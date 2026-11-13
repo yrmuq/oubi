@@ -76,6 +76,191 @@ def tag_images(tagger, images):
     return results
 
 
+# ===== DESCRIBE A DOWNLOAD =====
+def format_bytes(amount):
+    value = float(max(0, amount))
+    for unit in ("Б", "КБ", "МБ", "ГБ"):
+        if value < 1024 or unit == "ГБ":
+            if unit == "Б":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} ГБ"
+
+
+def format_speed(amount):
+    return f"{format_bytes(amount)}/с"
+
+
+def progress_line(done, total, speed):
+    done_text = format_bytes(done)
+    if total > 0:
+        percent = min(100, float(done) / float(total) * 100)
+        body = f"Модель: {percent:.0f}% ({done_text} из {format_bytes(total)})"
+    else:
+        body = f"Модель: {done_text}"
+    if speed is None:
+        return f"{body}, скорость ещё считается"
+    return f"{body}, сейчас {format_speed(speed)}"
+
+
+def model_status_line(cached, total):
+    if total <= 0:
+        return "Модель: размер на Hugging Face неизвестен."
+    percent = min(100, float(cached) / float(total) * 100)
+    return f"Модель: в кэше {format_bytes(cached)} из {format_bytes(total)} ({percent:.0f}%)."
+
+
+class DownloadMeter:
+    def __init__(self, total, done=0, clock=None, emit=print, interval=2):
+        self.total = total
+        self.done = float(done)
+        self.clock = clock or time.monotonic
+        self.emit = emit
+        self.interval = interval
+        self.last_log = 0.0
+        self.last_done = self.done
+        self.last_time = self.clock()
+
+    def add(self, amount):
+        amount = float(amount or 0)
+        if amount <= 0:
+            return
+        self.done += amount
+        now = self.clock()
+        finished = self.total > 0 and self.done >= self.total
+        due = self.last_log == 0 or now - self.last_log >= self.interval
+        if due or finished:
+            self.log(now)
+
+    def log(self, now):
+        span = now - self.last_time
+        speed = None if span < 0.5 else (self.done - self.last_done) / span
+        self.last_done = self.done
+        self.last_time = now
+        self.last_log = now
+        self.emit(progress_line(self.done, self.total, speed), flush=True)
+
+
+def byte_progress(meter):
+    try:
+        from tqdm.auto import tqdm as base
+    except ImportError:
+        base = object
+
+    class ByteProgress(base):
+        def __init__(self, *args, **kwargs):
+            initial = float(kwargs.get("initial") or 0)
+            kwargs["disable"] = True
+            if base is object:
+                self.n = initial
+                self.total = kwargs.get("total")
+            else:
+                super().__init__(*args, **kwargs)
+            self._credit(initial)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            self.close()
+            return False
+
+        def update(self, n=1):
+            amount = float(n or 0)
+            if base is not object:
+                super().update(n)
+            else:
+                self.n += amount
+            self._credit(amount)
+
+        def _credit(self, amount):
+            meter.add(amount)
+
+        def close(self):
+            return None
+
+        def refresh(self):
+            return None
+
+        def set_description(self, *args, **kwargs):
+            return None
+
+        def set_postfix(self, *args, **kwargs):
+            return None
+
+        def set_postfix_str(self, *args, **kwargs):
+            return None
+
+    return ByteProgress
+
+
+def rate_limited(error):
+    text = str(error).lower()
+    return "429" in text or "too many requests" in text or "rate limit" in text
+
+
+# ===== DOWNLOAD THE MODEL =====
+def cached_file(repo_id, filename):
+    from huggingface_hub import try_to_load_from_cache
+
+    found = try_to_load_from_cache(repo_id, filename)
+    if isinstance(found, str) and os.path.isfile(found):
+        return found
+    return None
+
+
+def list_model_files(repo_id):
+    from huggingface_hub import HfApi
+
+    info = HfApi().model_info(repo_id, files_metadata=True)
+    files = []
+    for sibling in info.siblings:
+        size = sibling.size
+        lfs = getattr(sibling, "lfs", None)
+        if size is None and isinstance(lfs, dict):
+            size = lfs.get("size")
+        files.append((sibling.rfilename, int(size or 0)))
+    return files
+
+
+def download_model(repo_id):
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    print("Сейчас: проверяю файлы модели на Hugging Face.", flush=True)
+    files = list_model_files(repo_id)
+    total = sum(size for _, size in files)
+    cached = 0
+    missing = []
+    for name, size in files:
+        if cached_file(repo_id, name):
+            cached += size
+        else:
+            missing.append((name, size))
+    print(model_status_line(cached, total), flush=True)
+    if not missing:
+        print("Модель уже скачана.", flush=True)
+        return
+    print(f"Сейчас: скачиваю ещё {format_bytes(max(0, total - cached))}, файлов: {len(missing)}.", flush=True)
+    meter = DownloadMeter(total=total, done=cached)
+    from huggingface_hub import hf_hub_download
+
+    progress = byte_progress(meter)
+    try:
+        for name, size in missing:
+            print(f"Сейчас: файл {name} ({format_bytes(size)}).", flush=True)
+            hf_hub_download(repo_id=repo_id, filename=name, tqdm_class=progress)
+            print(f"Файл скачан: {name}", flush=True)
+    except Exception as error:
+        if rate_limited(error):
+            print(
+                "Сейчас: Hugging Face ограничил скачивание. Добавь HF_TOKEN и запусти снова. Кэш сохранится.",
+                flush=True,
+            )
+        raise
+    print("Модель скачана.", flush=True)
+
+
 def categories_of(result):
     return {name: sorted(result.get(name, {}), key=lambda tag: -result[name][tag]) for name in ORDER}
 
@@ -85,18 +270,26 @@ def load_tagger(model):
     import torch
     from transformers import pipeline
 
+    if os.path.isdir(model):
+        print("Сейчас: модель локальная, скачивание не нужно.", flush=True)
+        source = model
+    else:
+        download_model(model)
+        source = model
+    print("Сейчас: загружаю модель в память. Это может занять несколько минут.", flush=True)
     device = 0 if torch.cuda.is_available() else -1
     if device == 0:
-        print("Устройство:", torch.cuda.get_device_name(0))
+        print("Устройство:", torch.cuda.get_device_name(0), flush=True)
     else:
-        print("Устройство:", "CPU (видеокарта не найдена!)")
+        print("Устройство: CPU (видеокарта не найдена!)", flush=True)
     tagger = pipeline(
-        model=model,
-        image_processor=model,
+        model=source,
+        image_processor=source,
         trust_remote_code=True,
         device=device,
         dtype=torch.float16 if device == 0 else torch.float32,
     )
+    print("Модель загружена.", flush=True)
     return tagger
 
 
@@ -117,17 +310,25 @@ def main():
     gfx = apply_gfx_override()
     if gfx:
         print("HSA_OVERRIDE_GFX_VERSION:", gfx)
-    print("Пачка:", args.batch_size)
+    print("Пачка:", args.batch_size, flush=True)
+    print("Сейчас: готовлю модель.", flush=True)
 
     tagger = load_tagger(args.model)
     from PIL import Image
 
+    print("Сейчас: ищу картинки.", flush=True)
     files = sorted(path for path in Path(args.folder).rglob("*") if path.suffix.lower() in EXTS)
     pending = []
     for index, path in enumerate(files, 1):
         if path.with_suffix(".txt").exists() and not args.force:
             continue
         pending.append((index, path))
+    print(
+        f"Сейчас: картинок {len(files)}, уже размечено {len(files) - len(pending)}, осталось {len(pending)}.",
+        flush=True,
+    )
+    if not pending:
+        print("Сейчас: размечать нечего.", flush=True)
 
     csv_path = Path(args.csv)
     new_csv = not csv_path.exists()
@@ -144,6 +345,16 @@ def main():
                     loaded.append((index, path, Image.open(path).convert("RGB")))
                 except Exception as error:
                     print(f"[ошибка] {path}: {error}", file=sys.stderr)
+            if not loaded:
+                continue
+            if len(loaded) == 1:
+                index, path, _image = loaded[0]
+                print(f"Сейчас: размечаю {path.name} ({index} из {len(files)}).", flush=True)
+            else:
+                print(
+                    f"Сейчас: размечаю пачку {loaded[0][0]}–{loaded[-1][0]} из {len(files)}.",
+                    flush=True,
+                )
             results = tag_images(tagger, [image for _, _, image in loaded])
             for (index, path, image), result in zip(loaded, results):
                 image.close()
@@ -160,8 +371,14 @@ def main():
                 done += 1
                 if done % 50 == 0:
                     handle.flush()
-                    rate = done / (time.time() - started)
-                    print(f"{index}/{len(files)}  {rate:.2f} карт./с, осталось ~{(len(files) - index) / rate / 3600:.1f} ч")
+                elapsed = time.time() - started
+                rate = done / elapsed if elapsed else 0
+                left = (len(pending) - done) / rate / 3600 if rate else 0
+                percent = done / len(pending) * 100 if pending else 100
+                print(
+                    f"Разметка: {percent:.0f}% ({done} из {len(pending)}), {rate:.2f} карт./с, осталось ~{left:.1f} ч",
+                    flush=True,
+                )
     print("Готово, размечено:", done)
     return 0
 

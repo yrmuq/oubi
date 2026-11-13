@@ -69,6 +69,7 @@ run_tag() {
     echo "The images folder is not mounted at /images." >&2
     exit 1
   fi
+  echo "Сейчас: разметка. Дальше будет прогресс скачивания модели, затем картинки."
   set -- /opt/oubi/tag_folder.py "$IMAGES_DIR" --model "$MODEL" --csv "$CSV_PATH" --batch-size "$BATCH_SIZE"
   if flag_on "$NO_TXT"; then
     set -- "$@" --no-txt
@@ -89,6 +90,7 @@ run_sort() {
     echo "The output folder is not mounted at /output." >&2
     exit 1
   fi
+  echo "Сейчас: сортировка по tags.csv. Модель не скачивается."
   set -- /opt/oubi/sort_images.py --csv "$CSV_PATH" --out "$OUTPUT_DIR" --nsfw-from "$NSFW_FROM"
   if [ -f "$GENDERS_PATH" ]; then
     set -- "$@" --genders "$GENDERS_PATH"
