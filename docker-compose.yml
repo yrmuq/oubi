@@ -1,0 +1,38 @@
+services:
+
+  oubi:
+    container_name: oubi
+    image: ghcr.io/yrmuq/oubi:latest
+    build: .
+    user: "${PUID}:${PGID}"
+    volumes:
+      - ${OUBI_IMAGES}:/images
+      - ${OUBI_OUTPUT}:/output
+      - ${LOCATION}/docker/data/oubi/data:/data
+      - ${LOCATION}/docker/data/oubi/cache:/cache
+    environment:
+      - TZ=${TZ}
+      - HF_HOME=/cache
+      - HUGGINGFACE_HUB_CACHE=/cache
+      - OUBI_MODE=${OUBI_MODE}
+      - OUBI_MODEL=${OUBI_MODEL}
+      - OUBI_BATCH_SIZE=${OUBI_BATCH_SIZE}
+      - OUBI_NO_TXT=${OUBI_NO_TXT}
+      - OUBI_FORCE=${OUBI_FORCE}
+      - OUBI_MOVE=${OUBI_MOVE}
+      - OUBI_DRY_RUN=${OUBI_DRY_RUN}
+      - OUBI_NSFW_FROM=${OUBI_NSFW_FROM}
+      - OUBI_COPY_TXT=${OUBI_COPY_TXT}
+      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION}
+    logging:
+      driver: json-file
+      options:
+        max-size: "55m"
+        max-file: "1"
+    restart: "no"
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    external: true
