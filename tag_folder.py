@@ -93,13 +93,16 @@ def format_speed(amount):
 
 
 def progress_line(done, total, speed):
-    done_text = format_bytes(done)
     if total > 0:
-        percent = min(100, float(done) / float(total) * 100)
-        body = f"Модель: {percent:.0f}% ({done_text} из {format_bytes(total)})"
+        shown = min(float(done), float(total))
+        percent = shown / float(total) * 100
+        body = f"Скачивание: {percent:.0f}% ({format_bytes(shown)} из {format_bytes(total)})"
     else:
-        body = f"Модель: {done_text}"
+        shown = float(done)
+        body = f"Скачивание: {format_bytes(shown)}"
     if speed is None:
+        if total > 0 and shown >= float(total):
+            return f"{body}, уже в кэше"
         return f"{body}, скорость ещё считается"
     return f"{body}, сейчас {format_speed(speed)}"
 
@@ -112,41 +115,50 @@ def model_status_line(cached, total):
 
 
 class DownloadMeter:
-    def __init__(self, total, done=0, clock=None, emit=print, interval=2):
+    def __init__(self, total, cached=0, clock=None, emit=print, interval=2):
         self.total = total
-        self.done = float(done)
+        self.cached = float(cached)
+        self.positions = {}
         self.clock = clock or time.monotonic
         self.emit = emit
         self.interval = interval
         self.last_log = 0.0
-        self.last_done = self.done
+        self.last_done = self.cached
         self.last_time = self.clock()
 
-    def add(self, amount):
-        amount = float(amount or 0)
-        if amount <= 0:
+    def done(self):
+        return self.cached + sum(self.positions.values())
+
+    def observe(self, filename, position, file_size):
+        position = float(position or 0)
+        if file_size:
+            position = min(position, float(file_size))
+        if position <= self.positions.get(filename, 0):
             return
-        self.done += amount
+        self.positions[filename] = position
         now = self.clock()
-        finished = self.total > 0 and self.done >= self.total
+        finished = self.total > 0 and self.done() >= self.total
         due = self.last_log == 0 or now - self.last_log >= self.interval
         if due or finished:
             self.log(now)
 
     def log(self, now):
+        done = self.done()
         span = now - self.last_time
-        speed = None if span < 0.5 else (self.done - self.last_done) / span
-        self.last_done = self.done
+        speed = None if span < 0.5 else (done - self.last_done) / span
+        self.last_done = done
         self.last_time = now
         self.last_log = now
-        self.emit(progress_line(self.done, self.total, speed), flush=True)
+        self.emit(progress_line(done, self.total, speed), flush=True)
 
 
-def byte_progress(meter):
+def byte_progress(meter, filename="file", file_size=0):
     try:
         from tqdm.auto import tqdm as base
     except ImportError:
         base = object
+
+    cap = float(file_size or 0)
 
     class ByteProgress(base):
         def __init__(self, *args, **kwargs):
@@ -157,7 +169,7 @@ def byte_progress(meter):
                 self.total = kwargs.get("total")
             else:
                 super().__init__(*args, **kwargs)
-            self._credit(initial)
+            self._report()
 
         def __enter__(self):
             return self
@@ -167,15 +179,15 @@ def byte_progress(meter):
             return False
 
         def update(self, n=1):
-            amount = float(n or 0)
             if base is not object:
                 super().update(n)
             else:
-                self.n += amount
-            self._credit(amount)
+                self.n += float(n or 0)
+            self._report()
 
-        def _credit(self, amount):
-            meter.add(amount)
+        def _report(self):
+            limit = cap or float(getattr(self, "total", 0) or 0)
+            meter.observe(filename, float(getattr(self, "n", 0) or 0), limit)
 
         def close(self):
             return None
@@ -242,14 +254,13 @@ def download_model(repo_id):
         print("Модель уже скачана.", flush=True)
         return
     print(f"Сейчас: скачиваю ещё {format_bytes(max(0, total - cached))}, файлов: {len(missing)}.", flush=True)
-    meter = DownloadMeter(total=total, done=cached)
+    meter = DownloadMeter(total=total, cached=cached)
     from huggingface_hub import hf_hub_download
 
-    progress = byte_progress(meter)
     try:
         for name, size in missing:
             print(f"Сейчас: файл {name} ({format_bytes(size)}).", flush=True)
-            hf_hub_download(repo_id=repo_id, filename=name, tqdm_class=progress)
+            hf_hub_download(repo_id=repo_id, filename=name, tqdm_class=byte_progress(meter, name, size))
             print(f"Файл скачан: {name}", flush=True)
     except Exception as error:
         if rate_limited(error):

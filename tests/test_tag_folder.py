@@ -69,8 +69,9 @@ class DownloadProgressTests(unittest.TestCase):
         self.assertEqual(format_bytes(2 * 1024 ** 3), "2.0 ГБ")
 
     def test_progress_line_with_and_without_speed(self):
-        self.assertEqual(progress_line(256, 1024, None), "Модель: 25% (256 Б из 1.0 КБ), скорость ещё считается")
-        self.assertEqual(progress_line(2048, 1024, 1024), "Модель: 100% (2.0 КБ из 1.0 КБ), сейчас 1.0 КБ/с")
+        self.assertEqual(progress_line(256, 1024, None), "Скачивание: 25% (256 Б из 1.0 КБ), скорость ещё считается")
+        self.assertEqual(progress_line(2048, 1024, 1024), "Скачивание: 100% (1.0 КБ из 1.0 КБ), сейчас 1.0 КБ/с")
+        self.assertEqual(progress_line(2048, 1024, None), "Скачивание: 100% (1.0 КБ из 1.0 КБ), уже в кэше")
 
     def test_model_status_line(self):
         self.assertEqual(model_status_line(0, 0), "Модель: размер на Hugging Face неизвестен.")
@@ -86,11 +87,11 @@ class DownloadProgressTests(unittest.TestCase):
             interval=2,
         )
         now[0] = 0.1
-        meter.add(100)
+        meter.observe("weights", 100, 1000)
         now[0] = 0.4
-        meter.add(50)
+        meter.observe("weights", 150, 1000)
         now[0] = 3.0
-        meter.add(400)
+        meter.observe("weights", 550, 1000)
         self.assertEqual(len(lines), 2)
         self.assertIn("скорость ещё считается", lines[0])
         self.assertIn("55%", lines[1])
@@ -98,10 +99,18 @@ class DownloadProgressTests(unittest.TestCase):
 
     def test_byte_progress_counts_resume_and_new_bytes_once(self):
         meter = DownloadMeter(total=100, clock=lambda: 10.0, emit=lambda line, flush=False: None, interval=100)
-        progress = byte_progress(meter)(total=100, initial=40)
+        progress = byte_progress(meter, "weights", 100)(total=100, initial=40)
         progress.update(10)
         progress.update(50)
-        self.assertEqual(meter.done, 100)
+        self.assertEqual(meter.done(), 100)
+
+    def test_two_bars_for_one_file_do_not_pass_its_size(self):
+        meter = DownloadMeter(total=1800, cached=0, clock=lambda: 10.0, emit=lambda line, flush=False: None, interval=100)
+        first = byte_progress(meter, "model.safetensors", 1800)(total=1800, initial=1800)
+        second = byte_progress(meter, "model.safetensors", 1800)(total=1800, initial=0)
+        second.update(1800)
+        first.update(800)
+        self.assertEqual(meter.done(), 1800)
 
     def test_rate_limited(self):
         self.assertTrue(rate_limited(RuntimeError("HTTPS 429 Too Many Requests")))
