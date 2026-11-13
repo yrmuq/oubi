@@ -73,7 +73,6 @@ A push to `dev` publishes `ghcr.io/yrmuq/oubi:dev`. A push to `main` publishes `
 
 ### Docker
 
-The external network `homelab` must already exist. Create it once with `docker network create homelab` if this host does not have it.
 
 Copy `.env.example` to `.env` and set the paths, `PUID`, and `PGID`.
 
@@ -91,7 +90,7 @@ services:
 
   oubi:
     container_name: oubi
-    image: ghcr.io/yrmuq/oubi:${OUBI_CHANNEL}
+    image: ghcr.io/yrmuq/oubi:dev
     user: "${PUID}:${PGID}"
     volumes:
       - ${OUBI_IMAGES}:/images
@@ -102,28 +101,23 @@ services:
       - TZ=${TZ}
       - HF_HOME=/cache
       - HUGGINGFACE_HUB_CACHE=/cache
-      - OUBI_MODE=${OUBI_MODE}
-      - OUBI_MODEL=${OUBI_MODEL}
-      - OUBI_BATCH_SIZE=${OUBI_BATCH_SIZE}
-      - OUBI_NO_TXT=${OUBI_NO_TXT}
-      - OUBI_FORCE=${OUBI_FORCE}
-      - OUBI_MOVE=${OUBI_MOVE}
-      - OUBI_DRY_RUN=${OUBI_DRY_RUN}
-      - OUBI_NSFW_FROM=${OUBI_NSFW_FROM}
-      - OUBI_COPY_TXT=${OUBI_COPY_TXT}
+      - OUBI_MODE=all
+      - OUBI_MODEL=pixai-labs/pixai-tagger-v1.0
+      - OUBI_BATCH_SIZE=1
+      - OUBI_NO_TXT=0
+      - OUBI_FORCE=0
+      - OUBI_MOVE=0
+      - OUBI_DRY_RUN=0
+      - OUBI_NSFW_FROM=q
+      - OUBI_COPY_TXT=0
       - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION}
     logging:
       driver: json-file
       options:
         max-size: "55m"
         max-file: "1"
-    restart: "no"
-    networks:
-      - homelab
+    restart: "unless-stopped"
 
-networks:
-  homelab:
-    external: true
 ```
 
 `.env`:
@@ -133,18 +127,8 @@ TZ=UTC
 LOCATION=/path/to/data
 PUID=1000
 PGID=1000
-OUBI_CHANNEL=dev
 OUBI_IMAGES=/path/to/pictures
 OUBI_OUTPUT=/path/to/sorted
-OUBI_MODE=all
-OUBI_MODEL=pixai-labs/pixai-tagger-v1.0
-OUBI_BATCH_SIZE=1
-OUBI_NO_TXT=0
-OUBI_FORCE=0
-OUBI_MOVE=0
-OUBI_DRY_RUN=0
-OUBI_NSFW_FROM=q
-OUBI_COPY_TXT=0
 HSA_OVERRIDE_GFX_VERSION=
 ```
 
