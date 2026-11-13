@@ -1,0 +1,37 @@
+name: Publish image
+
+on:
+  push:
+    branches: [dev, main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: checks-${{ github.ref_name }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test tagging helpers
+        run: python -m unittest tests.test_tag_folder -v
+      - name: Check entrypoint
+        run: sh -n entrypoint.sh
+
+  publish:
+    needs: checks
+    concurrency:
+      group: image-${{ github.ref_name }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      tag: ${{ github.ref_name == 'main' && 'latest' || 'dev' }}
+      ref: ${{ github.sha }}
+    secrets: inherit

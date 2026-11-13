@@ -3,6 +3,7 @@
   <h1>oubi</h1>
 
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+  [![Image](https://img.shields.io/badge/ghcr.io-image-2496ED?logo=docker&logoColor=white)](https://github.com/yrmuq/oubi/pkgs/container/oubi)
 
 </div>
 
@@ -68,7 +69,7 @@ The container prints the compute device before tagging. On this image the line i
 
 ### Release Scheme
 
-No image has been published. Build it on the host. There is no stable release yet. Tags and release notes will be added when publishing starts. The list of releases is the [GitHub releases](https://github.com/yrmuq/oubi/releases) page.
+A push to `dev` publishes `ghcr.io/yrmuq/oubi:dev`. A push to `main` publishes `ghcr.io/yrmuq/oubi:latest`. The `dev` tag never moves `latest`. Each commit is also tagged `sha-<commit>` once, and that tag is not replaced. Only `linux/amd64` is built. There is no numbered release yet. The list of releases is the [GitHub releases](https://github.com/yrmuq/oubi/releases) page.
 
 ### Docker
 
@@ -90,8 +91,7 @@ services:
 
   oubi:
     container_name: oubi
-    image: ghcr.io/yrmuq/oubi:latest
-    build: .
+    image: ghcr.io/yrmuq/oubi:${OUBI_CHANNEL}
     user: "${PUID}:${PGID}"
     volumes:
       - ${OUBI_IMAGES}:/images
@@ -133,6 +133,7 @@ TZ=UTC
 LOCATION=/path/to/data
 PUID=1000
 PGID=1000
+OUBI_CHANNEL=dev
 OUBI_IMAGES=/path/to/pictures
 OUBI_OUTPUT=/path/to/sorted
 OUBI_MODE=all
@@ -148,11 +149,11 @@ HSA_OVERRIDE_GFX_VERSION=
 ```
 
 ```bash
-docker compose build
+docker compose pull
 docker compose up
 ```
 
-There is no published image to pull. Build again to update. The container exits when the job finishes and is not restarted: a second sort would copy the pictures again under new numbers.
+`OUBI_CHANNEL=dev` follows the development image. Set `OUBI_CHANNEL=latest` only after that tag has been published from `main`. Pull again to update. The container exits when the job finishes and is not restarted: a second sort would copy the pictures again under new numbers.
 
 For a long run:
 

@@ -2,8 +2,7 @@ services:
 
   oubi:
     container_name: oubi
-    image: ghcr.io/yrmuq/oubi:latest
-    build: .
+    image: ghcr.io/yrmuq/oubi:${OUBI_CHANNEL}
     user: "${PUID}:${PGID}"
     volumes:
       - ${OUBI_IMAGES}:/images

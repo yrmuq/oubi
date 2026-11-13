@@ -1,0 +1,113 @@
+name: Publish one image tag
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+
+env:
+  IMAGE: ghcr.io/yrmuq/oubi
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Refuse a tag from the wrong branch
+        run: |
+          if [ "${{ inputs.tag }}" = "latest" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "latest is published only from main." >&2
+            exit 1
+          fi
+          if [ "${{ inputs.tag }}" = "dev" ] && [ "${GITHUB_REF}" != "refs/heads/dev" ]; then
+            echo "dev is published only from dev." >&2
+            exit 1
+          fi
+          if [ "${{ inputs.tag }}" != "latest" ] && [ "${{ inputs.tag }}" != "dev" ]; then
+            echo "Unknown image tag: ${{ inputs.tag }}" >&2
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build amd64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}:smoke-amd64
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,mode=max,scope=amd64
+          labels: |
+            org.opencontainers.image.source=https://github.com/yrmuq/oubi
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=GPL-3.0-only
+            org.opencontainers.image.version=${{ inputs.tag }}
+
+      - name: Start amd64
+        run: sh scripts/smoke-container.sh "${IMAGE}:smoke-amd64" linux/amd64
+
+      - name: Select tags
+        id: tags
+        run: |
+          moving="${IMAGE}:${{ inputs.tag }}"
+          sha="${IMAGE}:sha-${GITHUB_SHA}"
+          {
+            echo "list<<EOF"
+            echo "${moving}"
+            if docker buildx imagetools inspect "${sha}" >/dev/null 2>&1; then
+              echo "SHA tag already published, not replacing it." >&2
+            else
+              echo "${sha}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Push ${{ inputs.tag }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,mode=max,scope=amd64
+          labels: |
+            org.opencontainers.image.source=https://github.com/yrmuq/oubi
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=GPL-3.0-only
+            org.opencontainers.image.version=${{ inputs.tag }}
+
+      - name: Make the package public
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/users/yrmuq/packages/container/oubi" \
+            -f visibility=public
+
+      - name: Pull without credentials
+        run: |
+          docker logout ghcr.io || true
+          docker rmi "${IMAGE}:${{ inputs.tag }}" || true
+          docker pull "${IMAGE}:${{ inputs.tag }}"
