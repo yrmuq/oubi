@@ -70,7 +70,7 @@ The container prints the compute device before tagging. On this image the line i
 
 A push to `dev` publishes `ghcr.io/yrmuq/oubi:dev`. It does not create a release and it does not move `latest`.
 
-A merge into `main` publishes the next stable version. The number is one minor above the `VERSION` file: `0.0.0` becomes `v0.1.0`, then `v0.2.0`. That merge moves `ghcr.io/yrmuq/oubi:latest` to the new image and also tags the image with the number, which stays put. GitHub then opens a release, for example [v0.1.0](https://github.com/yrmuq/oubi/releases), and writes the number back. A second push created by that write does not publish another version.
+`v0.1.0` is the current stable release on `main`. It has no web page. Its image is `ghcr.io/yrmuq/oubi:latest` until the next merge. The next merge into `main` publishes `v0.2.0`, moves `latest` to that image, and also tags the image with `0.2.0`, which stays put. GitHub opens the release and writes the number back. A second push created by that write does not publish another version.
 
 Each commit is also tagged `sha-<commit>` once, and that tag is not replaced. Only `linux/amd64` is built.
 
