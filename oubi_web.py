@@ -451,7 +451,6 @@ class App:
         self.proc = None
         self.preview_file = ""
         self.current_file = ""
-        self.folders = []
         self.folder_cache = None
         self.folder_cached_at = 0.0
         self.folder_counting = False
@@ -601,7 +600,6 @@ class App:
                 return False
             self.job_running = True
             self.job_mode = mode
-            self.folders = paths
             self.percent = None
             self.detail = ""
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"

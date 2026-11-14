@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from oubi_web import (
+    App,
     absolute_folders,
     first_character,
     flag_on,
@@ -104,6 +105,9 @@ class WebTests(unittest.TestCase):
             only.mkdir()
             (only / "c.jpg").write_bytes(b"jpg")
             self.assertEqual(folder_names(only), [""])
+
+    def test_folder_method_stays_callable(self):
+        self.assertTrue(callable(App().folders))
 
     def test_theme_is_kept_on_disk(self):
         import tempfile
