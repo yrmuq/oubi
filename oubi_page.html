@@ -57,13 +57,13 @@
   }
 }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
-body { display: grid; grid-template-rows: auto minmax(0, 1fr) 8px var(--log); }
+body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .topbar { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--pane); }
 .brand { font-size: 18px; font-weight: 650; }
 .themes { display: flex; gap: 4px; }
 .themes button { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
 .themes button.on { background: var(--btn); color: #fff; }
-.top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; padding: 0 8px; }
+.top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
 .pane { border: 1px solid var(--line); background: var(--pane); margin: 8px 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -71,8 +71,7 @@ button { font: inherit; color: #fff; background: var(--btn); border: 0; border-r
 button.secondary { background: var(--btn-2); color: var(--btn-2-text); }
 button.danger { background: var(--danger); color: #fff; }
 button:disabled { opacity: 0.45; cursor: default; }
-#folders, #out { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 16px; padding: 4px; }
-#folders { margin-top: 40px; margin-left: 24px; }
+#folders { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 40px; margin-left: 24px; padding: 4px; }
 .folder { width: 104px; background: transparent; color: inherit; border: 2px solid transparent; border-radius: 8px; padding: 4px; box-sizing: border-box; }
 .folder .icon { width: 72px; height: 56px; margin: 0 auto 6px; position: relative; background: none; border: 0; }
 .folder .icon svg { width: 100%; height: 100%; display: block; }
@@ -95,12 +94,12 @@ button:disabled { opacity: 0.45; cursor: default; }
 .bar > div { height: 100%; width: 0; background: var(--fill); }
 .detail { color: var(--muted); min-height: 1.2em; }
 .mid { position: relative; align-items: center; text-align: center; gap: 12px; }
-#shot { width: 100%; height: 60%; min-height: 208px; flex: 0 0 60%; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
+#shot { width: 100%; flex: 1 1 auto; min-height: 120px; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
 #switch { position: relative; width: 100%; height: 32px; flex: 0 0 32px; }
 #prev, #next { position: absolute; top: 0; z-index: 2; background: transparent; color: var(--text); font-size: 22px; }
 #prev { left: 0; }
 #next { right: 0; }
-#name { display: block; width: 100%; padding: 0 52px; box-sizing: border-box; }
+#name { display: block; width: 100%; box-sizing: border-box; word-break: break-word; }
 #who { margin: 0; min-height: 1.2em; font-size: 18px; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
 #genre-row { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; align-items: center; }
@@ -122,9 +121,20 @@ button:disabled { opacity: 0.45; cursor: default; }
 .genre-8, .genre-handle.genre-8 { background: #f3e7a1; }
 .genre-9, .genre-handle.genre-9 { background: #d7c4b0; }
 .genre-10, .genre-handle.genre-10 { background: #d5dbe3; }
-.out { text-align: left; }
-.out button.file { display: block; width: 100%; text-align: left; background: transparent; color: inherit; border-radius: 0; border: 0; }
-.log { margin: 0 8px 8px; border: 1px solid var(--line); background: var(--pane); overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; min-height: 0; }
+#right { padding: 0; display: grid; grid-template-rows: minmax(0, 1.2fr) 8px minmax(88px, 0.8fr); }
+#info { min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+#right .split-h { margin: 0; }
+.genre-11, .genre-handle.genre-11 { background: #c9e8a9; }
+.genre-12, .genre-handle.genre-12 { background: #f7c6b2; }
+.genre-13, .genre-handle.genre-13 { background: #c5d4f7; }
+.genre-14, .genre-handle.genre-14 { background: #f8e1b0; }
+.genre-15, .genre-handle.genre-15 { background: #e7b7d8; }
+.genre-16, .genre-handle.genre-16 { background: #bfe3d4; }
+.genre-17, .genre-handle.genre-17 { background: #f0d0c0; }
+.genre-18, .genre-handle.genre-18 { background: #d4c6f2; }
+.genre-19, .genre-handle.genre-19 { background: #ead9a4; }
+.genre-20, .genre-handle.genre-20 { background: #c8d5dc; }
+.log { margin: 0; border: 0; background: var(--pane); overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; min-height: 0; }
 #zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
 #zoom[hidden] { display: none; }
 #zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; color: #fff; }
@@ -179,18 +189,19 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <button id="prev" type="button">❮</button>
       <button id="next" type="button">❯</button>
     </div>
-    <span id="name"></span>
-    <p id="who"></p>
     <div id="genre-row"></div>
-    <p id="tags"></p>
   </section>
   <div class="split split-v" id="split-mid"></div>
   <section class="pane" id="right">
-    <div id="out" class="out"></div>
+    <div id="info">
+      <span id="name"></span>
+      <p id="who"></p>
+      <p id="tags"></p>
+    </div>
+    <div class="split split-h" id="split-info"></div>
+    <pre id="log" class="log"></pre>
   </section>
 </div>
-<div class="split split-h" id="split-log"></div>
-<pre id="log" class="log"></pre>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
   <img id="zoom-img" alt="">
@@ -201,13 +212,12 @@ let folders = FOLDERS_JSON;
 let reel = [];
 let reelAt = -1;
 let follow = true;
-let outputPath = "";
 let shown = "";
 let genres = __OUBI_GENRES__;
 let tagText = "";
 let theme = savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto" ? savedTheme : "auto";
 let wasBusy = false;
-const panes = { left: null, mid: null, right: null, log: 200 };
+const panes = { left: null, mid: null, right: null };
 
 function fileName(path) {
   const parts = String(path || "").split("/");
@@ -297,7 +307,7 @@ function paintTags(text) {
     const span = document.createElement("span");
     const token = part.trim().toLowerCase();
     const rank = genres.findIndex((item) => item && item.toLowerCase() === token);
-    if (rank >= 0 && rank < 10) span.className = "genre genre-" + (rank + 1);
+    if (rank >= 0 && rank < 20) span.className = "genre genre-" + (rank + 1);
     span.textContent = part;
     box.append(span);
   });
@@ -323,43 +333,6 @@ async function showImage(root, path) {
   tagText = data.text || "";
   paintTags(tagText);
   refreshGenreGhosts();
-}
-
-async function loadOutput() {
-  const data = await (await fetch("/api/browse?root=output&path=" + encodeURIComponent(outputPath))).json();
-  const box = document.getElementById("out");
-  box.innerHTML = "";
-  if (data.parent !== null && data.parent !== undefined) {
-    const back = document.createElement("button");
-    back.type = "button";
-    back.textContent = "Назад";
-    back.onclick = () => { outputPath = data.parent; loadOutput(); };
-    box.appendChild(back);
-  }
-  for (const item of data.items || []) {
-    const button = document.createElement("button");
-    button.type = "button";
-    if (item.dir) {
-      button.className = "folder";
-      const label = document.createElement("span");
-      label.className = "name";
-      label.textContent = item.name;
-      button.append(folderIcon("", ""), label);
-    } else {
-      button.className = "file";
-      button.textContent = item.name;
-    }
-    button.onclick = () => {
-      if (item.dir) {
-        outputPath = item.path;
-        loadOutput();
-      } else {
-        follow = false;
-        showImage("output", item.path);
-      }
-    };
-    box.appendChild(button);
-  }
 }
 
 async function tick() {
@@ -403,7 +376,6 @@ function paintPanes() {
   const top = document.querySelector(".top");
   if (panes.left == null) return;
   top.style.gridTemplateColumns = panes.left + "px 8px " + panes.mid + "px 8px " + panes.right + "px";
-  document.body.style.gridTemplateRows = "auto minmax(0,1fr) 8px " + panes.log + "px";
 }
 
 function dragSplit(which, event) {
@@ -413,14 +385,15 @@ function dragSplit(which, event) {
   const mid = document.getElementById("mid");
   const right = document.getElementById("right");
   const log = document.getElementById("log");
+  const info = document.getElementById("info");
   const start = {
     x: event.clientX,
     y: event.clientY,
     left: left.getBoundingClientRect().width,
     mid: mid.getBoundingClientRect().width,
     right: right.getBoundingClientRect().width,
+    info: info.getBoundingClientRect().height,
     log: log.getBoundingClientRect().height,
-    top: document.querySelector(".top").getBoundingClientRect().height,
   };
   function move(ev) {
     if (which === "left") {
@@ -438,14 +411,9 @@ function dragSplit(which, event) {
       panes.mid = next;
       panes.right = pair - next;
     } else {
-      const pair = start.log + start.top;
-      const floor = Math.min(72, pair / 5);
-      panes.log = Math.min(pair - 120, Math.max(floor, start.log + (start.y - ev.clientY)));
-      if (panes.left == null) {
-        panes.left = start.left;
-        panes.mid = start.mid;
-        panes.right = start.right;
-      }
+      const pair = start.info + start.log;
+      const next = Math.min(pair - 72, Math.max(72, start.info + (ev.clientY - start.y)));
+      right.style.gridTemplateRows = next + "px 8px " + (pair - next) + "px";
     }
     paintPanes();
   }
@@ -497,7 +465,7 @@ function saveGenres() {
     fetch("/api/genres", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ genres: genres.slice(0, 10) }),
+      body: JSON.stringify({ genres: genres.slice(0, 20) }),
     });
   }, 300);
 }
@@ -570,13 +538,13 @@ function renderGenreRow(focusAt) {
     slot.append(handle, field);
     row.append(slot);
   });
-  if (genres.length < 10) {
+  if (genres.length < 20) {
     const add = document.createElement("button");
     add.type = "button";
     add.id = "genre-add";
     add.textContent = "+";
     add.onclick = () => {
-      if (genres.length >= 10) return;
+      if (genres.length >= 20) return;
       genres.push("");
       renderGenreRow(genres.length - 1);
     };
@@ -595,7 +563,7 @@ document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt 
 document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
 document.getElementById("split-left").onpointerdown = (event) => dragSplit("left", event);
 document.getElementById("split-mid").onpointerdown = (event) => dragSplit("mid", event);
-document.getElementById("split-log").onpointerdown = (event) => dragSplit("log", event);
+document.getElementById("split-info").onpointerdown = (event) => dragSplit("info", event);
 const zoom = document.getElementById("zoom");
 const zoomImg = document.getElementById("zoom-img");
 const view = { scale: 1, x: 0, y: 0, drag: null };
@@ -657,7 +625,6 @@ window.addEventListener("mousemove", (event) => {
 });
 window.addEventListener("mouseup", () => { view.drag = null; });
 loadFolders();
-loadOutput();
 renderFolders();
 tick();
 setInterval(tick, 1000);

@@ -133,11 +133,14 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(read_genres(path)[0], "portrait")
                 self.assertTrue(write_genres(["comic", "scenery", ""], path))
                 self.assertEqual(read_genres(path), ["comic", "scenery"])
-                self.assertFalse(write_genres(["x"] * 11, path))
-                os.environ["OUBI_GENRE_10"] = "last"
+                self.assertTrue(write_genres(["x"] * 20, path))
+                self.assertEqual(len(read_genres(path)), 20)
+                self.assertFalse(write_genres(["y"] * 21, path))
+                self.assertEqual(len(read_genres(path)), 20)
+                os.environ["OUBI_GENRE_20"] = "last"
                 empty = Path(tmp) / "missing.txt"
                 self.assertEqual(read_genres(empty)[-1], "last")
-                os.environ.pop("OUBI_GENRE_10", None)
+                os.environ.pop("OUBI_GENRE_20", None)
         finally:
             if previous is None:
                 os.environ.pop("OUBI_GENRE_1", None)
