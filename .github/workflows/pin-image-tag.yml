@@ -1,0 +1,44 @@
+name: Pin image tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: existing tag
+        required: true
+        default: latest
+      dest:
+        description: new tag
+        required: true
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Copy the manifest to the new tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          SOURCE: ${{ inputs.source }}
+          DEST: ${{ inputs.dest }}
+        run: |
+          set -eu
+          basic=$(printf '%s:%s' "$ACTOR" "$GH_TOKEN" | base64 -w0)
+          token=$(curl -fsS -H "Authorization: Basic $basic" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:yrmuq/oubi:pull,push" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          curl -fsS -D headers -o body \
+            -H "Authorization: Bearer $token" \
+            -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+            "https://ghcr.io/v2/yrmuq/oubi/manifests/${SOURCE}"
+          ctype=$(awk 'BEGIN{IGNORECASE=1} /^content-type:/ {sub(/\r/,""); $1=""; sub(/^ /,""); print; exit}' headers)
+          curl -fsS -D put-headers -o put-body \
+            -X PUT \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: $ctype" \
+            --data-binary @body \
+            "https://ghcr.io/v2/yrmuq/oubi/manifests/${DEST}"
+          head -n 8 put-headers
