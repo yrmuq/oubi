@@ -86,6 +86,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .split { position: relative; touch-action: none; }
 .split-v { cursor: col-resize; margin: 8px 0; }
 .split-h { cursor: row-resize; }
+.split-h::before { content: ""; position: absolute; left: 8px; right: 8px; top: 3px; height: 2px; background: var(--line); border-radius: 99px; }
 .split-v::after, .split-h::after { content: ""; position: absolute; }
 .split-v::after { left: -6px; right: -6px; top: 0; bottom: 0; }
 .split-h::after { left: 8px; right: 8px; top: -6px; bottom: -6px; }
@@ -93,8 +94,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 .bar { height: 10px; background: var(--bar); border-radius: 99px; overflow: hidden; }
 .bar > div { height: 100%; width: 0; background: var(--fill); }
 .detail { color: var(--muted); min-height: 1.2em; }
-.mid { position: relative; align-items: center; text-align: center; gap: 12px; }
-#shot { width: 100%; flex: 1 1 auto; min-height: 120px; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
+.mid { position: relative; align-items: stretch; text-align: center; gap: 0; display: grid; grid-template-rows: minmax(0, 1fr) 8px minmax(72px, 0.35fr); }
+#preview { min-height: 0; display: flex; flex-direction: column; }
+#shot { width: 100%; flex: 1 1 auto; min-height: 80px; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
 #switch { position: relative; width: 100%; height: 32px; flex: 0 0 32px; }
 #prev, #next { position: absolute; top: 0; z-index: 2; background: transparent; color: var(--text); font-size: 22px; }
 #prev { left: 0; }
@@ -102,7 +104,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 #name { display: block; width: 100%; box-sizing: border-box; word-break: break-word; }
 #who { margin: 0; min-height: 1.2em; font-size: 18px; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
-#genre-row { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; align-items: center; }
+#genre-row { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; min-height: 0; overflow: auto; align-items: flex-start; align-content: flex-start; }
 .genre-slot { display: flex; gap: 4px; align-items: center; flex: 1 1 150px; max-width: 240px; min-width: 0; }
 .genre-handle { width: 22px; height: 28px; padding: 0; border-radius: 6px; cursor: grab; color: #111; flex: 0 0 auto; }
 .genre-field { position: relative; flex: 1; min-width: 0; }
@@ -134,7 +136,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .genre-18, .genre-handle.genre-18 { background: #d4c6f2; }
 .genre-19, .genre-handle.genre-19 { background: #ead9a4; }
 .genre-20, .genre-handle.genre-20 { background: #c8d5dc; }
-.log { margin: 0; border: 0; background: var(--pane); overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; min-height: 0; }
+.log { margin: 0; border: 0; background: #000; color: #e6e6e6; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; min-height: 0; }
 #zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
 #zoom[hidden] { display: none; }
 #zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; color: #fff; }
@@ -184,11 +186,14 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   </section>
   <div class="split split-v" id="split-left"></div>
   <section class="pane mid" id="mid">
-    <img id="shot" alt="">
-    <div id="switch">
-      <button id="prev" type="button">❮</button>
-      <button id="next" type="button">❯</button>
+    <div id="preview">
+      <img id="shot" alt="">
+      <div id="switch">
+        <button id="prev" type="button">❮</button>
+        <button id="next" type="button">❯</button>
+      </div>
     </div>
+    <div class="split split-h" id="split-preview"></div>
     <div id="genre-row"></div>
   </section>
   <div class="split split-v" id="split-mid"></div>
@@ -386,6 +391,8 @@ function dragSplit(which, event) {
   const right = document.getElementById("right");
   const log = document.getElementById("log");
   const info = document.getElementById("info");
+  const preview = document.getElementById("preview");
+  const genres = document.getElementById("genre-row");
   const start = {
     x: event.clientX,
     y: event.clientY,
@@ -394,6 +401,8 @@ function dragSplit(which, event) {
     right: right.getBoundingClientRect().width,
     info: info.getBoundingClientRect().height,
     log: log.getBoundingClientRect().height,
+    preview: preview.getBoundingClientRect().height,
+    genres: genres.getBoundingClientRect().height,
   };
   function move(ev) {
     if (which === "left") {
@@ -410,6 +419,10 @@ function dragSplit(which, event) {
       panes.left = start.left;
       panes.mid = next;
       panes.right = pair - next;
+    } else if (which === "preview") {
+      const pair = start.preview + start.genres;
+      const next = Math.min(pair - 56, Math.max(80, start.preview + (ev.clientY - start.y)));
+      mid.style.gridTemplateRows = next + "px 8px " + (pair - next) + "px";
     } else {
       const pair = start.info + start.log;
       const next = Math.min(pair - 72, Math.max(72, start.info + (ev.clientY - start.y)));
@@ -563,6 +576,7 @@ document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt 
 document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
 document.getElementById("split-left").onpointerdown = (event) => dragSplit("left", event);
 document.getElementById("split-mid").onpointerdown = (event) => dragSplit("mid", event);
+document.getElementById("split-preview").onpointerdown = (event) => dragSplit("preview", event);
 document.getElementById("split-info").onpointerdown = (event) => dragSplit("info", event);
 const zoom = document.getElementById("zoom");
 const zoomImg = document.getElementById("zoom-img");
