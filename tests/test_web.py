@@ -23,6 +23,9 @@ from oubi_web import (
     write_theme,
     read_genres,
     write_genres,
+    read_layout,
+    write_layout,
+    images_with_tag,
 )
 from sort_images import under_roots
 
@@ -146,6 +149,37 @@ class WebTests(unittest.TestCase):
                 os.environ.pop("OUBI_GENRE_1", None)
             else:
                 os.environ["OUBI_GENRE_1"] = previous
+
+
+class LayoutTests(unittest.TestCase):
+    def test_layout_is_kept_on_disk(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layout.json"
+            self.assertEqual(read_layout(path), {})
+            self.assertTrue(write_layout({"left": 320, "mid": 400.5, "nope": 1}, path))
+            self.assertEqual(read_layout(path), {"left": 320, "mid": 400})
+            self.assertFalse(write_layout({"left": 10}, path))
+            self.assertEqual(read_layout(path)["left"], 320)
+
+    def test_images_with_tag(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "images"
+            root.mkdir()
+            picture = root / "a.jpg"
+            picture.write_bytes(b"x")
+            other = root / "b.jpg"
+            other.write_bytes(b"x")
+            csv_path = Path(tmp) / "tags.csv"
+            csv_path.write_text(
+                "file,rating,character,copyright,style,general,meta\n"
+                f"{picture},rating:s,,original,,comic,1girl\n"
+                f"{other},rating:s,,original,,portrait,1girl\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(images_with_tag("comic", csv_path, root), ["a.jpg"])
+            self.assertEqual(images_with_tag("missing", csv_path, root), [])
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ OUTPUT = "/output"
 CSV_PATH = "/data/tags.csv"
 GENDERS_PATH = "/data/genders.csv"
 THEME_PATH = "/data/theme"
+LAYOUT_PATH = "/data/layout.json"
 GENRES_PATH = "/data/genres.txt"
 MAX_GENRES = 20
 THEMES = {"light", "dark", "auto"}
@@ -27,13 +28,15 @@ PAGE_PATH = HERE / "oubi_page.html"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 SORTED_LIST = "/data/sorted.txt"
 
-def page_bytes(items, theme="auto", genres=None):
+def page_bytes(items, theme="auto", genres=None, layout=None):
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
     chosen = theme if theme in THEMES else "auto"
     genre_payload = json.dumps(list(genres or [])[:MAX_GENRES], ensure_ascii=False).replace("<", "\\u003c")
+    layout_payload = json.dumps(layout or {}, ensure_ascii=False).replace("<", "\\u003c")
     html = PAGE_PATH.read_text(encoding="utf-8")
     html = html.replace("FOLDERS_JSON", payload, 1).replace("__OUBI_THEME__", chosen, 1)
     html = html.replace("__OUBI_GENRES__", genre_payload, 1)
+    html = html.replace("__OUBI_LAYOUT__", layout_payload, 1)
     return html.encode()
 
 
@@ -81,6 +84,96 @@ def write_theme(value, path=THEME_PATH):
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(value, encoding="utf-8")
     return True
+
+
+LAYOUT_KEYS = ("left", "mid", "right", "preview", "genres", "info", "log")
+
+
+def read_layout(path=LAYOUT_PATH):
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    clean = {}
+    for key in LAYOUT_KEYS:
+        value = data.get(key)
+        if isinstance(value, (int, float)) and 40 <= float(value) <= 8000:
+            clean[key] = int(value)
+    return clean
+
+
+def write_layout(values, path=LAYOUT_PATH):
+    if not isinstance(values, dict):
+        return False
+    current = read_layout(path)
+    for key in LAYOUT_KEYS:
+        if key not in values:
+            continue
+        value = values.get(key)
+        if not isinstance(value, (int, float)) or not 40 <= float(value) <= 8000:
+            return False
+        current[key] = int(value)
+    file = Path(path)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(json.dumps(current), encoding="utf-8")
+    return True
+
+
+def images_with_tag(tag, path=CSV_PATH, root=IMAGES):
+    needle = (tag or "").strip().casefold()
+    if not needle:
+        return []
+    base = Path(root).resolve()
+    found = []
+    seen = set()
+    file = Path(path)
+    columns = ("rating", "character", "copyright", "style", "general", "meta")
+    if file.is_file():
+        import csv
+        csv.field_size_limit(10**9)
+        try:
+            handle = file.open(encoding="utf-8", errors="replace")
+        except OSError:
+            return []
+        try:
+            for row in csv.DictReader(handle):
+                tags = []
+                for key in columns:
+                    tags.extend(part.strip() for part in (row.get(key) or "").split(",") if part.strip())
+                if needle not in {item.casefold() for item in tags}:
+                    continue
+                raw = (row.get("file") or "").strip()
+                if not raw:
+                    continue
+                image = Path(raw)
+                if not image.is_absolute():
+                    image = base / raw
+                try:
+                    rel = image.resolve().relative_to(base).as_posix()
+                except (OSError, ValueError):
+                    continue
+                if rel in seen or not image.is_file():
+                    continue
+                seen.add(rel)
+                found.append(rel)
+        except (OSError, csv.Error):
+            return found
+        finally:
+            handle.close()
+        return found
+    if not base.is_dir():
+        return []
+    for image in images_under(base):
+        txt = image.with_suffix(".txt")
+        if not txt.is_file():
+            continue
+        parts = [part.strip().casefold() for part in txt.read_text(encoding="utf-8", errors="replace").split(",")]
+        if needle not in parts:
+            continue
+        found.append(image.resolve().relative_to(base).as_posix())
+    return found
 
 
 def mark(done, total):
@@ -718,7 +811,7 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         path = parsed.path
         if path == "/":
-            self._send(200, page_bytes(self.app.folders(), read_theme(), read_genres()), "text/html; charset=utf-8")
+            self._send(200, page_bytes(self.app.folders(), read_theme(), read_genres(), read_layout()), "text/html; charset=utf-8")
             return
         if path == "/api/status":
             self._send(200, self.app.status())
@@ -738,6 +831,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"files": recent_tagged(query.get("folder", []))})
             except ValueError:
                 self._send(404, {"error": "нет такой папки"})
+            return
+        if path == "/api/tagged":
+            self._send(200, {"files": images_with_tag(query.get("tag", [""])[0])})
             return
         if path == "/api/tags":
             try:
@@ -773,6 +869,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "нет такой темы"})
                 return
             self._send(200, {"theme": read_theme()})
+            return
+        if parsed.path == "/api/layout":
+            if not write_layout(payload if isinstance(payload, dict) else {}):
+                self._send(400, {"error": "непонятные размеры"})
+                return
+            self._send(200, read_layout())
             return
         if parsed.path == "/api/genres":
             if not write_genres(payload.get("genres")):
