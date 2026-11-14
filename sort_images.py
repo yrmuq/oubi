@@ -135,6 +135,34 @@ def stick_txt(path, tag):
     txt.write_text(", ".join(tags), encoding="utf-8")
 
 
+def tag_pool(row):
+    tags = {item.casefold() for item in row.get("_gen") or ()}
+    tags.update(item.casefold() for item in row.get("_style") or ())
+    return tags
+
+
+def genre_folder(title, tags, genres):
+    if (title or "").strip().casefold() != "original":
+        return ""
+    picked = [item.strip() for item in genres if item and item.strip()]
+    if not picked:
+        return ""
+    for name in picked:
+        if name.casefold() in tags:
+            return name.strip()
+    return "other"
+
+
+def place(out, title, rating, folder_char, genre="", extra=""):
+    dest = Path(out) / safe(title) / rating
+    if genre:
+        dest = dest / safe(genre)
+    dest = dest / safe(folder_char)
+    if extra:
+        dest = dest / extra
+    return dest
+
+
 def series_folder_name(key):
     return safe(key.replace("#", "")) or "series"
 
@@ -143,7 +171,7 @@ def rating_of(row, nsfw_set):
     return "nsfw" if any(tag in nsfw_set for tag in row["_rating"]) else "sfw"
 
 
-def series_targets(work, gender, nsfw_set, title_of):
+def series_targets(work, gender, nsfw_set, title_of, genres=()):
     by_file = {row["file"]: row for row in work}
     targets = {}
     stuck = []
@@ -167,6 +195,10 @@ def series_targets(work, gender, nsfw_set, title_of):
                 title = "crossover" if len(top) > 1 and top[0][1] == top[1][1] else top[0][0]
         rating = Counter(rating_of(row, nsfw_set) for row in members).most_common(1)[0][0]
         folder = series_folder_name(group["key"])
+        tags = set()
+        for row in members:
+            tags |= tag_pool(row)
+        genre = genre_folder(title, tags, genres)
         used = set()
         for path, number in sorted(group["files"].items(), key=lambda item: (item[1], item[0])):
             suffix = Path(path).suffix.lower()
@@ -174,7 +206,7 @@ def series_targets(work, gender, nsfw_set, title_of):
             while name in used:
                 name = f"{number}_{len(used)}{suffix}"
             used.add(name)
-            targets[path] = (title, rating, folder_char, folder, name)
+            targets[path] = (title, rating, folder_char, genre, folder, name)
     return targets, stuck
 
 
@@ -202,6 +234,7 @@ def main():
     ap.add_argument("--genders", help="CSV с ручными поправками пола: персонаж,f|m")
     ap.add_argument("--copy-txt", action="store_true", help="переносить рядом и .txt с тегами")
     ap.add_argument("--only", nargs="*", default=[], help="раскладывать только файлы внутри этих папок")
+    ap.add_argument("--genres", default="", help="жанры для copyright original, через запятую, по приоритету")
     ap.add_argument("--sorted-list", default="", help="дописывать путь после успешного копирования")
     args = ap.parse_args()
 
@@ -213,6 +246,7 @@ def main():
         r["_chars"] = split(r.get("character", ""))
         r["_copy"] = split(r.get("copyright", ""))
         r["_gen"] = set(split(r.get("general", "")))
+        r["_style"] = set(split(r.get("style", "")))
         r["_rating"] = split(r.get("rating", ""))
 
     # 1. Пол персонажей по одиночным картинкам из всей коллекции
@@ -244,12 +278,13 @@ def main():
             return m.group(1)
         return r["_copy"][0] if r["_copy"] else "unknown"
 
+    args.genres = [part.strip() for part in args.genres.split(",") if part.strip()]
     nsfw_set = {"rating:q", "rating:e"} if args.nsfw_from == "q" else {"rating:e"}
     counters = {}
     stats = Counter()
 
     work = [r for r in rows if under_roots(r["file"], args.only)]
-    series, stuck = series_targets(work, gender, nsfw_set, title_of)
+    series, stuck = series_targets(work, gender, nsfw_set, title_of, args.genres)
     for path, tag in stuck:
         print(f"Тег серии: {path} -> {tag}", flush=True)
     if stuck and not args.dry_run and fieldnames:
@@ -266,8 +301,8 @@ def main():
             continue
         planned = series.get(r["file"])
         if planned:
-            title, rating, folder_char, folder, name = planned
-            dst_dir = Path(args.out) / safe(title) / rating / safe(folder_char) / folder
+            title, rating, folder_char, genre, folder, name = planned
+            dst_dir = place(args.out, title, rating, folder_char, genre, folder)
             dst = dst_dir / name
         else:
             rating = "nsfw" if any(t in nsfw_set for t in r["_rating"]) else "sfw"
@@ -296,8 +331,8 @@ def main():
                 title = title_of(pick, r)
                 folder_char = file_char = base_name(pick)
 
-            title_s, char_s = safe(title), safe(folder_char)
-            dst_dir = Path(args.out) / title_s / rating / char_s
+            genre = genre_folder(title, tag_pool(r), args.genres)
+            dst_dir = place(args.out, title, rating, folder_char, genre)
             key = str(dst_dir)
             if key not in counters:
                 n = 0
@@ -308,7 +343,7 @@ def main():
                             n = max(n, int(m.group(1)))
                 counters[key] = n
             counters[key] += 1
-            dst = dst_dir / f"{safe(file_char)}_{title_s}_{counters[key]:04d}{src.suffix.lower()}"
+            dst = dst_dir / f"{safe(file_char)}_{safe(title)}_{counters[key]:04d}{src.suffix.lower()}"
 
         if args.dry_run:
             print(f"{src} -> {dst}")

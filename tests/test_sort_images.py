@@ -4,7 +4,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sort_images import group_series, majority_tag, series_folder_name, series_targets, stick_character
+from sort_images import (
+    genre_folder,
+    group_series,
+    majority_tag,
+    series_folder_name,
+    series_targets,
+    stick_character,
+)
 
 
 def page(char, girls="1girl", copy="evangelion"):
@@ -46,7 +53,7 @@ class SeriesTests(unittest.TestCase):
             row["file"] = f"/images/pack/post_p{number}_master1200.jpg"
             rows.append(row)
         targets, stuck = series_targets(rows, {}, {"rating:q", "rating:e"}, lambda char, row: "evangelion")
-        self.assertEqual(targets[rows[0]["file"]], ("evangelion", "sfw", "asuka", "post_p_master1200", "1.jpg"))
+        self.assertEqual(targets[rows[0]["file"]], ("evangelion", "sfw", "asuka", "", "post_p_master1200", "1.jpg"))
         self.assertEqual(targets[rows[4]["file"]][-1], "5.jpg")
         self.assertIn(rows[4]["file"], {path for path, _tag in stuck})
         split = [page("asuka"), page("asuka"), page("rei"), page("rei")]
@@ -55,6 +62,13 @@ class SeriesTests(unittest.TestCase):
         targets, stuck = series_targets(split, {}, {"rating:q", "rating:e"}, lambda char, row: "evangelion")
         self.assertEqual(targets[split[0]["file"]][2], "group")
         self.assertEqual(stuck, [])
+
+    def test_original_uses_the_first_matching_genre(self):
+        tags = {"portrait", "comic"}
+        self.assertEqual(genre_folder("original", tags, ["comic", "portrait"]), "comic")
+        self.assertEqual(genre_folder("original", {"1girl"}, ["comic"]), "other")
+        self.assertEqual(genre_folder("evangelion", tags, ["comic"]), "")
+        self.assertEqual(genre_folder("original", tags, []), "")
 
 
 if __name__ == "__main__":

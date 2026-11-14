@@ -21,6 +21,8 @@ from oubi_web import (
     tag_command,
     read_theme,
     write_theme,
+    read_genres,
+    write_genres,
 )
 from sort_images import under_roots
 
@@ -118,6 +120,24 @@ class WebTests(unittest.TestCase):
             self.assertEqual(read_theme(path), "dark")
             self.assertFalse(write_theme("blue", path))
             self.assertEqual(read_theme(path), "dark")
+
+    def test_page_genres_override_compose(self):
+        import tempfile
+        previous = os.environ.get("OUBI_GENRE_1")
+        os.environ["OUBI_GENRE_1"] = "portrait"
+        os.environ["OUBI_GENRE_2"] = ""
+        os.environ["OUBI_GENRE_3"] = ""
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "genres.txt"
+                self.assertEqual(read_genres(path)[0], "portrait")
+                self.assertTrue(write_genres(["comic", "scenery", ""], path))
+                self.assertEqual(read_genres(path), ["comic", "scenery", ""])
+        finally:
+            if previous is None:
+                os.environ.pop("OUBI_GENRE_1", None)
+            else:
+                os.environ["OUBI_GENRE_1"] = previous
 
 
 if __name__ == "__main__":

@@ -103,6 +103,13 @@ button:disabled { opacity: 0.45; cursor: default; }
 #name { display: block; width: 100%; padding: 0 52px; box-sizing: border-box; }
 #who { margin: 0; min-height: 1.2em; font-size: 18px; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
+#genre-row { display: flex; gap: 6px; width: 100%; }
+#genre-row label { flex: 1; display: flex; gap: 4px; align-items: center; color: var(--muted); font-size: 13px; }
+#genre-row input { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+.genre { border-radius: 4px; padding: 0 3px; color: #111; }
+.genre-1 { background: #ffb4b4; }
+.genre-2 { background: #b9d0ff; }
+.genre-3 { background: #b7efc9; }
 .out { text-align: left; }
 .out button.file { display: block; width: 100%; text-align: left; background: transparent; color: inherit; border-radius: 0; border: 0; }
 .log { margin: 0 8px 8px; border: 1px solid var(--line); background: var(--pane); overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; min-height: 0; }
@@ -162,6 +169,11 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     </div>
     <span id="name"></span>
     <p id="who"></p>
+    <div id="genre-row">
+      <label>1 <input id="genre-1" spellcheck="false"></label>
+      <label>2 <input id="genre-2" spellcheck="false"></label>
+      <label>3 <input id="genre-3" spellcheck="false"></label>
+    </div>
     <p id="tags"></p>
   </section>
   <div class="split split-v" id="split-mid"></div>
@@ -183,6 +195,8 @@ let reelAt = -1;
 let follow = true;
 let outputPath = "";
 let shown = "";
+let genres = __OUBI_GENRES__;
+let tagText = "";
 let theme = savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto" ? savedTheme : "auto";
 let wasBusy = false;
 const panes = { left: null, mid: null, right: null, log: 200 };
@@ -266,6 +280,21 @@ async function loadRecent() {
   if (follow && reel.length) showAt(reel.length - 1);
 }
 
+function paintTags(text) {
+  const box = document.getElementById("tags");
+  box.replaceChildren();
+  const parts = String(text || "").split(",");
+  parts.forEach((part, index) => {
+    if (index) box.append(", ");
+    const span = document.createElement("span");
+    const token = part.trim().toLowerCase();
+    const rank = genres.findIndex((item) => item && item.toLowerCase() === token);
+    if (rank >= 0 && rank < 3) span.className = "genre genre-" + (rank + 1);
+    span.textContent = part;
+    box.append(span);
+  });
+}
+
 function showAt(index) {
   if (!reel.length) return;
   reelAt = (index + reel.length) % reel.length;
@@ -278,11 +307,13 @@ async function showImage(root, path) {
   document.getElementById("shot").src = "/api/file?root=" + root + "&path=" + encodeURIComponent(path);
   document.getElementById("name").textContent = fileName(path);
   document.getElementById("who").textContent = "";
-  document.getElementById("tags").textContent = "";
+  document.getElementById("tags").replaceChildren();
+  tagText = "";
   if (root !== "images") return;
   const data = await (await fetch("/api/tags?path=" + encodeURIComponent(path))).json();
   document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
-  document.getElementById("tags").textContent = data.text || "";
+  tagText = data.text || "";
+  paintTags(tagText);
 }
 
 async function loadOutput() {
@@ -437,6 +468,23 @@ for (const button of document.querySelectorAll(".themes button")) {
   };
 }
 for (const id of ["tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
+let genreTimer = 0;
+for (let number = 1; number <= 3; number += 1) {
+  const input = document.getElementById("genre-" + number);
+  input.value = genres[number - 1] || "";
+  input.oninput = () => {
+    genres[number - 1] = input.value.trim();
+    paintTags(tagText);
+    clearTimeout(genreTimer);
+    genreTimer = setTimeout(() => {
+      fetch("/api/genres", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ genres: genres.slice(0, 3) }),
+      });
+    }, 300);
+  };
+}
 document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };

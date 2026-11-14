@@ -19,18 +19,51 @@ OUTPUT = "/output"
 CSV_PATH = "/data/tags.csv"
 GENDERS_PATH = "/data/genders.csv"
 THEME_PATH = "/data/theme"
+GENRES_PATH = "/data/genres.txt"
 THEMES = {"light", "dark", "auto"}
 MODES = {"all", "tag", "sort", "plan"}
 PAGE_PATH = HERE / "oubi_page.html"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 SORTED_LIST = "/data/sorted.txt"
 
-def page_bytes(items, theme="auto"):
+def page_bytes(items, theme="auto", genres=None):
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
     chosen = theme if theme in THEMES else "auto"
+    genre_payload = json.dumps(list(genres or ["", "", ""])[:3], ensure_ascii=False).replace("<", "\\u003c")
     html = PAGE_PATH.read_text(encoding="utf-8")
     html = html.replace("FOLDERS_JSON", payload, 1).replace("__OUBI_THEME__", chosen, 1)
+    html = html.replace("__OUBI_GENRES__", genre_payload, 1)
     return html.encode()
+
+
+def read_genres(path=GENRES_PATH):
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = None
+    if lines is not None:
+        picked = [line.strip() for line in lines[:3]]
+        while len(picked) < 3:
+            picked.append("")
+        if any(picked):
+            return picked
+    return [
+        os.environ.get("OUBI_GENRE_1", "").strip(),
+        os.environ.get("OUBI_GENRE_2", "").strip(),
+        os.environ.get("OUBI_GENRE_3", "").strip(),
+    ]
+
+
+def write_genres(values, path=GENRES_PATH):
+    if not isinstance(values, list):
+        return False
+    cleaned = [str(value or "").strip().replace("\n", "")[:80] for value in values[:3]]
+    while len(cleaned) < 3:
+        cleaned.append("")
+    file = Path(path)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text("\n".join(cleaned) + "\n", encoding="utf-8")
+    return True
 
 
 def read_theme(path=THEME_PATH):
@@ -414,6 +447,9 @@ def sort_command(plan=False, folders=None):
         command.extend(["--sorted-list", SORTED_LIST])
     if flag_on(os.environ.get("OUBI_COPY_TXT")):
         command.append("--copy-txt")
+    genres = [item for item in read_genres() if item]
+    if genres:
+        command.extend(["--genres", ",".join(genres)])
     return command
 
 
@@ -682,7 +718,7 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         path = parsed.path
         if path == "/":
-            self._send(200, page_bytes(self.app.folders(), read_theme()), "text/html; charset=utf-8")
+            self._send(200, page_bytes(self.app.folders(), read_theme(), read_genres()), "text/html; charset=utf-8")
             return
         if path == "/api/status":
             self._send(200, self.app.status())
@@ -737,6 +773,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "нет такой темы"})
                 return
             self._send(200, {"theme": read_theme()})
+            return
+        if parsed.path == "/api/genres":
+            if not write_genres(payload.get("genres")):
+                self._send(400, {"error": "непонятные жанры"})
+                return
+            self._send(200, {"genres": read_genres()})
             return
         if parsed.path == "/api/stop":
             self.app.stop()
