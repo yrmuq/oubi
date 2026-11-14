@@ -94,7 +94,10 @@ def main():
     counters = {}
     stats = Counter()
 
-    for r in rows:
+    print(f"Сейчас: раскладываю {len(rows)} строк из tags.csv.", flush=True)
+    for index, r in enumerate(rows, 1):
+        if index == 1 or index % 25 == 0 or index == len(rows):
+            print(f"Раскладка: {index} из {len(rows)}", flush=True)
         src = Path(r["file"])
         if not src.exists():
             stats["нет файла"] += 1
