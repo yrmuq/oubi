@@ -46,10 +46,9 @@ button:disabled { opacity: 0.45; cursor: default; }
   <section class="pane">
     <h1>oubi</h1>
     <div class="buttons">
-      <button id="all">Разметить и разложить</button>
-      <button id="tag">Только разметить</button>
-      <button id="sort">Только разложить</button>
-      <button id="plan" class="secondary">Только план раскладки</button>
+      <button id="tag">Опознать</button>
+      <button id="sort">Сортировать</button>
+      <button id="plan" class="secondary">План сортировки</button>
       <button id="stop" class="danger" disabled>Остановить</button>
       <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
     </div>
@@ -213,9 +212,8 @@ async function tick() {
   const busy = data.job_running;
   const ready = data.model === "ready";
   const picked = selected.size > 0;
-  for (const id of ["all", "tag", "sort", "plan"]) {
-    const needsModel = id === "all" || id === "tag";
-    document.getElementById(id).disabled = busy || !picked || (needsModel && !ready);
+  for (const id of ["tag", "sort", "plan"]) {
+    document.getElementById(id).disabled = busy || !picked || (id === "tag" && !ready);
   }
   document.getElementById("stop").disabled = !busy;
   document.getElementById("retry").hidden = data.model !== "error";
@@ -235,7 +233,7 @@ async function start(mode) {
   tick();
 }
 
-for (const id of ["all", "tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
+for (const id of ["tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
 document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };

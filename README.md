@@ -47,7 +47,7 @@
 | `OUBI_MODEL` | Hugging Face id or a local model directory. |
 | `HSA_OVERRIDE_GFX_VERSION` | Kept for a later ROCm image. This CPU image ignores it. |
 
-`OUBI_DRY_RUN` is not used by the page. `Только план раскладки` prints the destination and does not copy. A dry-run still writes `unknown_genders.txt` when some characters have no gender vote.
+`OUBI_DRY_RUN` is not used by the page. `План сортировки` prints the destination and does not copy. A dry-run still writes `unknown_genders.txt` when some characters have no gender vote.
 
 The container prints the compute device before tagging. On this image the line is `CPU (видеокарта не найдена!)`. That is expected: AMD and Nvidia are not wired up yet. `HSA_OVERRIDE_GFX_VERSION` does not turn a GPU on.
 
@@ -144,7 +144,7 @@ docker compose pull
 docker compose up
 ```
 
-Open `http://<server>:${OUBI_PORT}`. On startup the `dev` image only downloads the model and serves the page. Pick one or more folders in the mounted pictures, then start tagging or sorting. The buttons do nothing until a folder is selected. A folder carries two marks: tagging (not started, partial, done) and sorting (the same three states). `Разметить и разложить` does both. `Только план раскладки` does not copy. Running the sort again copies the pictures once more under the next numbers.
+Open `http://<server>:${OUBI_PORT}`. On startup the `dev` image only downloads the model and serves the page. Pick one or more folders in the mounted pictures, then start tagging or sorting. The buttons do nothing until a folder is selected. A folder carries two marks: tagging (not started, partial, done) and sorting (the same three states). `Опознать` tags. `Сортировать` copies. `План сортировки` does not copy. Running the sort again copies the pictures once more under the next numbers.
 
 `latest` has no page. It still runs the job from `OUBI_MODE` and exits when that job finishes.
 
@@ -164,7 +164,7 @@ docker compose logs -f oubi
 | `/data` | `tags.csv`, optional `genders.csv`, and `unknown_genders.txt`. |
 | `/cache` | Hugging Face download of the tagger weights. |
 
-To preview the folders before copying, use `Только план раскладки` on the page.
+To preview the folders before copying, use `План сортировки` on the page.
 
 ---
 
