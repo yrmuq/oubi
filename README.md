@@ -116,7 +116,7 @@ services:
       options:
         max-size: "55m"
         max-file: "1"
-    restart: "unless-stopped"
+    restart: "no"
 
 ```
 
