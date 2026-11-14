@@ -25,7 +25,7 @@ SORTED_LIST = "/data/sorted.txt"
 
 def page_bytes():
     items = [
-        {"path": name, "name": "Картинки" if name == "" else name, "scan": "none", "sort": "none"}
+        {"path": name, "name": "Картинки" if name == "" else name}
         for name in folder_names()
     ]
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
@@ -100,14 +100,51 @@ def folder_names(root=IMAGES):
     return [""]
 
 
-def summarize_images(rel, images, csv_paths, sorted_paths):
+def path_keys(path, root=None):
+    keys = set()
+    raw = str(path).strip()
+    if not raw:
+        return keys
+    keys.add(raw)
+    file = Path(raw)
+    if root is not None and not file.is_absolute():
+        file = Path(root) / raw
+        keys.add(str(file))
+    try:
+        resolved = file.resolve()
+    except OSError:
+        return keys
+    keys.add(str(resolved))
+    if root is not None:
+        try:
+            keys.add(resolved.relative_to(Path(root).resolve()).as_posix())
+        except ValueError:
+            pass
+    return keys
+
+
+def index_paths(paths, root=None):
+    found = set()
+    for name in paths:
+        found.update(path_keys(name, root))
+    return found
+
+
+def summarize_images(rel, images, csv_paths, sorted_paths, root=None):
     tagged = 0
     laid = 0
+    tagged_keys = index_paths(csv_paths, root)
+    sorted_keys = index_paths(sorted_paths, root)
     for image in images:
-        if image.with_suffix(".txt").is_file() or str(image) in csv_paths or str(image.resolve()) in csv_paths:
-            tagged += 1
-        if str(image.resolve()) in sorted_paths or str(image) in sorted_paths:
-            laid += 1
+        try:
+            keys = path_keys(image, root)
+            txt = image.with_suffix(".txt")
+            if keys & tagged_keys or (txt.is_file() and not txt.is_dir()):
+                tagged += 1
+            if keys & sorted_keys:
+                laid += 1
+        except OSError:
+            continue
     total = len(images)
     return {
         "path": rel,
@@ -141,7 +178,7 @@ def source_folders(root=IMAGES):
             images = images_under(folder)
         except OSError:
             images = []
-        found.append(summarize_images(name, images, csv_paths, sorted_paths))
+        found.append(summarize_images(name, images, csv_paths, sorted_paths, base))
     return found
 
 
@@ -227,8 +264,11 @@ def character_index(path=CSV_PATH):
     try:
         for row in csv.DictReader(handle):
             name = (row.get("file") or "").strip()
-            if name:
-                rows[name] = first_character(row.get("character"))
+            if not name:
+                continue
+            character = first_character(row.get("character"))
+            for key in path_keys(name, IMAGES):
+                rows[key] = character
     except (OSError, csv.Error):
         return {}
     finally:
@@ -245,7 +285,11 @@ def read_info(rel):
     if txt.is_file() and (base in txt.resolve().parents or txt.resolve() == base):
         text = txt.read_text(encoding="utf-8", errors="replace")[:4000]
     names = character_index()
-    character = names.get(str(image)) or names.get(str(image.resolve())) or ""
+    character = ""
+    for key in path_keys(image, base):
+        if names.get(key):
+            character = names[key]
+            break
     return {"text": text, "character": character}
 
 
@@ -427,7 +471,7 @@ class App:
     def folders(self):
         names = folder_names()
         quick = [
-            {"path": name, "name": "Картинки" if name == "" else name, "scan": "none", "sort": "none", "total": 0}
+            {"path": name, "name": "Картинки" if name == "" else name, "total": 0}
             for name in names
         ]
         now = time.monotonic()
@@ -446,7 +490,8 @@ class App:
     def _count_folders(self):
         try:
             found = source_folders()
-        except Exception:
+        except Exception as error:
+            print(f"Сейчас: не удалось посчитать папки: {error}", flush=True)
             found = None
         with self.lock:
             if found is not None:

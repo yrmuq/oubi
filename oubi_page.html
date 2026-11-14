@@ -5,53 +5,111 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>oubi</title>
 <style>
-:root { color-scheme: dark; }
-html, body { height: 100%; margin: 0; background: #111; color: #eee; font: 15px/1.4 system-ui, sans-serif; }
-body { display: grid; grid-template-rows: 1fr 200px; }
-.top { display: grid; grid-template-columns: 1.15fr 1fr 1.15fr; min-height: 0; }
-.pane { border: 1px solid #d7d7d7; margin: 8px; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+:root {
+  color-scheme: light;
+  --bg: #f2f2f2;
+  --text: #1c1c1c;
+  --muted: #5e5e5e;
+  --pane: #fff;
+  --line: #c6c6c6;
+  --folder-tab: #d7a441;
+  --folder: #e7b84a;
+  --folder-front: #f6d78a;
+  --folder-edge: #8a5a12;
+  --yellow: #f5c400;
+  --blue: #2f6fed;
+  --iron-a: #f7f8f9;
+  --iron-b: #8d98a3;
+  --iron-c: #d5dbe0;
+  --bar: #e4e4e4;
+  --fill: #e7b341;
+  --btn: #2c4a3e;
+  --btn-2: #dedede;
+  --btn-2-text: #1c1c1c;
+  --danger: #8d3a3a;
+  --pick: #c98400;
+  --log: 200px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #111;
+    --text: #eee;
+    --muted: #aaa;
+    --pane: #161616;
+    --line: #3a3a3a;
+    --folder-tab: #e0b44a;
+    --folder: #f0c85a;
+    --folder-front: #ffe39a;
+    --folder-edge: #6a4310;
+    --yellow: #f5c400;
+    --blue: #4c86ff;
+    --iron-a: #f4f6f8;
+    --iron-b: #7e8b97;
+    --iron-c: #c5ced6;
+    --bar: #2a2a2a;
+    --fill: #e7b341;
+    --btn: #2c4a3e;
+    --btn-2: #333;
+    --btn-2-text: #fff;
+    --danger: #6e2e2e;
+    --pick: #e7b341;
+  }
+}
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+body { display: grid; grid-template-rows: minmax(0, 1fr) 8px var(--log); }
+.top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; padding: 0 8px; }
+.pane { border: 1px solid var(--line); background: var(--pane); margin: 8px 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
-button { font: inherit; color: #fff; background: #2c4a3e; border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
-button.secondary { background: #333; }
-button.danger { background: #6e2e2e; }
+button { font: inherit; color: #fff; background: var(--btn); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+button.secondary { background: var(--btn-2); color: var(--btn-2-text); }
+button.danger { background: var(--danger); color: #fff; }
 button:disabled { opacity: 0.45; cursor: default; }
 #folders, #out { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 16px; }
-.folder { width: 96px; background: #1b1b1b; color: #eee; border: 1px solid #aaa; border-radius: 8px; padding: 8px 4px; }
-.folder .icon { width: 64px; height: 48px; margin: 0 auto 6px; border: 2px solid #eee; border-radius: 3px; position: relative; background: #2a2a2a; }
+.folder { width: 104px; background: transparent; color: inherit; border: 0; border-radius: 8px; padding: 4px; }
+.folder .icon { width: 72px; height: 56px; margin: 0 auto 6px; position: relative; background: none; border: 0; }
+.folder .icon svg { width: 100%; height: 100%; display: block; }
 .folder .name { display: block; font-size: 12px; line-height: 1.2; word-break: break-word; }
-.folder.on { outline: 2px solid #e7b341; }
-.badge { position: absolute; bottom: 2px; width: 16px; height: 16px; border-radius: 50%; border: 1px solid #aaa; background: #111; font-size: 11px; line-height: 16px; }
-.badge.scan { left: 2px; }
-.badge.sort { right: 2px; }
-.badge.part { background: #e7b341; color: #111; }
-.badge.done { background: #3dba6a; color: #111; }
+.folder.on { outline: 2px solid var(--pick); }
+.badge { position: absolute; bottom: 7px; width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; }
+.badge.scan { left: 12px; }
+.badge.sort { right: 12px; }
+.badge.none { background: var(--yellow); border: 1px solid #8a6d00; }
+.badge.part { background: var(--blue); border: 1px solid #1d4fb5; }
+.badge.done { background: radial-gradient(circle at 35% 30%, var(--iron-a), var(--iron-c) 40%, var(--iron-b)); border: 1px solid #5e6973; }
+.split { position: relative; touch-action: none; }
+.split-v { cursor: col-resize; margin: 8px 0; }
+.split-h { cursor: row-resize; }
+.split-v::after, .split-h::after { content: ""; position: absolute; }
+.split-v::after { left: -6px; right: -6px; top: 0; bottom: 0; }
+.split-h::after { left: 8px; right: 8px; top: -6px; bottom: -6px; }
 .step { margin-top: auto; }
-.bar { height: 10px; background: #2a2a2a; border-radius: 99px; overflow: hidden; }
-.bar > div { height: 100%; width: 0; background: #e7b341; }
-.detail { color: #aaa; min-height: 1.2em; }
+.bar { height: 10px; background: var(--bar); border-radius: 99px; overflow: hidden; }
+.bar > div { height: 100%; width: 0; background: var(--fill); }
+.detail { color: var(--muted); min-height: 1.2em; }
 .mid { position: relative; align-items: center; text-align: center; gap: 12px; }
-#shot { width: 100%; height: 60%; min-height: 208px; flex: 0 0 60%; object-fit: contain; background: #000; border: 1px solid #ddd; cursor: zoom-in; }
+#shot { width: 100%; height: 60%; min-height: 208px; flex: 0 0 60%; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
 #switch { position: relative; width: 100%; height: 32px; flex: 0 0 32px; }
-#prev, #next { position: absolute; top: 0; z-index: 2; background: transparent; font-size: 22px; }
+#prev, #next { position: absolute; top: 0; z-index: 2; background: transparent; color: var(--text); font-size: 22px; }
 #prev { left: 0; }
 #next { right: 0; }
 #name { display: block; width: 100%; padding: 0 52px; box-sizing: border-box; }
 #who { margin: 0; min-height: 1.2em; font-size: 18px; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
 .out { text-align: left; }
-.out button.file { display: block; width: 100%; text-align: left; background: transparent; border-radius: 0; border: 0; }
-.log { margin: 0 8px 8px; border: 1px solid #d7d7d7; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
+.out button.file { display: block; width: 100%; text-align: left; background: transparent; color: inherit; border-radius: 0; border: 0; }
+.log { margin: 0 8px 8px; border: 1px solid var(--line); background: var(--pane); overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; min-height: 0; }
 #zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
 #zoom[hidden] { display: none; }
-#zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; }
+#zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; color: #fff; }
 #zoom-img { max-width: 100%; max-height: 100%; transform-origin: center center; user-select: none; }
 #zoom-img.zoomed { cursor: grab; }
 </style>
 </head>
 <body>
 <div class="top">
-  <section class="pane">
+  <section class="pane" id="left">
     <h1>oubi</h1>
     <div class="buttons">
       <button id="tag">Опознать</button>
@@ -65,7 +123,8 @@ button:disabled { opacity: 0.45; cursor: default; }
     <div class="bar"><div id="fill"></div></div>
     <p id="detail" class="detail"></p>
   </section>
-  <section class="pane mid">
+  <div class="split split-v" id="split-left"></div>
+  <section class="pane mid" id="mid">
     <img id="shot" alt="">
     <div id="switch">
       <button id="prev" type="button">❮</button>
@@ -75,10 +134,12 @@ button:disabled { opacity: 0.45; cursor: default; }
     <p id="who"></p>
     <p id="tags"></p>
   </section>
-  <section class="pane">
+  <div class="split split-v" id="split-mid"></div>
+  <section class="pane" id="right">
     <div id="out" class="out"></div>
   </section>
 </div>
+<div class="split split-h" id="split-log"></div>
 <pre id="log" class="log"></pre>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
@@ -92,6 +153,7 @@ let reelAt = -1;
 let follow = true;
 let outputPath = "";
 let shown = "";
+const panes = { left: null, mid: null, right: null, log: 200 };
 
 function fileName(path) {
   const parts = String(path || "").split("/");
@@ -100,11 +162,22 @@ function fileName(path) {
 
 function badge(kind, state) {
   const title = {
-    scan: { none: "ещё не размечалась", part: "размечена не до конца", done: "размечена полностью" },
-    sort: { none: "ещё не раскладывалась", part: "разложена не до конца", done: "разложена полностью" },
+    scan: { none: "не опознавалась", part: "опознана не до конца", done: "опознана полностью" },
+    sort: { none: "не сортировалась", part: "отсортирована не до конца", done: "отсортирована полностью" },
   }[kind][state] || "";
-  const mark = state === "done" ? "✓" : state === "part" ? "½" : "";
-  return `<span class="badge ${kind} ${state}" title="${title}">${mark}</span>`;
+  if (!title) return "";
+  return `<span class="badge ${kind} ${state}" title="${title}"></span>`;
+}
+
+function folderIcon(scan, sort) {
+  const icon = document.createElement("div");
+  icon.className = "icon";
+  icon.innerHTML = `<svg viewBox="0 0 64 52" aria-hidden="true">
+    <path fill="var(--folder-tab)" d="M8 18h14l4-8h24a4 4 0 0 1 4 4v8H8z"/>
+    <path fill="var(--folder)" stroke="var(--folder-edge)" stroke-width="1.4" d="M4 18h56a4 4 0 0 1 4 4v22a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V18z"/>
+    <path fill="var(--folder-front)" d="M4 28h56v16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V28z"/>
+  </svg>` + badge("scan", scan) + badge("sort", sort);
+  return icon;
 }
 
 function renderFolders() {
@@ -114,13 +187,10 @@ function renderFolders() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "folder" + (selected.has(folder.path) ? " on" : "");
-    const icon = document.createElement("div");
-    icon.className = "icon";
-    icon.innerHTML = badge("scan", folder.scan) + badge("sort", folder.sort);
     const label = document.createElement("span");
     label.className = "name";
     label.textContent = folder.name;
-    button.append(icon, label);
+    button.append(folderIcon(folder.scan, folder.sort), label);
     button.onclick = () => {
       if (selected.has(folder.path)) selected.delete(folder.path);
       else selected.add(folder.path);
@@ -131,12 +201,23 @@ function renderFolders() {
   }
 }
 
+function takeFolders(data) {
+  const prev = new Map(folders.map((folder) => [folder.path, folder]));
+  folders = data.map((folder) => {
+    if (!folder.scan && prev.has(folder.path) && prev.get(folder.path).scan) {
+      const old = prev.get(folder.path);
+      return Object.assign({}, folder, { scan: old.scan, sort: old.sort });
+    }
+    return folder;
+  });
+  renderFolders();
+}
+
 async function loadFolders() {
   try {
     const data = await (await fetch("/api/folders")).json();
     if (!Array.isArray(data)) return;
-    folders = data;
-    renderFolders();
+    takeFolders(data);
   } catch (error) {
     return;
   }
@@ -186,17 +267,15 @@ async function loadOutput() {
   for (const item of data.items || []) {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = item.dir ? "" : item.name;
     if (item.dir) {
       button.className = "folder";
-      const icon = document.createElement("div");
-      icon.className = "icon";
       const label = document.createElement("span");
       label.className = "name";
       label.textContent = item.name;
-      button.append(icon, label);
+      button.append(folderIcon("", ""), label);
     } else {
       button.className = "file";
+      button.textContent = item.name;
     }
     button.onclick = () => {
       if (item.dir) {
@@ -246,11 +325,72 @@ async function start(mode) {
   tick();
 }
 
+function paintPanes() {
+  const top = document.querySelector(".top");
+  if (panes.left == null) return;
+  top.style.gridTemplateColumns = panes.left + "px 8px " + panes.mid + "px 8px " + panes.right + "px";
+  document.body.style.gridTemplateRows = "minmax(0,1fr) 8px " + panes.log + "px";
+}
+
+function dragSplit(which, event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  event.preventDefault();
+  const left = document.getElementById("left");
+  const mid = document.getElementById("mid");
+  const right = document.getElementById("right");
+  const log = document.getElementById("log");
+  const start = {
+    x: event.clientX,
+    y: event.clientY,
+    left: left.getBoundingClientRect().width,
+    mid: mid.getBoundingClientRect().width,
+    right: right.getBoundingClientRect().width,
+    log: log.getBoundingClientRect().height,
+    top: document.querySelector(".top").getBoundingClientRect().height,
+  };
+  function move(ev) {
+    if (which === "left") {
+      const pair = start.left + start.mid;
+      const floor = Math.min(96, pair / 2);
+      const next = Math.min(pair - floor, Math.max(floor, start.left + ev.clientX - start.x));
+      panes.left = next;
+      panes.mid = pair - next;
+      panes.right = start.right;
+    } else if (which === "mid") {
+      const pair = start.mid + start.right;
+      const floor = Math.min(96, pair / 2);
+      const next = Math.min(pair - floor, Math.max(floor, start.mid + ev.clientX - start.x));
+      panes.left = start.left;
+      panes.mid = next;
+      panes.right = pair - next;
+    } else {
+      const pair = start.log + start.top;
+      const floor = Math.min(72, pair / 5);
+      panes.log = Math.min(pair - 120, Math.max(floor, start.log + (start.y - ev.clientY)));
+      if (panes.left == null) {
+        panes.left = start.left;
+        panes.mid = start.mid;
+        panes.right = start.right;
+      }
+    }
+    paintPanes();
+  }
+  function up() {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
 for (const id of ["tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
 document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };
 document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
+document.getElementById("split-left").onpointerdown = (event) => dragSplit("left", event);
+document.getElementById("split-mid").onpointerdown = (event) => dragSplit("mid", event);
+document.getElementById("split-log").onpointerdown = (event) => dragSplit("log", event);
 const zoom = document.getElementById("zoom");
 const zoomImg = document.getElementById("zoom-img");
 const view = { scale: 1, x: 0, y: 0, drag: null };

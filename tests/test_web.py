@@ -86,6 +86,10 @@ class WebTests(unittest.TestCase):
             info = summarize_images("pack", [image], set(), set())
             self.assertEqual(info["scan"], "done")
             self.assertEqual(info["sort"], "none")
+            bare = folder / "b.jpg"
+            bare.write_bytes(b"jpg")
+            info = summarize_images("pack", [bare], {"pack/b.jpg"}, set(), base)
+            self.assertEqual(info["scan"], "done")
             info = summarize_images("pack", [image], set(), {str(image.resolve())})
             self.assertEqual(info["sort"], "done")
             paths, error = absolute_folders(["pack"], base)
