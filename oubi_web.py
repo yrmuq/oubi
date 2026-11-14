@@ -24,7 +24,13 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 SORTED_LIST = "/data/sorted.txt"
 
 def page_bytes():
-    return PAGE_PATH.read_bytes()
+    items = [
+        {"path": name, "name": "Картинки" if name == "" else name, "scan": "none", "sort": "none"}
+        for name in folder_names()
+    ]
+    payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
+    html = PAGE_PATH.read_text(encoding="utf-8").replace("FOLDERS_JSON", payload, 1)
+    return html.encode()
 
 
 def mark(done, total):
@@ -85,7 +91,8 @@ def folder_names(root=IMAGES):
         return []
     try:
         children = [path for path in base.iterdir() if path.is_dir() and not path.name.startswith(".")]
-    except OSError:
+    except OSError as error:
+        print(f"Сейчас: не читается {root}: {error}", flush=True)
         return []
     children.sort(key=lambda path: path.name.lower())
     if children:
@@ -647,6 +654,13 @@ def main():
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     threading.Thread(target=app.download, daemon=True).start()
     print(f"Сейчас: страница на порту {port}.", flush=True)
+    names = folder_names()
+    if not names:
+        print("Сейчас: в /images папок не видно.", flush=True)
+    elif names == [""]:
+        print("Сейчас: в /images нет вложенных папок, слева одна общая.", flush=True)
+    else:
+        print(f"Сейчас: в /images папок {len(names)}.", flush=True)
     server.serve_forever()
 
 
