@@ -87,6 +87,29 @@ def write_theme(value, path=THEME_PATH):
 
 
 LAYOUT_KEYS = ("left", "mid", "right", "preview", "genres", "info", "log")
+BLOCK_NAMES = ("buttons", "folders", "progress", "preview", "genres", "info", "log")
+PANEL_NAMES = ("left", "mid", "right")
+
+
+def clean_blocks(value):
+    if not isinstance(value, dict):
+        return None
+    seen = []
+    clean = {}
+    for panel in PANEL_NAMES:
+        items = value.get(panel)
+        if not isinstance(items, list):
+            return None
+        names = []
+        for item in items:
+            if not isinstance(item, str) or item not in BLOCK_NAMES or item in seen:
+                return None
+            seen.append(item)
+            names.append(item)
+        clean[panel] = names
+    if len(seen) != len(BLOCK_NAMES):
+        return None
+    return clean
 
 
 def read_layout(path=LAYOUT_PATH):
@@ -101,6 +124,9 @@ def read_layout(path=LAYOUT_PATH):
         value = data.get(key)
         if isinstance(value, (int, float)) and 40 <= float(value) <= 8000:
             clean[key] = int(value)
+    blocks = clean_blocks(data.get("blocks"))
+    if blocks:
+        clean["blocks"] = blocks
     return clean
 
 
@@ -115,6 +141,11 @@ def write_layout(values, path=LAYOUT_PATH):
         if not isinstance(value, (int, float)) or not 40 <= float(value) <= 8000:
             return False
         current[key] = int(value)
+    if "blocks" in values:
+        blocks = clean_blocks(values.get("blocks"))
+        if not blocks:
+            return False
+        current["blocks"] = blocks
     file = Path(path)
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(json.dumps(current), encoding="utf-8")

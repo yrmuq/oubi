@@ -161,6 +161,15 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(read_layout(path), {"left": 320, "mid": 400})
             self.assertFalse(write_layout({"left": 10}, path))
             self.assertEqual(read_layout(path)["left"], 320)
+            order = {
+                "left": ["log"],
+                "mid": ["buttons", "folders", "progress"],
+                "right": ["preview", "genres", "info"],
+            }
+            self.assertTrue(write_layout({"blocks": order}, path))
+            self.assertEqual(read_layout(path)["blocks"], order)
+            self.assertFalse(write_layout({"blocks": {"left": ["log"]}}, path))
+            self.assertEqual(read_layout(path)["blocks"]["left"], ["log"])
 
     def test_images_with_tag(self):
         import tempfile

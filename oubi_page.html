@@ -71,7 +71,7 @@ button { font: inherit; color: #fff; background: var(--btn); border: 0; border-r
 button.secondary { background: var(--btn-2); color: var(--btn-2-text); }
 button.danger { background: var(--danger); color: #fff; }
 button:disabled { opacity: 0.45; cursor: default; }
-#folders { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 40px; margin-left: 24px; padding: 4px; }
+#folders { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 16px; margin-left: 16px; padding: 4px; }
 .folder { width: 104px; background: transparent; color: inherit; border: 2px solid transparent; border-radius: 8px; padding: 4px; box-sizing: border-box; }
 .folder .icon { width: 72px; height: 56px; margin: 0 auto 6px; position: relative; background: none; border: 0; }
 .folder .icon svg { width: 100%; height: 100%; display: block; }
@@ -90,12 +90,22 @@ button:disabled { opacity: 0.45; cursor: default; }
 .split-v::after, .split-h::after { content: ""; position: absolute; }
 .split-v::after { left: -6px; right: -6px; top: 0; bottom: 0; }
 .split-h::after { left: 8px; right: 8px; top: -6px; bottom: -6px; }
-.step { margin-top: auto; }
+.step { margin: 0; }
 .bar { height: 10px; background: var(--bar); border-radius: 99px; overflow: hidden; }
 .bar > div { height: 100%; width: 0; background: var(--fill); }
 .detail { color: var(--muted); min-height: 1.2em; }
-.mid { position: relative; align-items: stretch; text-align: center; gap: 0; display: grid; grid-template-rows: minmax(0, 1fr) 8px minmax(72px, 0.35fr); }
-#preview { min-height: 0; display: flex; flex-direction: column; }
+.mid { position: relative; text-align: center; gap: 8px; display: flex; flex-direction: column; }
+.block { min-width: 0; min-height: 0; }
+.block.grow { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; }
+body.arrange .block { outline: 1px dashed var(--pick); cursor: grab; border-radius: 8px; }
+body.arrange .block * { pointer-events: none; }
+.block.dragging { opacity: 0.4; }
+.block.drop-before { box-shadow: inset 0 3px 0 var(--pick); }
+.block.drop-after { box-shadow: inset 0 -3px 0 var(--pick); }
+.head-tools { display: flex; align-items: center; gap: 8px; }
+#arrange { width: 32px; height: 32px; padding: 0; background: var(--btn-2); color: var(--text); }
+#arrange.on { background: var(--pick); color: #111; }
+#preview { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 #shot { width: 100%; flex: 1 1 auto; min-height: 80px; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
 #switch { position: relative; width: 100%; height: 32px; flex: 0 0 32px; }
 #prev, #next { position: absolute; top: 0; z-index: 2; background: transparent; color: var(--text); font-size: 22px; }
@@ -104,7 +114,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 #name { position: absolute; left: 44px; right: 44px; top: 4px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #who { margin: 0; min-height: 1.2em; font-size: 22px; font-weight: 700; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
-#genre-row { display: flex; flex-wrap: wrap; gap: 8px 16px; width: 100%; min-height: 0; overflow: auto; align-items: flex-start; align-content: flex-start; }
+#genre-row { display: flex; flex-wrap: wrap; gap: 8px 16px; width: 100%; flex: 1; min-height: 0; overflow: auto; align-items: flex-start; align-content: flex-start; }
 .genre-slot { display: flex; gap: 6px; align-items: center; flex: 1 1 180px; max-width: 280px; min-width: 0; overflow: hidden; }
 .genre-handle, .genre-pin { width: 22px; height: 28px; padding: 0; border-radius: 6px; flex: 0 0 22px; box-sizing: border-box; }
 .genre-handle { cursor: grab; color: #111; }
@@ -126,8 +136,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 .genre-8, .genre-handle.genre-8 { background: #f3e7a1; }
 .genre-9, .genre-handle.genre-9 { background: #d7c4b0; }
 .genre-10, .genre-handle.genre-10 { background: #d5dbe3; }
-#right { padding: 0; display: grid; grid-template-rows: minmax(0, 1.2fr) 8px minmax(88px, 0.8fr); }
-#info { min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+#right { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+#info { min-height: 0; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; text-align: left; }
 #right .split-h { margin: 0; }
 .genre-11, .genre-handle.genre-11 { background: #c9e8a9; }
 .genre-12, .genre-handle.genre-12 { background: #f7c6b2; }
@@ -139,7 +149,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .genre-18, .genre-handle.genre-18 { background: #d4c6f2; }
 .genre-19, .genre-handle.genre-19 { background: #ead9a4; }
 .genre-20, .genre-handle.genre-20 { background: #c8d5dc; }
-.log { margin: 0; border: 0; background: #000; color: #e6e6e6; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; min-height: 0; }
+.log { margin: 0; border: 0; flex: 1; min-height: 0; background: #000; color: #e6e6e6; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
 #zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
 #zoom[hidden] { display: none; }
 #zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; color: #fff; }
@@ -167,47 +177,62 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
 <body>
 <header class="topbar">
   <span class="brand">oubi</span>
-  <div class="themes">
+  <div class="head-tools">
+    <button id="arrange" type="button" title="Перетащить блоки">✎</button>
+    <div class="themes">
     <button type="button" data-theme="light">светлая</button>
     <button type="button" data-theme="dark">тёмная</button>
     <button type="button" data-theme="auto">auto</button>
+    </div>
   </div>
 </header>
 <div class="top">
   <section class="pane" id="left">
-    <div class="buttons">
-      <button id="tag">Опознать</button>
-      <button id="sort">Сортировать</button>
-      <button id="plan" class="secondary">План сортировки</button>
-      <button id="stop" class="danger" disabled>Остановить</button>
-      <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
+    <div class="block" data-block="buttons">
+      <div class="buttons">
+        <button id="tag">Опознать</button>
+        <button id="sort">Сортировать</button>
+        <button id="plan" class="secondary">План сортировки</button>
+        <button id="stop" class="danger" disabled>Остановить</button>
+        <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
+      </div>
     </div>
-    <div id="folders"></div>
-    <p id="step" class="step">Открываю…</p>
-    <div class="bar"><div id="fill"></div></div>
-    <p id="detail" class="detail"></p>
+    <div class="block grow" data-block="folders">
+      <div id="folders"></div>
+    </div>
+    <div class="block" data-block="progress">
+      <p id="step" class="step">Открываю…</p>
+      <div class="bar"><div id="fill"></div></div>
+      <p id="detail" class="detail"></p>
+    </div>
   </section>
   <div class="split split-v" id="split-left"></div>
   <section class="pane mid" id="mid">
-    <div id="preview">
-      <img id="shot" alt="">
-      <div id="switch">
-        <button id="prev" type="button">❮</button>
-        <span id="name"></span>
-        <button id="next" type="button">❯</button>
+    <div class="block grow" data-block="preview">
+      <div id="preview">
+        <img id="shot" alt="">
+        <div id="switch">
+          <button id="prev" type="button">❮</button>
+          <span id="name"></span>
+          <button id="next" type="button">❯</button>
+        </div>
       </div>
     </div>
-    <div class="split split-h" id="split-preview"></div>
-    <div id="genre-row"></div>
+    <div class="block grow" data-block="genres">
+      <div id="genre-row"></div>
+    </div>
   </section>
   <div class="split split-v" id="split-mid"></div>
   <section class="pane" id="right">
-    <div id="info">
-      <p id="who"></p>
-      <p id="tags"></p>
+    <div class="block grow" data-block="info">
+      <div id="info">
+        <p id="who"></p>
+        <p id="tags"></p>
+      </div>
     </div>
-    <div class="split split-h" id="split-info"></div>
-    <pre id="log" class="log"></pre>
+    <div class="block grow" data-block="log">
+      <pre id="log" class="log"></pre>
+    </div>
   </section>
 </div>
 <div id="zoom" hidden>
@@ -425,14 +450,6 @@ function dragSplit(which, event) {
       panes.left = start.left;
       panes.mid = next;
       panes.right = pair - next;
-    } else if (which === "preview") {
-      const pair = start.preview + start.genres;
-      const next = Math.min(pair - 56, Math.max(80, start.preview + (ev.clientY - start.y)));
-      mid.style.gridTemplateRows = next + "px 8px " + (pair - next) + "px";
-    } else {
-      const pair = start.info + start.log;
-      const next = Math.min(pair - 72, Math.max(72, start.info + (ev.clientY - start.y)));
-      right.style.gridTemplateRows = next + "px 8px " + (pair - next) + "px";
     }
     paintPanes();
   }
@@ -445,19 +462,33 @@ function dragSplit(which, event) {
   window.addEventListener("pointerup", up);
 }
 
+function placeBlocks(order) {
+  if (!order || !Array.isArray(order.left) || !Array.isArray(order.mid) || !Array.isArray(order.right)) return;
+  for (const panel of ["left", "mid", "right"]) {
+    const host = document.getElementById(panel);
+    for (const name of order[panel]) {
+      const block = document.querySelector('.block[data-block="' + name + '"]');
+      if (block) host.appendChild(block);
+    }
+  }
+}
+
 function applyLayout() {
+  placeBlocks(layout.blocks);
   if (layout.left && layout.mid && layout.right) {
     panes.left = layout.left;
     panes.mid = layout.mid;
     panes.right = layout.right;
     paintPanes();
   }
-  if (layout.preview && layout.genres) {
-    document.getElementById("mid").style.gridTemplateRows = layout.preview + "px 8px " + layout.genres + "px";
+}
+
+function blockOrder() {
+  const order = {};
+  for (const id of ["left", "mid", "right"]) {
+    order[id] = [...document.getElementById(id).querySelectorAll(":scope > .block")].map((block) => block.dataset.block);
   }
-  if (layout.info && layout.log) {
-    document.getElementById("right").style.gridTemplateRows = layout.info + "px 8px " + layout.log + "px";
-  }
+  return order;
 }
 
 function saveLayout() {
@@ -469,6 +500,7 @@ function saveLayout() {
     genres: Math.round(document.getElementById("genre-row").getBoundingClientRect().height),
     info: Math.round(document.getElementById("info").getBoundingClientRect().height),
     log: Math.round(document.getElementById("log").getBoundingClientRect().height),
+    blocks: blockOrder(),
   };
   fetch("/api/layout", {
     method: "POST",
@@ -636,14 +668,73 @@ function renderGenreRow(focusAt) {
 }
 renderGenreRow();
 applyLayout();
+let arranging = false;
+let dragBlock = null;
+let dropAt = null;
+function clearDrop() {
+  for (const item of document.querySelectorAll(".drop-before, .drop-after")) {
+    item.classList.remove("drop-before", "drop-after");
+  }
+}
+function arrangeMove(event) {
+  clearDrop();
+  dropAt = null;
+  const hit = document.elementFromPoint(event.clientX, event.clientY);
+  const panel = hit && hit.closest(".pane");
+  if (!panel || !dragBlock) return;
+  const blocks = [...panel.querySelectorAll(":scope > .block")].filter((item) => item !== dragBlock);
+  let before = null;
+  let after = null;
+  for (const item of blocks) {
+    const box = item.getBoundingClientRect();
+    if (event.clientY < box.top + box.height / 2) {
+      before = item;
+      break;
+    }
+    after = item;
+  }
+  if (before) before.classList.add("drop-before");
+  else if (after) after.classList.add("drop-after");
+  dropAt = { panel, before };
+}
+function arrangeUp() {
+  if (dragBlock && dropAt) {
+    if (dropAt.before) dropAt.panel.insertBefore(dragBlock, dropAt.before);
+    else dropAt.panel.appendChild(dragBlock);
+  }
+  if (dragBlock) dragBlock.classList.remove("dragging");
+  clearDrop();
+  dragBlock = null;
+  dropAt = null;
+}
+for (const block of document.querySelectorAll(".block")) {
+  block.onpointerdown = (event) => {
+    if (!arranging || event.button !== 0) return;
+    event.preventDefault();
+    dragBlock = block;
+    block.classList.add("dragging");
+    block.setPointerCapture(event.pointerId);
+    block.onpointermove = arrangeMove;
+    block.onpointerup = (upEvent) => {
+      block.onpointermove = null;
+      block.onpointerup = null;
+      arrangeUp();
+      if (block.hasPointerCapture(upEvent.pointerId)) block.releasePointerCapture(upEvent.pointerId);
+    };
+  };
+}
+document.getElementById("arrange").onclick = () => {
+  arranging = !arranging;
+  document.body.classList.toggle("arrange", arranging);
+  document.getElementById("arrange").classList.toggle("on", arranging);
+  if (!arranging) saveLayout();
+};
 document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };
 document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
 document.getElementById("split-left").onpointerdown = (event) => dragSplit("left", event);
 document.getElementById("split-mid").onpointerdown = (event) => dragSplit("mid", event);
-document.getElementById("split-preview").onpointerdown = (event) => dragSplit("preview", event);
-document.getElementById("split-info").onpointerdown = (event) => dragSplit("info", event);
 const zoom = document.getElementById("zoom");
 const zoomImg = document.getElementById("zoom-img");
 const view = { scale: 1, x: 0, y: 0, drag: null };
