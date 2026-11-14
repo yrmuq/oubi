@@ -103,13 +103,25 @@ button:disabled { opacity: 0.45; cursor: default; }
 #name { display: block; width: 100%; padding: 0 52px; box-sizing: border-box; }
 #who { margin: 0; min-height: 1.2em; font-size: 18px; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
-#genre-row { display: flex; gap: 6px; width: 100%; }
-#genre-row label { flex: 1; display: flex; gap: 4px; align-items: center; color: var(--muted); font-size: 13px; }
-#genre-row input { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+#genre-row { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; align-items: center; }
+.genre-slot { display: flex; gap: 4px; align-items: center; flex: 1 1 150px; max-width: 240px; min-width: 0; }
+.genre-handle { width: 22px; height: 28px; padding: 0; border-radius: 6px; cursor: grab; color: #111; flex: 0 0 auto; }
+.genre-field { position: relative; flex: 1; min-width: 0; }
+.genre-field input, .genre-ghost { font: inherit; padding: 4px 6px; }
+.genre-ghost { position: absolute; inset: 0; color: var(--muted); pointer-events: none; white-space: pre; overflow: hidden; border: 1px solid transparent; }
+.genre-field input { position: relative; width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
+#genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
 .genre { border-radius: 4px; padding: 0 3px; color: #111; }
-.genre-1 { background: #ffb4b4; }
-.genre-2 { background: #b9d0ff; }
-.genre-3 { background: #b7efc9; }
+.genre-1, .genre-handle.genre-1 { background: #ffb4b4; }
+.genre-2, .genre-handle.genre-2 { background: #b9d0ff; }
+.genre-3, .genre-handle.genre-3 { background: #b7efc9; }
+.genre-4, .genre-handle.genre-4 { background: #ffd39a; }
+.genre-5, .genre-handle.genre-5 { background: #e0c2ff; }
+.genre-6, .genre-handle.genre-6 { background: #b8efe8; }
+.genre-7, .genre-handle.genre-7 { background: #ffc4e0; }
+.genre-8, .genre-handle.genre-8 { background: #f3e7a1; }
+.genre-9, .genre-handle.genre-9 { background: #d7c4b0; }
+.genre-10, .genre-handle.genre-10 { background: #d5dbe3; }
 .out { text-align: left; }
 .out button.file { display: block; width: 100%; text-align: left; background: transparent; color: inherit; border-radius: 0; border: 0; }
 .log { margin: 0 8px 8px; border: 1px solid var(--line); background: var(--pane); overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; min-height: 0; }
@@ -169,11 +181,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     </div>
     <span id="name"></span>
     <p id="who"></p>
-    <div id="genre-row">
-      <label>1 <input id="genre-1" spellcheck="false"></label>
-      <label>2 <input id="genre-2" spellcheck="false"></label>
-      <label>3 <input id="genre-3" spellcheck="false"></label>
-    </div>
+    <div id="genre-row"></div>
     <p id="tags"></p>
   </section>
   <div class="split split-v" id="split-mid"></div>
@@ -289,7 +297,7 @@ function paintTags(text) {
     const span = document.createElement("span");
     const token = part.trim().toLowerCase();
     const rank = genres.findIndex((item) => item && item.toLowerCase() === token);
-    if (rank >= 0 && rank < 3) span.className = "genre genre-" + (rank + 1);
+    if (rank >= 0 && rank < 10) span.className = "genre genre-" + (rank + 1);
     span.textContent = part;
     box.append(span);
   });
@@ -314,6 +322,7 @@ async function showImage(root, path) {
   document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
   tagText = data.text || "";
   paintTags(tagText);
+  refreshGenreGhosts();
 }
 
 async function loadOutput() {
@@ -468,23 +477,118 @@ for (const button of document.querySelectorAll(".themes button")) {
   };
 }
 for (const id of ["tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
+if (!Array.isArray(genres) || !genres.length) genres = [""];
 let genreTimer = 0;
-for (let number = 1; number <= 3; number += 1) {
-  const input = document.getElementById("genre-" + number);
-  input.value = genres[number - 1] || "";
-  input.oninput = () => {
-    genres[number - 1] = input.value.trim();
-    paintTags(tagText);
-    clearTimeout(genreTimer);
-    genreTimer = setTimeout(() => {
-      fetch("/api/genres", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ genres: genres.slice(0, 3) }),
-      });
-    }, 300);
-  };
+let genreDrag = -1;
+
+function suggestGenre(prefix) {
+  const typed = String(prefix || "").trim().toLowerCase();
+  if (!typed) return "";
+  const tags = String(tagText || "").split(",").map((part) => part.trim()).filter(Boolean);
+  return tags.find((tag) => {
+    const folded = tag.toLowerCase();
+    return folded.startsWith(typed) && folded !== typed;
+  }) || "";
 }
+
+function saveGenres() {
+  clearTimeout(genreTimer);
+  genreTimer = setTimeout(() => {
+    fetch("/api/genres", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ genres: genres.slice(0, 10) }),
+    });
+  }, 300);
+}
+
+function refreshGenreGhosts() {
+  for (const input of document.querySelectorAll(".genre-field input")) {
+    const ghost = input.parentElement.querySelector(".genre-ghost");
+    const hint = suggestGenre(input.value);
+    ghost.textContent = hint || "";
+  }
+}
+
+function renderGenreRow(focusAt) {
+  const row = document.getElementById("genre-row");
+  row.innerHTML = "";
+  genres.forEach((value, index) => {
+    const slot = document.createElement("div");
+    slot.className = "genre-slot";
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "genre-handle genre-" + (index + 1);
+    handle.textContent = String(index + 1);
+    handle.draggable = true;
+    handle.ondragstart = (event) => {
+      genreDrag = index;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+    };
+    handle.ondragend = () => { genreDrag = -1; };
+    slot.ondragover = (event) => event.preventDefault();
+    slot.ondrop = (event) => {
+      event.preventDefault();
+      const from = genreDrag;
+      if (from < 0 || from === index) return;
+      const [moved] = genres.splice(from, 1);
+      genres.splice(index, 0, moved);
+      genreDrag = -1;
+      renderGenreRow(index);
+      paintTags(tagText);
+      saveGenres();
+    };
+    const field = document.createElement("div");
+    field.className = "genre-field";
+    const ghost = document.createElement("span");
+    ghost.className = "genre-ghost";
+    const input = document.createElement("input");
+    input.spellcheck = false;
+    input.value = value || "";
+    const hint = suggestGenre(input.value);
+    ghost.textContent = hint || "";
+    input.oninput = () => {
+      genres[index] = input.value.trim();
+      const next = suggestGenre(input.value);
+      ghost.textContent = next || "";
+      paintTags(tagText);
+      saveGenres();
+    };
+    input.onkeydown = (event) => {
+      if (event.key !== " " || event.ctrlKey || event.altKey || event.metaKey) return;
+      const next = suggestGenre(input.value);
+      if (!next) return;
+      event.preventDefault();
+      input.value = next;
+      genres[index] = next;
+      ghost.textContent = "";
+      paintTags(tagText);
+      saveGenres();
+    };
+    field.append(ghost, input);
+    slot.append(handle, field);
+    row.append(slot);
+  });
+  if (genres.length < 10) {
+    const add = document.createElement("button");
+    add.type = "button";
+    add.id = "genre-add";
+    add.textContent = "+";
+    add.onclick = () => {
+      if (genres.length >= 10) return;
+      genres.push("");
+      renderGenreRow(genres.length - 1);
+    };
+    row.append(add);
+  }
+  if (focusAt !== undefined) {
+    const inputs = row.querySelectorAll(".genre-field input");
+    const target = inputs[focusAt];
+    if (target) target.focus();
+  }
+}
+renderGenreRow();
 document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };

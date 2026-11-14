@@ -20,6 +20,7 @@ CSV_PATH = "/data/tags.csv"
 GENDERS_PATH = "/data/genders.csv"
 THEME_PATH = "/data/theme"
 GENRES_PATH = "/data/genres.txt"
+MAX_GENRES = 10
 THEMES = {"light", "dark", "auto"}
 MODES = {"all", "tag", "sort", "plan"}
 PAGE_PATH = HERE / "oubi_page.html"
@@ -29,7 +30,7 @@ SORTED_LIST = "/data/sorted.txt"
 def page_bytes(items, theme="auto", genres=None):
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
     chosen = theme if theme in THEMES else "auto"
-    genre_payload = json.dumps(list(genres or ["", "", ""])[:3], ensure_ascii=False).replace("<", "\\u003c")
+    genre_payload = json.dumps(list(genres or [])[:MAX_GENRES], ensure_ascii=False).replace("<", "\\u003c")
     html = PAGE_PATH.read_text(encoding="utf-8")
     html = html.replace("FOLDERS_JSON", payload, 1).replace("__OUBI_THEME__", chosen, 1)
     html = html.replace("__OUBI_GENRES__", genre_payload, 1)
@@ -42,27 +43,26 @@ def read_genres(path=GENRES_PATH):
     except OSError:
         lines = None
     if lines is not None:
-        picked = [line.strip() for line in lines[:3]]
-        while len(picked) < 3:
-            picked.append("")
-        if any(picked):
+        picked = [line.strip()[:80] for line in lines[:MAX_GENRES]]
+        while picked and not picked[-1]:
+            picked.pop()
+        if picked:
             return picked
-    return [
-        os.environ.get("OUBI_GENRE_1", "").strip(),
-        os.environ.get("OUBI_GENRE_2", "").strip(),
-        os.environ.get("OUBI_GENRE_3", "").strip(),
-    ]
+    picked = [os.environ.get(f"OUBI_GENRE_{number}", "").strip() for number in range(1, MAX_GENRES + 1)]
+    while picked and not picked[-1]:
+        picked.pop()
+    return picked
 
 
 def write_genres(values, path=GENRES_PATH):
-    if not isinstance(values, list):
+    if not isinstance(values, list) or len(values) > MAX_GENRES:
         return False
-    cleaned = [str(value or "").strip().replace("\n", "")[:80] for value in values[:3]]
-    while len(cleaned) < 3:
-        cleaned.append("")
+    cleaned = [str(value or "").strip().replace("\n", "")[:80] for value in values]
+    while cleaned and not cleaned[-1]:
+        cleaned.pop()
     file = Path(path)
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text("\n".join(cleaned) + "\n", encoding="utf-8")
+    file.write_text("\n".join(cleaned) + ("\n" if cleaned else ""), encoding="utf-8")
     return True
 
 
