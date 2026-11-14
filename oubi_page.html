@@ -32,9 +32,10 @@ button:disabled { opacity: 0.45; cursor: default; }
 .detail { color: #aaa; min-height: 1.2em; }
 .mid { position: relative; align-items: center; text-align: center; gap: 12px; }
 #shot { width: 100%; height: 60%; min-height: 208px; flex: 0 0 60%; object-fit: contain; background: #000; border: 1px solid #ddd; cursor: zoom-in; }
-#prev, #next { position: absolute; top: 68%; z-index: 2; background: transparent; font-size: 22px; }
-#prev { left: 10px; }
-#next { right: 10px; }
+#switch { position: relative; width: 100%; height: 32px; flex: 0 0 32px; }
+#prev, #next { position: absolute; top: 0; z-index: 2; background: transparent; font-size: 22px; }
+#prev { left: 0; }
+#next { right: 0; }
 #name { display: block; width: 100%; padding: 0 52px; box-sizing: border-box; }
 #who { margin: 0; min-height: 1.2em; font-size: 18px; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
@@ -66,9 +67,11 @@ button:disabled { opacity: 0.45; cursor: default; }
   </section>
   <section class="pane mid">
     <img id="shot" alt="">
+    <div id="switch">
+      <button id="prev" type="button">❮</button>
+      <button id="next" type="button">❯</button>
+    </div>
     <span id="name"></span>
-    <button id="prev" type="button">❮</button>
-    <button id="next" type="button">❯</button>
     <p id="who"></p>
     <p id="tags"></p>
   </section>
@@ -271,7 +274,20 @@ document.getElementById("shot").onclick = () => {
 };
 document.getElementById("zoom-close").onclick = closeZoom;
 document.addEventListener("keydown", (event) => {
+  if (zoom.hidden) return;
   if (event.key === "Escape") closeZoom();
+  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+    event.preventDefault();
+    if (!reel.length) return;
+    follow = false;
+    showAt(reelAt + (event.key === "ArrowRight" ? 1 : -1));
+    zoomImg.src = document.getElementById("shot").src;
+    view.scale = 1;
+    view.x = 0;
+    view.y = 0;
+    view.drag = null;
+    paintZoom();
+  }
 });
 zoom.addEventListener("wheel", (event) => {
   event.preventDefault();
