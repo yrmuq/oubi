@@ -205,15 +205,48 @@ def recent_tagged(rels, limit=40):
     return [item for _, item in found[-limit:]]
 
 
-def read_tags(rel):
+def first_character(value):
+    return (value or "").split(",")[0].strip()
+
+
+def character_index(path=CSV_PATH):
+    file = Path(path)
+    if not file.is_file():
+        return {}
+    stat = file.stat()
+    cached = getattr(character_index, "cache", None)
+    if cached and cached["mtime"] == stat.st_mtime and cached["size"] == stat.st_size:
+        return cached["rows"]
+    import csv
+    csv.field_size_limit(10**9)
+    rows = {}
+    try:
+        handle = file.open(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    try:
+        for row in csv.DictReader(handle):
+            name = (row.get("file") or "").strip()
+            if name:
+                rows[name] = first_character(row.get("character"))
+    except (OSError, csv.Error):
+        return {}
+    finally:
+        handle.close()
+    character_index.cache = {"mtime": stat.st_mtime, "size": stat.st_size, "rows": rows}
+    return rows
+
+
+def read_info(rel):
     base = Path(IMAGES).resolve()
     image = resolve_under(base, rel)
+    text = ""
     txt = image.with_suffix(".txt")
-    if not txt.is_file():
-        return ""
-    if base not in txt.resolve().parents and txt.resolve() != base:
-        return ""
-    return txt.read_text(encoding="utf-8", errors="replace")[:4000]
+    if txt.is_file() and (base in txt.resolve().parents or txt.resolve() == base):
+        text = txt.read_text(encoding="utf-8", errors="replace")[:4000]
+    names = character_index()
+    character = names.get(str(image)) or names.get(str(image.resolve())) or ""
+    return {"text": text, "character": character}
 
 
 def parse_progress(line):
@@ -595,7 +628,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/tags":
             try:
-                self._send(200, {"text": read_tags(query.get("path", [""])[0])})
+                self._send(200, read_info(query.get("path", [""])[0]))
             except ValueError:
                 self._send(404, {"error": "нет файла"})
             return

@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from oubi_web import (
     absolute_folders,
+    first_character,
     flag_on,
     folder_names,
     mark,
@@ -67,6 +68,8 @@ class WebTests(unittest.TestCase):
         self.assertEqual(mark(0, 4), "none")
         self.assertEqual(mark(1, 4), "part")
         self.assertEqual(mark(4, 4), "done")
+        self.assertEqual(first_character("hatsune_miku, other"), "hatsune_miku")
+        self.assertEqual(first_character(""), "")
         self.assertTrue(under_roots("/images/a/x.jpg", ["/images/a"]))
         self.assertFalse(under_roots("/images/ab/x.jpg", ["/images/a"]))
         import tempfile

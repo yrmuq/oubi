@@ -30,15 +30,22 @@ button:disabled { opacity: 0.45; cursor: default; }
 .bar { height: 10px; background: #2a2a2a; border-radius: 99px; overflow: hidden; }
 .bar > div { height: 100%; width: 0; background: #e7b341; }
 .detail { color: #aaa; min-height: 1.2em; }
-.mid { align-items: center; text-align: center; gap: 12px; }
-#shot { width: min(100%, 420px); height: 46%; min-height: 160px; border: 1px solid #ddd; object-fit: contain; background: #000; }
-.nav { display: flex; align-items: center; justify-content: center; gap: 16px; }
-.nav button { font-size: 22px; background: transparent; }
-#name { min-width: 8em; }
-#tags { white-space: pre-wrap; }
+.mid { position: relative; align-items: center; text-align: center; gap: 12px; }
+#shot { width: 100%; height: 60%; min-height: 208px; flex: 0 0 60%; object-fit: contain; background: #000; border: 1px solid #ddd; cursor: zoom-in; }
+#prev, #next { position: absolute; top: 68%; z-index: 2; background: transparent; font-size: 22px; }
+#prev { left: 10px; }
+#next { right: 10px; }
+#name { display: block; width: 100%; padding: 0 52px; box-sizing: border-box; }
+#who { margin: 0; min-height: 1.2em; font-size: 18px; }
+#tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
 .out { text-align: left; }
 .out button.file { display: block; width: 100%; text-align: left; background: transparent; border-radius: 0; border: 0; }
 .log { margin: 0 8px 8px; border: 1px solid #d7d7d7; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
+#zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
+#zoom[hidden] { display: none; }
+#zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; }
+#zoom-img { max-width: 100%; max-height: 100%; transform-origin: center center; user-select: none; }
+#zoom-img.zoomed { cursor: grab; }
 </style>
 </head>
 <body>
@@ -59,11 +66,10 @@ button:disabled { opacity: 0.45; cursor: default; }
   </section>
   <section class="pane mid">
     <img id="shot" alt="">
-    <div class="nav">
-      <button id="prev" type="button">❮</button>
-      <span id="name"></span>
-      <button id="next" type="button">❯</button>
-    </div>
+    <span id="name"></span>
+    <button id="prev" type="button">❮</button>
+    <button id="next" type="button">❯</button>
+    <p id="who"></p>
     <p id="tags"></p>
   </section>
   <section class="pane">
@@ -71,6 +77,10 @@ button:disabled { opacity: 0.45; cursor: default; }
   </section>
 </div>
 <pre id="log" class="log"></pre>
+<div id="zoom" hidden>
+  <button id="zoom-close" type="button">×</button>
+  <img id="zoom-img" alt="">
+</div>
 <script>
 const selected = new Set();
 let folders = FOLDERS_JSON;
@@ -151,11 +161,11 @@ async function showImage(root, path) {
   shown = root + ":" + path;
   document.getElementById("shot").src = "/api/file?root=" + root + "&path=" + encodeURIComponent(path);
   document.getElementById("name").textContent = fileName(path);
-  if (root !== "images") {
-    document.getElementById("tags").textContent = "Файл из разложенных папок.";
-    return;
-  }
+  document.getElementById("who").textContent = "";
+  document.getElementById("tags").textContent = "";
+  if (root !== "images") return;
   const data = await (await fetch("/api/tags?path=" + encodeURIComponent(path))).json();
+  document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
   document.getElementById("tags").textContent = data.text || "";
 }
 
@@ -238,6 +248,53 @@ document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "PO
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };
 document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
+const zoom = document.getElementById("zoom");
+const zoomImg = document.getElementById("zoom-img");
+const view = { scale: 1, x: 0, y: 0, drag: null };
+function paintZoom() {
+  zoomImg.style.transform = "translate(" + view.x + "px, " + view.y + "px) scale(" + view.scale + ")";
+  zoomImg.classList.toggle("zoomed", view.scale > 1);
+}
+function closeZoom() {
+  zoom.hidden = true;
+  view.drag = null;
+}
+document.getElementById("shot").onclick = () => {
+  if (!document.getElementById("shot").src) return;
+  view.scale = 1;
+  view.x = 0;
+  view.y = 0;
+  view.drag = null;
+  zoomImg.src = document.getElementById("shot").src;
+  zoom.hidden = false;
+  paintZoom();
+};
+document.getElementById("zoom-close").onclick = closeZoom;
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeZoom();
+});
+zoom.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  const next = view.scale * (event.deltaY < 0 ? 1.12 : 1 / 1.12);
+  view.scale = Math.min(8, Math.max(1, next));
+  if (view.scale === 1) {
+    view.x = 0;
+    view.y = 0;
+  }
+  paintZoom();
+}, { passive: false });
+zoomImg.addEventListener("mousedown", (event) => {
+  if (event.button !== 0 || view.scale <= 1) return;
+  view.drag = { x: event.clientX, y: event.clientY, ox: view.x, oy: view.y };
+  event.preventDefault();
+});
+window.addEventListener("mousemove", (event) => {
+  if (!view.drag) return;
+  view.x = view.drag.ox + event.clientX - view.drag.x;
+  view.y = view.drag.oy + event.clientY - view.drag.y;
+  paintZoom();
+});
+window.addEventListener("mouseup", () => { view.drag = null; });
 loadFolders();
 loadOutput();
 renderFolders();
