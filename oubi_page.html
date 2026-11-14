@@ -101,14 +101,14 @@ button:disabled { opacity: 0.45; cursor: default; }
 #prev, #next { position: absolute; top: 0; z-index: 2; background: transparent; color: var(--text); font-size: 22px; }
 #prev { left: 0; }
 #next { right: 0; }
-#name { display: block; width: 100%; box-sizing: border-box; word-break: break-word; }
-#who { margin: 0; min-height: 1.2em; font-size: 18px; }
+#name { position: absolute; left: 44px; right: 44px; top: 4px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#who { margin: 0; min-height: 1.2em; font-size: 22px; font-weight: 700; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
-#genre-row { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; min-height: 0; overflow: auto; align-items: flex-start; align-content: flex-start; }
-.genre-slot { display: flex; gap: 4px; align-items: center; flex: 1 1 150px; max-width: 240px; min-width: 0; }
+#genre-row { display: flex; flex-wrap: wrap; gap: 6px 14px; width: 100%; min-height: 0; overflow: auto; align-items: flex-start; align-content: flex-start; }
+.genre-slot { display: flex; gap: 6px; align-items: center; flex: 1 1 150px; max-width: 240px; min-width: 0; }
 .genre-handle { width: 22px; height: 28px; padding: 0; border-radius: 6px; cursor: grab; color: #111; flex: 0 0 auto; }
 .genre-field { position: relative; flex: 1; min-width: 0; }
-.genre-field input, .genre-ghost { font: inherit; padding: 4px 6px; }
+.genre-field input, .genre-ghost { font: inherit; padding: 4px 6px; box-sizing: border-box; }
 .genre-ghost { position: absolute; inset: 0; color: var(--muted); pointer-events: none; white-space: pre; overflow: hidden; border: 1px solid transparent; }
 .genre-field input { position: relative; width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
 #genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
@@ -190,6 +190,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <img id="shot" alt="">
       <div id="switch">
         <button id="prev" type="button">❮</button>
+        <span id="name"></span>
         <button id="next" type="button">❯</button>
       </div>
     </div>
@@ -199,7 +200,6 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   <div class="split split-v" id="split-mid"></div>
   <section class="pane" id="right">
     <div id="info">
-      <span id="name"></span>
       <p id="who"></p>
       <p id="tags"></p>
     </div>
