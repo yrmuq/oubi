@@ -62,11 +62,35 @@ def load_csv_paths(path=CSV_PATH):
     if not file.is_file():
         return found
     import csv
-    for row in csv.DictReader(file.open(encoding="utf-8")):
-        name = (row.get("file") or "").strip()
-        if name:
-            found.add(name)
+    csv.field_size_limit(10**9)
+    try:
+        handle = file.open(encoding="utf-8", errors="replace")
+    except OSError:
+        return found
+    try:
+        for row in csv.DictReader(handle):
+            name = (row.get("file") or "").strip()
+            if name:
+                found.add(name)
+    except (OSError, csv.Error):
+        return found
+    finally:
+        handle.close()
     return found
+
+
+def folder_names(root=IMAGES):
+    base = Path(root)
+    if not base.is_dir():
+        return []
+    try:
+        children = [path for path in base.iterdir() if path.is_dir() and not path.name.startswith(".")]
+    except OSError:
+        return []
+    children.sort(key=lambda path: path.name.lower())
+    if children:
+        return [path.name for path in children]
+    return [""]
 
 
 def summarize_images(rel, images, csv_paths, sorted_paths):
@@ -94,19 +118,24 @@ def images_under(folder):
 
 
 def source_folders(root=IMAGES):
-    base = Path(root)
-    if not base.is_dir():
+    names = folder_names(root)
+    if not names:
         return []
-    csv_paths = load_csv_paths()
-    sorted_paths = load_sorted_paths()
-    children = [path for path in base.iterdir() if path.is_dir() and not path.name.startswith(".")]
-    children.sort(key=lambda path: path.name.lower())
-    if not children:
-        return [summarize_images("", images_under(base), csv_paths, sorted_paths)]
-    return [
-        summarize_images(path.name, images_under(path), csv_paths, sorted_paths)
-        for path in children
-    ]
+    try:
+        csv_paths = load_csv_paths()
+        sorted_paths = load_sorted_paths()
+    except OSError:
+        csv_paths, sorted_paths = set(), set()
+    base = Path(root)
+    found = []
+    for name in names:
+        folder = base if name == "" else base / name
+        try:
+            images = images_under(folder)
+        except OSError:
+            images = []
+        found.append(summarize_images(name, images, csv_paths, sorted_paths))
+    return found
 
 
 def absolute_folders(rels, root=IMAGES):
@@ -324,6 +353,7 @@ class App:
         self.folders = []
         self.folder_cache = None
         self.folder_cached_at = 0.0
+        self.folder_counting = False
 
     def note(self, line, echo=True):
         text = line.strip()
@@ -355,17 +385,34 @@ class App:
             print(text, flush=True)
 
     def folders(self):
+        names = folder_names()
+        quick = [
+            {"path": name, "name": "Картинки" if name == "" else name, "scan": "none", "sort": "none", "total": 0}
+            for name in names
+        ]
         now = time.monotonic()
         with self.lock:
             cached = self.folder_cache
             cached_at = self.folder_cached_at
+            counting = getattr(self, "folder_counting", False)
         if cached is not None and now - cached_at < 8:
             return cached
-        found = source_folders()
+        if not counting:
+            with self.lock:
+                self.folder_counting = True
+            threading.Thread(target=self._count_folders, daemon=True).start()
+        return cached or quick
+
+    def _count_folders(self):
+        try:
+            found = source_folders()
+        except Exception:
+            found = None
         with self.lock:
-            self.folder_cache = found
-            self.folder_cached_at = now
-        return found
+            if found is not None:
+                self.folder_cache = found
+                self.folder_cached_at = time.monotonic()
+            self.folder_counting = False
 
     def status(self):
         with self.lock:

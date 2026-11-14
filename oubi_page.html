@@ -25,7 +25,6 @@ button:disabled { opacity: 0.45; cursor: default; }
 .badge.sort { right: 2px; }
 .badge.part { background: #e7b341; color: #111; }
 .badge.done { background: #3dba6a; color: #111; }
-.hint { flex: 1; display: grid; place-items: center; color: #eee; font-size: 20px; text-align: center; }
 .step { margin-top: auto; }
 .bar { height: 10px; background: #2a2a2a; border-radius: 99px; overflow: hidden; }
 .bar > div { height: 100%; width: 0; background: #e7b341; }
@@ -54,22 +53,20 @@ button:disabled { opacity: 0.45; cursor: default; }
       <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
     </div>
     <div id="folders"></div>
-    <p id="hint" class="hint">Нужно выбрать папки для работы</p>
     <p id="step" class="step">Открываю…</p>
     <div class="bar"><div id="fill"></div></div>
     <p id="detail" class="detail"></p>
   </section>
   <section class="pane mid">
-    <img id="shot" alt="Превью картинки, опознанной на прошлом шаге">
+    <img id="shot" alt="">
     <div class="nav">
       <button id="prev" type="button">❮</button>
-      <span id="name">название файла</span>
+      <span id="name"></span>
       <button id="next" type="button">❯</button>
     </div>
-    <p id="tags">Данные о опознавании</p>
+    <p id="tags"></p>
   </section>
   <section class="pane">
-    <h1>Здесь папки с файлами на выходе</h1>
     <div id="out" class="out"></div>
   </section>
 </div>
@@ -85,7 +82,7 @@ let shown = "";
 
 function fileName(path) {
   const parts = String(path || "").split("/");
-  return parts[parts.length - 1] || "название файла";
+  return parts[parts.length - 1] || "";
 }
 
 function badge(kind, state) {
@@ -108,18 +105,22 @@ function renderFolders() {
     button.onclick = () => {
       if (selected.has(folder.path)) selected.delete(folder.path);
       else selected.add(folder.path);
-      document.getElementById("hint").hidden = selected.size > 0;
       renderFolders();
       loadRecent();
     };
     box.appendChild(button);
   }
-  document.getElementById("hint").hidden = selected.size > 0;
 }
 
 async function loadFolders() {
-  folders = await (await fetch("/api/folders")).json();
-  renderFolders();
+  try {
+    const data = await (await fetch("/api/folders")).json();
+    if (!Array.isArray(data)) return;
+    folders = data;
+    renderFolders();
+  } catch (error) {
+    return;
+  }
 }
 
 async function loadRecent() {
@@ -149,7 +150,7 @@ async function showImage(root, path) {
     return;
   }
   const data = await (await fetch("/api/tags?path=" + encodeURIComponent(path))).json();
-  document.getElementById("tags").textContent = data.text || "Данные о опознавании ещё не записаны.";
+  document.getElementById("tags").textContent = data.text || "";
 }
 
 async function loadOutput() {

@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from oubi_web import (
     absolute_folders,
     flag_on,
+    folder_names,
     mark,
     parse_progress,
     preflight,
@@ -88,6 +89,12 @@ class WebTests(unittest.TestCase):
             self.assertIsNone(error)
             self.assertEqual(paths, [str(folder.resolve())])
             self.assertEqual(absolute_folders([], base)[1], "Нужно выбрать папки.")
+            (base / "b.jpg").write_bytes(b"jpg")
+            self.assertEqual(folder_names(base / "empty" if False else base), ["pack"])
+            only = base / "loose"
+            only.mkdir()
+            (only / "c.jpg").write_bytes(b"jpg")
+            self.assertEqual(folder_names(only), [""])
 
 
 if __name__ == "__main__":
