@@ -18,6 +18,8 @@ from oubi_web import (
     sort_command,
     summarize_images,
     tag_command,
+    read_theme,
+    write_theme,
 )
 from sort_images import under_roots
 
@@ -102,6 +104,16 @@ class WebTests(unittest.TestCase):
             only.mkdir()
             (only / "c.jpg").write_bytes(b"jpg")
             self.assertEqual(folder_names(only), [""])
+
+    def test_theme_is_kept_on_disk(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "theme"
+            self.assertEqual(read_theme(path), "auto")
+            self.assertTrue(write_theme("dark", path))
+            self.assertEqual(read_theme(path), "dark")
+            self.assertFalse(write_theme("blue", path))
+            self.assertEqual(read_theme(path), "dark")
 
 
 if __name__ == "__main__":

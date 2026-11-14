@@ -18,19 +18,36 @@ IMAGES = "/images"
 OUTPUT = "/output"
 CSV_PATH = "/data/tags.csv"
 GENDERS_PATH = "/data/genders.csv"
+THEME_PATH = "/data/theme"
+THEMES = {"light", "dark", "auto"}
 MODES = {"all", "tag", "sort", "plan"}
 PAGE_PATH = HERE / "oubi_page.html"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 SORTED_LIST = "/data/sorted.txt"
 
-def page_bytes():
-    items = [
-        {"path": name, "name": "Картинки" if name == "" else name}
-        for name in folder_names()
-    ]
+def page_bytes(items, theme="auto"):
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
-    html = PAGE_PATH.read_text(encoding="utf-8").replace("FOLDERS_JSON", payload, 1)
+    chosen = theme if theme in THEMES else "auto"
+    html = PAGE_PATH.read_text(encoding="utf-8")
+    html = html.replace("FOLDERS_JSON", payload, 1).replace("__OUBI_THEME__", chosen, 1)
     return html.encode()
+
+
+def read_theme(path=THEME_PATH):
+    try:
+        value = Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return "auto"
+    return value if value in THEMES else "auto"
+
+
+def write_theme(value, path=THEME_PATH):
+    if value not in THEMES:
+        return False
+    file = Path(path)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(value, encoding="utf-8")
+    return True
 
 
 def mark(done, total):
@@ -469,23 +486,40 @@ class App:
             print(text, flush=True)
 
     def folders(self):
-        names = folder_names()
-        quick = [
-            {"path": name, "name": "Картинки" if name == "" else name, "total": 0}
-            for name in names
-        ]
-        now = time.monotonic()
+        self._ensure_count()
         with self.lock:
             cached = self.folder_cache
-            cached_at = self.folder_cached_at
-            counting = getattr(self, "folder_counting", False)
-        if cached is not None and now - cached_at < 8:
+        if cached is not None:
             return cached
-        if not counting:
-            with self.lock:
+        return [
+            {
+                "path": name,
+                "name": "Картинки" if name == "" else name,
+                "total": 0,
+                "tagged": 0,
+                "sorted": 0,
+                "scan": "none",
+                "sort": "none",
+            }
+            for name in folder_names()
+        ]
+
+    def _ensure_count(self):
+        with self.lock:
+            fresh = self.folder_cache is not None and time.monotonic() - self.folder_cached_at < 8
+            if fresh:
+                return
+            start = not self.folder_counting
+            if start:
                 self.folder_counting = True
-            threading.Thread(target=self._count_folders, daemon=True).start()
-        return cached or quick
+        if start:
+            self._count_folders()
+            return
+        while True:
+            with self.lock:
+                if not self.folder_counting:
+                    return
+            time.sleep(0.05)
 
     def _count_folders(self):
         try:
@@ -650,7 +684,7 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         path = parsed.path
         if path == "/":
-            self._send(200, page_bytes(), "text/html; charset=utf-8")
+            self._send(200, page_bytes(self.app.folders(), read_theme()), "text/html; charset=utf-8")
             return
         if path == "/api/status":
             self._send(200, self.app.status())
@@ -700,6 +734,12 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send(400, {"error": "непонятный запрос"})
             return
+        if parsed.path == "/api/theme":
+            if not write_theme(payload.get("theme")):
+                self._send(400, {"error": "нет такой темы"})
+                return
+            self._send(200, {"theme": read_theme()})
+            return
         if parsed.path == "/api/stop":
             self.app.stop()
             self._send(200, {"ok": True})
@@ -731,6 +771,7 @@ def main():
     port = int(os.environ.get("OUBI_LISTEN", "8080"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     threading.Thread(target=app.download, daemon=True).start()
+    threading.Thread(target=app._ensure_count, daemon=True).start()
     print(f"Сейчас: страница на порту {port}.", flush=True)
     names = folder_names()
     if not names:
