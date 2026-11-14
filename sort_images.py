@@ -16,7 +16,7 @@ genders.csv (строки вида "hatsune_miku,f" или "gojou_satoru,m") ч�
 
 По умолчанию файлы КОПИРУЮТСЯ (оригиналы не трогаются). --move перемещает, --dry-run только показывает.
 """
-import argparse, csv, re, shutil, sys
+import argparse, csv, os, re, shutil, sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -36,6 +36,16 @@ def safe(name):
     name = re.sub(r'[<>:"|?*\x00-\x1f]', "", name).strip(" ._")
     return name[:80] or "unknown"
 
+def under_roots(path, roots):
+    if not roots:
+        return True
+    resolved = Path(os.path.abspath(path))
+    for root in roots:
+        base = Path(os.path.abspath(root))
+        if resolved == base or base in resolved.parents:
+            return True
+    return False
+
 def girl_count(general):
     n = 0
     for t in general:
@@ -52,6 +62,8 @@ def main():
                     help="q: questionable и explicit = nsfw (по умолчанию); e: только explicit")
     ap.add_argument("--genders", help="CSV с ручными поправками пола: персонаж,f|m")
     ap.add_argument("--copy-txt", action="store_true", help="переносить рядом и .txt с тегами")
+    ap.add_argument("--only", nargs="*", default=[], help="раскладывать только файлы внутри этих папок")
+    ap.add_argument("--sorted-list", default="", help="дописывать путь после успешного копирования")
     args = ap.parse_args()
 
     rows = list(csv.DictReader(open(args.csv, encoding="utf-8")))
@@ -94,10 +106,11 @@ def main():
     counters = {}
     stats = Counter()
 
-    print(f"Сейчас: раскладываю {len(rows)} строк из tags.csv.", flush=True)
-    for index, r in enumerate(rows, 1):
-        if index == 1 or index % 25 == 0 or index == len(rows):
-            print(f"Раскладка: {index} из {len(rows)}", flush=True)
+    work = [r for r in rows if under_roots(r["file"], args.only)]
+    print(f"Сейчас: раскладываю {len(work)} строк из tags.csv.", flush=True)
+    for index, r in enumerate(work, 1):
+        if index == 1 or index % 25 == 0 or index == len(work):
+            print(f"Раскладка: {index} из {len(work)}", flush=True)
         src = Path(r["file"])
         if not src.exists():
             stats["нет файла"] += 1
@@ -151,6 +164,9 @@ def main():
             txt = src.with_suffix(".txt")
             if args.copy_txt and txt.exists():
                 op(str(txt), str(dst.with_suffix(".txt")))
+            if args.sorted_list:
+                with open(args.sorted_list, "a", encoding="utf-8") as mark:
+                    mark.write(str(src.resolve()) + "\n")
         stats[folder_char == "group" and "group" or ("unknown" if folder_char == "unknown" else "персонаж")] += 1
 
     print("Итого:", dict(stats))

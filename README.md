@@ -144,7 +144,7 @@ docker compose pull
 docker compose up
 ```
 
-Open `http://<server>:${OUBI_PORT}`. On startup the `dev` image only downloads the model and serves the page. Tagging and sorting start from the buttons. `Разметить и разложить` does both. `Только план раскладки` does not copy. Running the sort again copies the pictures once more under the next numbers.
+Open `http://<server>:${OUBI_PORT}`. On startup the `dev` image only downloads the model and serves the page. Pick one or more folders in the mounted pictures, then start tagging or sorting. The buttons do nothing until a folder is selected. A folder carries two marks: tagging (not started, partial, done) and sorting (the same three states). `Разметить и разложить` does both. `Только план раскладки` does not copy. Running the sort again copies the pictures once more under the next numbers.
 
 `latest` has no page. It still runs the job from `OUBI_MODE` and exits when that job finishes.
 

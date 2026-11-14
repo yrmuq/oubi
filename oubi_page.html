@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oubi</title>
+<style>
+:root { color-scheme: dark; }
+html, body { height: 100%; margin: 0; background: #111; color: #eee; font: 15px/1.4 system-ui, sans-serif; }
+body { display: grid; grid-template-rows: 1fr 200px; }
+.top { display: grid; grid-template-columns: 1.15fr 1fr 1.15fr; min-height: 0; }
+.pane { border: 1px solid #d7d7d7; margin: 8px; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+button { font: inherit; color: #fff; background: #2c4a3e; border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+button.secondary { background: #333; }
+button.danger { background: #6e2e2e; }
+button:disabled { opacity: 0.45; cursor: default; }
+#folders { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px; }
+.folder { width: 84px; background: transparent; color: #eee; padding: 0; }
+.folder .icon { width: 52px; height: 42px; margin: 0 auto 8px; border: 1px solid #eee; position: relative; }
+.folder.on .icon { outline: 2px solid #e7b341; }
+.badge { position: absolute; bottom: -7px; width: 16px; height: 16px; border-radius: 50%; border: 1px solid #aaa; background: #111; font-size: 11px; line-height: 16px; }
+.badge.scan { left: 2px; }
+.badge.sort { right: 2px; }
+.badge.part { background: #e7b341; color: #111; }
+.badge.done { background: #3dba6a; color: #111; }
+.hint { flex: 1; display: grid; place-items: center; color: #eee; font-size: 20px; text-align: center; }
+.step { margin-top: auto; }
+.bar { height: 10px; background: #2a2a2a; border-radius: 99px; overflow: hidden; }
+.bar > div { height: 100%; width: 0; background: #e7b341; }
+.detail { color: #aaa; min-height: 1.2em; }
+.mid { align-items: center; text-align: center; gap: 12px; }
+#shot { width: min(100%, 420px); height: 46%; min-height: 160px; border: 1px solid #ddd; object-fit: contain; background: #000; }
+.nav { display: flex; align-items: center; justify-content: center; gap: 16px; }
+.nav button { font-size: 22px; background: transparent; }
+#name { min-width: 8em; }
+#tags { white-space: pre-wrap; }
+.out { overflow: auto; text-align: left; }
+.out button { display: block; width: 100%; text-align: left; background: transparent; border-radius: 0; }
+.log { margin: 0 8px 8px; border: 1px solid #d7d7d7; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<div class="top">
+  <section class="pane">
+    <h1>oubi</h1>
+    <div class="buttons">
+      <button id="all">Разметить и разложить</button>
+      <button id="tag">Только разметить</button>
+      <button id="sort">Только разложить</button>
+      <button id="plan" class="secondary">Только план раскладки</button>
+      <button id="stop" class="danger" disabled>Остановить</button>
+      <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
+    </div>
+    <div id="folders"></div>
+    <p id="hint" class="hint">Нужно выбрать папки для работы</p>
+    <p id="step" class="step">Открываю…</p>
+    <div class="bar"><div id="fill"></div></div>
+    <p id="detail" class="detail"></p>
+  </section>
+  <section class="pane mid">
+    <img id="shot" alt="Превью картинки, опознанной на прошлом шаге">
+    <div class="nav">
+      <button id="prev" type="button">❮</button>
+      <span id="name">название файла</span>
+      <button id="next" type="button">❯</button>
+    </div>
+    <p id="tags">Данные о опознавании</p>
+  </section>
+  <section class="pane">
+    <h1>Здесь папки с файлами на выходе</h1>
+    <div id="out" class="out"></div>
+  </section>
+</div>
+<pre id="log" class="log"></pre>
+<script>
+const selected = new Set();
+let folders = [];
+let reel = [];
+let reelAt = -1;
+let follow = true;
+let outputPath = "";
+let shown = "";
+
+function fileName(path) {
+  const parts = String(path || "").split("/");
+  return parts[parts.length - 1] || "название файла";
+}
+
+function badge(kind, state) {
+  const title = {
+    scan: { none: "ещё не размечалась", part: "размечена не до конца", done: "размечена полностью" },
+    sort: { none: "ещё не раскладывалась", part: "разложена не до конца", done: "разложена полностью" },
+  }[kind][state] || "";
+  const mark = state === "done" ? "✓" : state === "part" ? "½" : "";
+  return `<span class="badge ${kind} ${state}" title="${title}">${mark}</span>`;
+}
+
+function renderFolders() {
+  const box = document.getElementById("folders");
+  box.innerHTML = "";
+  for (const folder of folders) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "folder" + (selected.has(folder.path) ? " on" : "");
+    button.innerHTML = `<div class="icon">${badge("scan", folder.scan)}${badge("sort", folder.sort)}</div>${folder.name}`;
+    button.onclick = () => {
+      if (selected.has(folder.path)) selected.delete(folder.path);
+      else selected.add(folder.path);
+      document.getElementById("hint").hidden = selected.size > 0;
+      renderFolders();
+      loadRecent();
+    };
+    box.appendChild(button);
+  }
+  document.getElementById("hint").hidden = selected.size > 0;
+}
+
+async function loadFolders() {
+  folders = await (await fetch("/api/folders")).json();
+  renderFolders();
+}
+
+async function loadRecent() {
+  if (!selected.size) {
+    reel = [];
+    return;
+  }
+  const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
+  const data = await (await fetch("/api/recent?" + query)).json();
+  reel = data.files || [];
+  if (follow && reel.length) showAt(reel.length - 1);
+}
+
+function showAt(index) {
+  if (!reel.length) return;
+  reelAt = (index + reel.length) % reel.length;
+  showImage("images", reel[reelAt]);
+}
+
+async function showImage(root, path) {
+  if (!path) return;
+  shown = root + ":" + path;
+  document.getElementById("shot").src = "/api/file?root=" + root + "&path=" + encodeURIComponent(path);
+  document.getElementById("name").textContent = fileName(path);
+  if (root !== "images") {
+    document.getElementById("tags").textContent = "Файл из разложенных папок.";
+    return;
+  }
+  const data = await (await fetch("/api/tags?path=" + encodeURIComponent(path))).json();
+  document.getElementById("tags").textContent = data.text || "Данные о опознавании ещё не записаны.";
+}
+
+async function loadOutput() {
+  const data = await (await fetch("/api/browse?root=output&path=" + encodeURIComponent(outputPath))).json();
+  const box = document.getElementById("out");
+  box.innerHTML = "";
+  if (data.parent !== null && data.parent !== undefined) {
+    const back = document.createElement("button");
+    back.type = "button";
+    back.textContent = "Назад";
+    back.onclick = () => { outputPath = data.parent; loadOutput(); };
+    box.appendChild(back);
+  }
+  for (const item of data.items || []) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = (item.dir ? "📁 " : "") + item.name;
+    button.onclick = () => {
+      if (item.dir) {
+        outputPath = item.path;
+        loadOutput();
+      } else {
+        follow = false;
+        showImage("output", item.path);
+      }
+    };
+    box.appendChild(button);
+  }
+}
+
+async function tick() {
+  const data = await (await fetch("/api/status")).json();
+  let step = data.step || "Жду.";
+  const named = step.match(/Сейчас: размечаю (.+) \((\d+ из \d+)\)/);
+  if (named) step = "Сейчас: размечаю " + fileName(named[1]) + " (" + named[2] + ").";
+  document.getElementById("step").textContent = step;
+  document.getElementById("detail").textContent = data.detail || "";
+  document.getElementById("fill").style.width = (data.percent || 0) + "%";
+  const log = document.getElementById("log");
+  log.textContent = (data.log || []).join(String.fromCharCode(10));
+  log.scrollTop = log.scrollHeight;
+  const busy = data.job_running;
+  const ready = data.model === "ready";
+  const picked = selected.size > 0;
+  for (const id of ["all", "tag", "sort", "plan"]) {
+    const needsModel = id === "all" || id === "tag";
+    document.getElementById(id).disabled = busy || !picked || (needsModel && !ready);
+  }
+  document.getElementById("stop").disabled = !busy;
+  document.getElementById("retry").hidden = data.model !== "error";
+  if (follow && data.preview_file && data.preview_file !== (reel[reelAt] || "")) {
+    if (!reel.includes(data.preview_file)) reel.push(data.preview_file);
+    showAt(reel.indexOf(data.preview_file));
+  }
+}
+
+async function start(mode) {
+  await fetch("/api/job", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, folders: [...selected] }),
+  });
+  follow = true;
+  tick();
+}
+
+for (const id of ["all", "tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
+document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
+document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
+document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };
+document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
+loadFolders();
+loadOutput();
+tick();
+setInterval(tick, 1000);
+setInterval(loadFolders, 8000);
+</script>
+</body>
+</html>

@@ -307,7 +307,7 @@ def load_tagger(model):
 # ===== TAG THE FOLDER =====
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("folder")
+    ap.add_argument("folder", nargs="+")
     ap.add_argument("--model", default="pixai-labs/pixai-tagger-v1.0")
     ap.add_argument("--csv", default="tags.csv")
     ap.add_argument("--no-txt", action="store_true", help="не писать .txt рядом с картинками")
@@ -328,7 +328,15 @@ def main():
     from PIL import Image
 
     print("Сейчас: ищу картинки.", flush=True)
-    files = sorted(path for path in Path(args.folder).rglob("*") if path.suffix.lower() in EXTS)
+    files = []
+    seen = set()
+    for folder in args.folder:
+        for path in Path(folder).rglob("*"):
+            if path.suffix.lower() not in EXTS or path in seen:
+                continue
+            seen.add(path)
+            files.append(path)
+    files.sort()
     pending = []
     for index, path in enumerate(files, 1):
         if path.with_suffix(".txt").exists() and not args.force:
@@ -360,7 +368,7 @@ def main():
                 continue
             if len(loaded) == 1:
                 index, path, _image = loaded[0]
-                print(f"Сейчас: размечаю {path.name} ({index} из {len(files)}).", flush=True)
+                print(f"Сейчас: размечаю {path} ({index} из {len(files)}).", flush=True)
             else:
                 print(
                     f"Сейчас: размечаю пачку {loaded[0][0]}–{loaded[-1][0]} из {len(files)}.",

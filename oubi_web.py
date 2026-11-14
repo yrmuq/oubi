@@ -7,8 +7,10 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 # ===== SETTINGS =====
 HERE = Path(__file__).resolve().parent
@@ -17,82 +19,167 @@ OUTPUT = "/output"
 CSV_PATH = "/data/tags.csv"
 GENDERS_PATH = "/data/genders.csv"
 MODES = {"all", "tag", "sort", "plan"}
-PAGE = """<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>oubi</title>
-<style>
-:root { color-scheme: dark; }
-body { margin: 0; font: 16px/1.45 system-ui, sans-serif; background: #161616; color: #eee; }
-main { max-width: 820px; margin: 0 auto; padding: 28px 20px 48px; }
-h1 { font-size: 28px; margin: 0 0 8px; }
-.step { font-size: 20px; margin: 18px 0 10px; }
-.bar { height: 14px; background: #2a2a2a; border-radius: 99px; overflow: hidden; }
-.bar > div { height: 100%; width: 0; background: #e7b341; }
-.detail { color: #aaa; min-height: 1.4em; }
-.row { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
-button { font: inherit; padding: 12px 16px; border: 0; border-radius: 10px; background: #2c4a3e; color: #fff; cursor: pointer; }
-button.secondary { background: #333; }
-button.danger { background: #6e2e2e; }
-button:disabled { opacity: 0.45; cursor: default; }
-.warn { color: #e7b341; }
-pre { background: #101010; padding: 12px; border-radius: 10px; max-height: 320px; overflow: auto; white-space: pre-wrap; }
-</style>
-</head>
-<body>
-<main>
-<h1>oubi</h1>
-<p id="step" class="step">Открываю…</p>
-<div class="bar"><div id="fill"></div></div>
-<p id="detail" class="detail"></p>
-<div class="row">
-  <button id="all">Разметить и разложить</button>
-  <button id="tag">Только разметить</button>
-  <button id="sort">Только разложить</button>
-  <button id="plan" class="secondary">Только план раскладки</button>
-  <button id="stop" class="danger" disabled>Остановить</button>
-</div>
-<p class="warn">Повторная раскладка копирует файлы ещё раз, со следующими номерами. План ничего не копирует.</p>
-<p><button id="retry" class="secondary" hidden>Повторить скачивание модели</button></p>
-<pre id="log"></pre>
-</main>
-<script>
-const ids = ["all", "tag", "sort", "plan"];
-async function tick() {
-  const data = await (await fetch("/api/status")).json();
-  document.getElementById("step").textContent = data.step || "Жду.";
-  document.getElementById("detail").textContent = data.detail || "";
-  document.getElementById("fill").style.width = (data.percent || 0) + "%";
-  const log = document.getElementById("log");
-  log.textContent = (data.log || []).join(String.fromCharCode(10));
-  log.scrollTop = log.scrollHeight;
-  const busy = data.job_running;
-  const ready = data.model === "ready";
-  for (const id of ids) {
-    const needsModel = id === "all" || id === "tag";
-    document.getElementById(id).disabled = busy || (needsModel && !ready);
-  }
-  document.getElementById("stop").disabled = !busy;
-  document.getElementById("retry").hidden = data.model !== "error";
-}
-async function start(mode) {
-  await fetch("/api/job", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({mode})});
-  tick();
-}
-for (const id of ids) document.getElementById(id).onclick = () => start(id);
-document.getElementById("stop").onclick = () => fetch("/api/stop", {method: "POST"});
-document.getElementById("retry").onclick = () => fetch("/api/download", {method: "POST"});
-tick();
-setInterval(tick, 1000);
-</script>
-</body>
-</html>
-"""
+PAGE_PATH = HERE / "oubi_page.html"
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+SORTED_LIST = "/data/sorted.txt"
+
+def page_bytes():
+    return PAGE_PATH.read_bytes()
 
 
-# ===== READ A LOG LINE =====
+def mark(done, total):
+    if total <= 0 or done <= 0:
+        return "none"
+    if done >= total:
+        return "done"
+    return "part"
+
+
+def resolve_under(root, rel):
+    base = Path(root).resolve()
+    rel = (rel or "").strip().lstrip("/")
+    path = base if rel in ("", ".") else (base / rel).resolve()
+    if path != base and base not in path.parents:
+        raise ValueError(rel)
+    return path
+
+
+def load_sorted_paths(path=SORTED_LIST):
+    found = set()
+    file = Path(path)
+    if not file.is_file():
+        return found
+    for line in file.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line:
+            found.add(line)
+    return found
+
+
+def load_csv_paths(path=CSV_PATH):
+    found = set()
+    file = Path(path)
+    if not file.is_file():
+        return found
+    import csv
+    for row in csv.DictReader(file.open(encoding="utf-8")):
+        name = (row.get("file") or "").strip()
+        if name:
+            found.add(name)
+    return found
+
+
+def summarize_images(rel, images, csv_paths, sorted_paths):
+    tagged = 0
+    laid = 0
+    for image in images:
+        if image.with_suffix(".txt").is_file() or str(image) in csv_paths or str(image.resolve()) in csv_paths:
+            tagged += 1
+        if str(image.resolve()) in sorted_paths or str(image) in sorted_paths:
+            laid += 1
+    total = len(images)
+    return {
+        "path": rel,
+        "name": "Картинки" if rel == "" else Path(rel).name,
+        "total": total,
+        "tagged": tagged,
+        "sorted": laid,
+        "scan": mark(tagged, total),
+        "sort": mark(laid, total),
+    }
+
+
+def images_under(folder):
+    return [path for path in folder.rglob("*") if path.is_file() and path.suffix.lower() in IMAGE_EXTS]
+
+
+def source_folders(root=IMAGES):
+    base = Path(root)
+    if not base.is_dir():
+        return []
+    csv_paths = load_csv_paths()
+    sorted_paths = load_sorted_paths()
+    children = [path for path in base.iterdir() if path.is_dir() and not path.name.startswith(".")]
+    children.sort(key=lambda path: path.name.lower())
+    if not children:
+        return [summarize_images("", images_under(base), csv_paths, sorted_paths)]
+    return [
+        summarize_images(path.name, images_under(path), csv_paths, sorted_paths)
+        for path in children
+    ]
+
+
+def absolute_folders(rels, root=IMAGES):
+    if not isinstance(rels, list) or not rels:
+        return None, "Нужно выбрать папки."
+    paths = []
+    for rel in rels:
+        if not isinstance(rel, str):
+            return None, "Нет такой папки."
+        try:
+            path = resolve_under(root, rel)
+        except ValueError:
+            return None, "Нет такой папки."
+        if not path.is_dir():
+            return None, "Нет такой папки."
+        paths.append(str(path))
+    return paths, None
+
+
+def content_type(path):
+    return {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".bmp": "image/bmp",
+    }.get(Path(path).suffix.lower(), "application/octet-stream")
+
+
+def browse_dir(root, rel):
+    base = Path(root).resolve()
+    path = resolve_under(base, rel)
+    if not path.is_dir():
+        raise ValueError(rel)
+    items = []
+    for child in path.iterdir():
+        if child.name.startswith("."):
+            continue
+        items.append({
+            "name": child.name,
+            "dir": child.is_dir(),
+            "path": str(child.relative_to(base)),
+        })
+    items.sort(key=lambda item: (not item["dir"], item["name"].lower()))
+    parent = None if path == base else ("" if path.parent == base else str(path.parent.relative_to(base)))
+    return {"path": "" if path == base else str(path.relative_to(base)), "parent": parent, "items": items}
+
+
+def recent_tagged(rels, limit=40):
+    base = Path(IMAGES).resolve()
+    found = []
+    for rel in rels:
+        folder = resolve_under(base, rel)
+        for image in images_under(folder):
+            txt = image.with_suffix(".txt")
+            if txt.is_file():
+                found.append((txt.stat().st_mtime, str(image.resolve().relative_to(base))))
+    found.sort()
+    return [item for _, item in found[-limit:]]
+
+
+def read_tags(rel):
+    base = Path(IMAGES).resolve()
+    image = resolve_under(base, rel)
+    txt = image.with_suffix(".txt")
+    if not txt.is_file():
+        return ""
+    if base not in txt.resolve().parents and txt.resolve() != base:
+        return ""
+    return txt.read_text(encoding="utf-8", errors="replace")[:4000]
+
+
 def parse_progress(line):
     text = line.strip()
     found = {}
@@ -154,11 +241,11 @@ def preflight(mode):
 
 
 # ===== COMMANDS =====
-def tag_command():
+def tag_command(folders):
     command = [
         sys.executable,
         str(HERE / "tag_folder.py"),
-        IMAGES,
+        *folders,
         "--model",
         os.environ.get("OUBI_MODEL", "pixai-labs/pixai-tagger-v1.0"),
         "--csv",
@@ -173,7 +260,7 @@ def tag_command():
     return command
 
 
-def sort_command(plan=False):
+def sort_command(plan=False, folders=None):
     command = [
         sys.executable,
         str(HERE / "sort_images.py"),
@@ -186,10 +273,15 @@ def sort_command(plan=False):
     ]
     if os.path.isfile(GENDERS_PATH):
         command.extend(["--genders", GENDERS_PATH])
+    if folders:
+        command.append("--only")
+        command.extend(folders)
     if flag_on(os.environ.get("OUBI_MOVE")):
         command.append("--move")
     if plan:
         command.append("--dry-run")
+    elif folders:
+        command.extend(["--sorted-list", SORTED_LIST])
     if flag_on(os.environ.get("OUBI_COPY_TXT")):
         command.append("--copy-txt")
     return command
@@ -227,6 +319,11 @@ class App:
         self.detail = ""
         self.percent = None
         self.proc = None
+        self.preview_file = ""
+        self.current_file = ""
+        self.folders = []
+        self.folder_cache = None
+        self.folder_cached_at = 0.0
 
     def note(self, line, echo=True):
         text = line.strip()
@@ -244,12 +341,36 @@ class App:
                 self.step = parsed["step"]
             if "kind" in parsed:
                 self.phase = parsed["kind"]
+            found = re.search(r"Сейчас: размечаю (.+) \(\d+ из \d+\)\.?$", text)
+            if found:
+                path = found.group(1).strip()
+                if self.current_file:
+                    self.preview_file = self.current_file
+                self.current_file = path
+                if not self.preview_file:
+                    self.preview_file = path
+            elif text.startswith("Готово") and self.current_file:
+                self.preview_file = self.current_file
         if echo:
             print(text, flush=True)
 
+    def folders(self):
+        now = time.monotonic()
+        with self.lock:
+            cached = self.folder_cache
+            cached_at = self.folder_cached_at
+        if cached is not None and now - cached_at < 8:
+            return cached
+        found = source_folders()
+        with self.lock:
+            self.folder_cache = found
+            self.folder_cached_at = now
+        return found
+
     def status(self):
         with self.lock:
-            return {
+            preview = self.preview_file
+            payload = {
                 "model": self.model_state,
                 "job_running": self.job_running,
                 "job_mode": self.job_mode,
@@ -257,8 +378,15 @@ class App:
                 "step": self.step,
                 "detail": self.detail,
                 "percent": self.percent,
+                "preview_file": "",
                 "log": self.lines[-80:],
             }
+        if preview:
+            try:
+                payload["preview_file"] = str(Path(preview).resolve().relative_to(Path(IMAGES).resolve()))
+            except ValueError:
+                payload["preview_file"] = ""
+        return payload
 
     def download(self):
         with self.lock:
@@ -296,8 +424,9 @@ class App:
         threading.Thread(target=self.download, daemon=True).start()
         return True
 
-    def start(self, mode):
-        reason = preflight(mode)
+    def start(self, mode, folders):
+        paths, error = absolute_folders(folders)
+        reason = error or preflight(mode)
         if reason:
             self.note(f"Сейчас: {reason}")
             return False
@@ -306,19 +435,21 @@ class App:
                 return False
             self.job_running = True
             self.job_mode = mode
+            self.folders = paths
             self.percent = None
             self.detail = ""
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
             self.step = "Сейчас: запускаю."
-        threading.Thread(target=self._run, args=(mode,), daemon=True).start()
+            self.folder_cache = None
+        threading.Thread(target=self._run, args=(mode, paths), daemon=True).start()
         return True
 
-    def _run(self, mode):
+    def _run(self, mode, folders):
         commands = []
         if mode in {"tag", "all"}:
-            commands.append(tag_command())
+            commands.append(tag_command(folders))
         if mode in {"sort", "plan", "all"}:
-            commands.append(sort_command(plan=mode == "plan"))
+            commands.append(sort_command(plan=mode == "plan", folders=folders))
         code = 0
         try:
             for command in commands:
@@ -348,6 +479,7 @@ class App:
                 self.job_running = False
                 self.job_mode = None
                 self.proc = None
+                self.folder_cache = None
             if code == 0:
                 self.note("Сейчас: работа закончилась.")
             elif code < 0:
@@ -382,33 +514,71 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/":
-            self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+        path = parsed.path
+        if path == "/":
+            self._send(200, page_bytes(), "text/html; charset=utf-8")
             return
-        if self.path == "/api/status":
+        if path == "/api/status":
             self._send(200, self.app.status())
+            return
+        if path == "/api/folders":
+            self._send(200, self.app.folders())
+            return
+        if path == "/api/browse":
+            root = OUTPUT if query.get("root", ["output"])[0] == "output" else IMAGES
+            try:
+                self._send(200, browse_dir(root, query.get("path", [""])[0]))
+            except ValueError:
+                self._send(404, {"error": "нет такой папки"})
+            return
+        if path == "/api/recent":
+            try:
+                self._send(200, {"files": recent_tagged(query.get("folder", []))})
+            except ValueError:
+                self._send(404, {"error": "нет такой папки"})
+            return
+        if path == "/api/tags":
+            try:
+                self._send(200, {"text": read_tags(query.get("path", [""])[0])})
+            except ValueError:
+                self._send(404, {"error": "нет файла"})
+            return
+        if path == "/api/file":
+            root = OUTPUT if query.get("root", ["images"])[0] == "output" else IMAGES
+            try:
+                file = resolve_under(root, query.get("path", [""])[0])
+            except ValueError:
+                self._send(404, {"error": "нет файла"})
+                return
+            if not file.is_file() or file.suffix.lower() not in IMAGE_EXTS:
+                self._send(404, {"error": "нет файла"})
+                return
+            self._send(200, file.read_bytes(), content_type(file))
             return
         self._send(404, {"error": "нет такой страницы"})
 
     def do_POST(self):
+        parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length", "0") or 0)
-        raw = self.rfile.read(min(length, 4096)) if length else b"{}"
+        raw = self.rfile.read(min(length, 200000)) if length else b"{}"
         try:
             payload = json.loads(raw.decode() or "{}")
         except json.JSONDecodeError:
             self._send(400, {"error": "непонятный запрос"})
             return
-        if self.path == "/api/stop":
+        if parsed.path == "/api/stop":
             self.app.stop()
             self._send(200, {"ok": True})
             return
-        if self.path == "/api/download":
+        if parsed.path == "/api/download":
             if not self.app.retry_download():
                 self._send(409, {"error": "скачивание уже идёт"})
                 return
             self._send(200, {"ok": True})
             return
-        if self.path != "/api/job":
+        if parsed.path != "/api/job":
             self._send(404, {"error": "нет такой страницы"})
             return
         mode = payload.get("mode")
@@ -417,7 +587,7 @@ class Handler(BaseHTTPRequestHandler):
         if reason:
             self._send(409, {"error": reason})
             return
-        if not self.app.start(mode):
+        if not self.app.start(mode, payload.get("folders") or []):
             self._send(409, {"error": self.app.status()["step"]})
             return
         self._send(200, {"ok": True})
