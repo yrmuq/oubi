@@ -64,7 +64,7 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .themes button { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
 .themes button.on { background: var(--btn); color: #fff; }
 .top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
-.pane { border: 1px solid var(--line); background: var(--pane); margin: 8px 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; }
+.pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 button { font: inherit; color: #fff; background: var(--btn); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
@@ -84,7 +84,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .badge.part { background: #f5c400; border: 1px solid #8a6d00; }
 .badge.done { background: #3dba6a; border: 1px solid #1e7a3a; }
 .split { position: relative; touch-action: none; }
-.split-v { cursor: col-resize; margin: 8px 0; }
+.split-v { cursor: col-resize; margin: 8px 0 0; }
 .split-h { cursor: row-resize; }
 .split-h::before { content: ""; position: absolute; left: 8px; right: 8px; top: 3px; height: 2px; background: var(--line); border-radius: 99px; }
 .split-v::after, .split-h::after { content: ""; position: absolute; }
@@ -95,9 +95,10 @@ button:disabled { opacity: 0.45; cursor: default; }
 .bar > div { height: 100%; width: 0; background: var(--fill); }
 .detail { color: var(--muted); min-height: 1.2em; }
 .mid { position: relative; text-align: center; gap: 0; display: flex; flex-direction: column; }
-.block { min-width: 0; min-height: 0; }
+.block { min-width: 0; min-height: 0; position: relative; }
 .block.grow { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; }
 .block-split { flex: 0 0 8px; height: 8px; margin: 6px 0; }
+.edge-split { position: absolute; left: 0; right: 0; bottom: 0; height: 10px; margin: 0; z-index: 3; }
 body.arrange .block { outline: 1px dashed var(--pick); cursor: grab; border-radius: 8px; }
 body.arrange .block * { pointer-events: none; }
 .block.dragging { opacity: 0.4; }
@@ -127,6 +128,9 @@ body.arrange .block * { pointer-events: none; }
 .genre-ghost { position: absolute; inset: 0; color: var(--muted); pointer-events: none; white-space: pre; overflow: hidden; border: 1px solid transparent; }
 .genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
 #genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
+.tag-hit { cursor: pointer; border-radius: 4px; padding: 0 3px; }
+#filter { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; min-height: 28px; }
+.filter-tag { color: #111; border-radius: 6px; }
 .genre { border-radius: 4px; padding: 0 3px; color: #111; }
 .genre-1, .genre-handle.genre-1 { background: #ffb4b4; }
 .genre-2, .genre-handle.genre-2 { background: #b9d0ff; }
@@ -233,6 +237,9 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <p id="tags">Select a file to show tags</p>
       </div>
     </div>
+    <div class="block" data-block="filter">
+      <div id="filter"></div>
+    </div>
     <div class="block grow" data-block="log">
       <pre id="log" class="log"></pre>
     </div>
@@ -255,7 +262,7 @@ let lang = "__OUBI_LANG__";
 const catalogs = __OUBI_LANGS__;
 let tagText = "";
 let hasFile = false;
-let genreFilter = -1;
+let pinned = [];
 let theme = savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto" ? savedTheme : "auto";
 let wasBusy = false;
 const panes = { left: null, mid: null, right: null };
@@ -363,7 +370,7 @@ async function loadFolders() {
 }
 
 async function loadRecent() {
-  if (genreFilter >= 0) return;
+  if (pinned.length) return;
   if (!selected.size) {
     reel = [];
     showEmpty();
@@ -376,17 +383,73 @@ async function loadRecent() {
   else if (follow && reel.length) showAt(reel.length - 1);
 }
 
+function rainbow(index) {
+  return "hsl(" + ((index * 47) % 360) + " 78% 72%)";
+}
+
+function pinIndex(tag) {
+  const key = String(tag || "").trim().toLowerCase();
+  return pinned.findIndex((item) => item.toLowerCase() === key);
+}
+
+function renderFilter() {
+  const box = document.getElementById("filter");
+  if (!box) return;
+  box.replaceChildren();
+  pinned.forEach((tag, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "filter-tag";
+    button.style.background = rainbow(index);
+    button.textContent = tag;
+    button.onclick = () => togglePin(tag);
+    box.append(button);
+  });
+}
+
+function togglePin(tag) {
+  const token = String(tag || "").trim();
+  if (!token) return;
+  const index = pinIndex(token);
+  if (index >= 0) pinned.splice(index, 1);
+  else pinned.push(token);
+  renderFilter();
+  paintTags(tagText);
+  renderGenreRow();
+  applyFilter();
+}
+
+async function applyFilter() {
+  if (!pinned.length) {
+    follow = true;
+    loadRecent();
+    return;
+  }
+  const query = pinned.map((tag) => "tag=" + encodeURIComponent(tag)).join("&");
+  const data = await (await fetch("/api/tagged?" + query)).json();
+  reel = data.files || [];
+  follow = false;
+  if (reel.length) showAt(0);
+  else showEmpty();
+}
 function paintTags(text) {
   const box = document.getElementById("tags");
   box.replaceChildren();
   const parts = String(text || "").split(",");
   parts.forEach((part, index) => {
     if (index) box.append(", ");
+    const token = part.trim();
+    if (!token) return;
     const span = document.createElement("span");
-    const token = part.trim().toLowerCase();
-    const rank = genres.findIndex((item) => item && item.toLowerCase() === token);
-    if (rank >= 0 && rank < 20) span.className = "genre genre-" + (rank + 1);
+    span.className = "tag-hit";
+    const pinnedAt = pinIndex(token);
+    const rank = genres.findIndex((item) => item && item.toLowerCase() === token.toLowerCase());
+    if (pinnedAt >= 0) {
+      span.style.background = rainbow(pinnedAt);
+      span.style.color = "#111";
+    } else if (rank >= 0 && rank < 20) span.classList.add("genre", "genre-" + (rank + 1));
     span.textContent = part;
+    span.onclick = () => togglePin(token);
     box.append(span);
   });
 }
@@ -508,7 +571,7 @@ function dragSplit(which, event) {
 function fitSplits() {
   for (const id of ["left", "mid", "right"]) {
     const host = document.getElementById(id);
-    for (const old of host.querySelectorAll(":scope > .block-split")) old.remove();
+    for (const old of host.querySelectorAll(":scope > .block-split, :scope .edge-split")) old.remove();
     const blocks = [...host.querySelectorAll(":scope > .block")];
     for (let index = 0; index < blocks.length - 1; index += 1) {
       const split = document.createElement("div");
@@ -516,7 +579,34 @@ function fitSplits() {
       split.onpointerdown = (event) => dragBlockSplit(split, event);
       blocks[index].after(split);
     }
+    if (blocks.length === 1) {
+      const edge = document.createElement("div");
+      edge.className = "split split-h edge-split";
+      edge.onpointerdown = (event) => dragEdge(blocks[0], event);
+      blocks[0].appendChild(edge);
+    }
   }
+}
+
+function dragEdge(block, event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const pane = block.parentElement;
+  const startY = event.clientY;
+  const startH = block.getBoundingClientRect().height;
+  const limit = Math.max(36, pane.getBoundingClientRect().height - 24);
+  function move(ev) {
+    const next = Math.min(limit, Math.max(36, startH + ev.clientY - startY));
+    block.style.flex = "0 0 " + next + "px";
+  }
+  function up() {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    saveLayout();
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
 }
 
 function dragBlockSplit(split, event) {
@@ -659,21 +749,7 @@ function refreshGenreGhosts() {
 }
 
 async function toggleGenre(index) {
-  const tag = (genres[index] || "").trim();
-  if (!tag) return;
-  if (genreFilter === index) {
-    genreFilter = -1;
-    renderGenreRow();
-    follow = true;
-    loadRecent();
-    return;
-  }
-  genreFilter = index;
-  renderGenreRow();
-  const data = await (await fetch("/api/tagged?tag=" + encodeURIComponent(tag))).json();
-  reel = data.files || [];
-  follow = false;
-  if (reel.length) showAt(0);
+  togglePin(genres[index] || "");
 }
 
 function renderGenreRow(focusAt) {
@@ -687,16 +763,24 @@ function renderGenreRow(focusAt) {
     handle.className = "genre-handle genre-" + (index + 1);
     handle.textContent = String(index + 1);
     handle.draggable = true;
+    let moved = false;
     handle.ondragstart = (event) => {
+      moved = true;
       genreDrag = index;
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", String(index));
     };
     handle.ondragend = () => { genreDrag = -1; };
+    handle.onclick = () => {
+      if (moved) { moved = false; return; }
+      toggleGenre(index);
+    };
+    if (pinIndex(value || "") >= 0) handle.style.background = rainbow(pinIndex(value || ""));
     const pin = document.createElement("button");
     pin.type = "button";
-    pin.className = "genre-pin" + (genreFilter === index ? " on" : "");
+    pin.className = "genre-pin" + (pinIndex(value || "") >= 0 ? " on" : "");
     pin.title = t(19);
+    if (pinIndex(value || "") >= 0) pin.style.background = rainbow(pinIndex(value || ""));
     pin.onclick = () => toggleGenre(index);
     slot.ondragover = (event) => event.preventDefault();
     slot.ondrop = (event) => {
@@ -705,9 +789,6 @@ function renderGenreRow(focusAt) {
       if (from < 0 || from === index) return;
       const [moved] = genres.splice(from, 1);
       genres.splice(index, 0, moved);
-      if (genreFilter === from) genreFilter = index;
-      else if (genreFilter > from && genreFilter <= index) genreFilter -= 1;
-      else if (genreFilter < from && genreFilter >= index) genreFilter += 1;
       genreDrag = -1;
       renderGenreRow(index);
       paintTags(tagText);
@@ -763,6 +844,7 @@ function renderGenreRow(focusAt) {
   }
 }
 renderGenreRow();
+renderFilter();
 applyLayout();
 let arranging = false;
 let dragBlock = null;

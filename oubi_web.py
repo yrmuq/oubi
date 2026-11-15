@@ -194,7 +194,7 @@ def write_theme(value, path=THEME_PATH):
 
 
 LAYOUT_KEYS = ("left", "mid", "right", "preview", "genres", "info", "log")
-BLOCK_NAMES = ("buttons", "folders", "progress", "preview", "genres", "info", "log")
+BLOCK_NAMES = ("buttons", "folders", "progress", "preview", "genres", "info", "filter", "log")
 PANEL_NAMES = ("left", "mid", "right")
 
 
@@ -214,6 +214,16 @@ def clean_blocks(value):
             seen.append(item)
             names.append(item)
         clean[panel] = names
+    if "filter" not in seen and len(seen) == len(BLOCK_NAMES) - 1:
+        placed = False
+        for panel in PANEL_NAMES:
+            if "info" in clean[panel]:
+                clean[panel].insert(clean[panel].index("info") + 1, "filter")
+                placed = True
+                break
+        if not placed:
+            clean["right"].append("filter")
+        seen.append("filter")
     if len(seen) != len(BLOCK_NAMES):
         return None
     return clean
@@ -280,9 +290,21 @@ def write_layout(values, path=LAYOUT_PATH):
 
 
 def images_with_tag(tag, path=CSV_PATH, root=IMAGES):
-    needle = (tag or "").strip().casefold()
-    if not needle:
+    return images_with_tags([tag], path, root)
+
+
+def images_with_tags(tags, path=CSV_PATH, root=IMAGES):
+    required = []
+    seen_needles = set()
+    for tag in tags or []:
+        folded = str(tag or "").strip().casefold()
+        if not folded or folded in seen_needles:
+            continue
+        seen_needles.add(folded)
+        required.append(folded)
+    if not required:
         return []
+    needed = set(required)
     base = Path(root).resolve()
     found = []
     seen = set()
@@ -300,7 +322,7 @@ def images_with_tag(tag, path=CSV_PATH, root=IMAGES):
                 tags = []
                 for key in columns:
                     tags.extend(part.strip() for part in (row.get(key) or "").split(",") if part.strip())
-                if needle not in {item.casefold() for item in tags}:
+                if not needed <= {item.casefold() for item in tags}:
                     continue
                 raw = (row.get("file") or "").strip()
                 if not raw:
@@ -328,7 +350,7 @@ def images_with_tag(tag, path=CSV_PATH, root=IMAGES):
         if not txt.is_file():
             continue
         parts = [part.strip().casefold() for part in txt.read_text(encoding="utf-8", errors="replace").split(",")]
-        if needle not in parts:
+        if not needed <= set(parts):
             continue
         found.append(image.resolve().relative_to(base).as_posix())
     return found
@@ -992,7 +1014,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, {"error": "нет такой папки"})
             return
         if path == "/api/tagged":
-            self._send(200, {"files": images_with_tag(query.get("tag", [""])[0])})
+            self._send(200, {"files": images_with_tags(query.get("tag", []))})
             return
         if path == "/api/tags":
             try:

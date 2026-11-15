@@ -26,6 +26,7 @@ from oubi_web import (
     read_layout,
     write_layout,
     images_with_tag,
+    images_with_tags,
     detect_lang,
     read_lang,
     write_lang,
@@ -170,12 +171,19 @@ class LayoutTests(unittest.TestCase):
             order = {
                 "left": ["log"],
                 "mid": ["buttons", "folders", "progress"],
-                "right": ["preview", "genres", "info"],
+                "right": ["preview", "genres", "info", "filter"],
             }
             self.assertTrue(write_layout({"blocks": order}, path))
             self.assertEqual(read_layout(path)["blocks"], order)
             self.assertFalse(write_layout({"blocks": {"left": ["log"]}}, path))
             self.assertEqual(read_layout(path)["blocks"]["left"], ["log"])
+            old = {
+                "left": ["log"],
+                "mid": ["buttons", "folders", "progress"],
+                "right": ["preview", "genres", "info"],
+            }
+            self.assertTrue(write_layout({"blocks": old}, path))
+            self.assertEqual(read_layout(path)["blocks"]["right"][-1], "filter")
             self.assertTrue(write_layout({"heights": {"folders": 240, "nope": 10}}, path))
             self.assertEqual(read_layout(path)["heights"], {"folders": 240})
 
@@ -197,6 +205,8 @@ class LayoutTests(unittest.TestCase):
             )
             self.assertEqual(images_with_tag("comic", csv_path, root), ["a.jpg"])
             self.assertEqual(images_with_tag("missing", csv_path, root), [])
+            self.assertEqual(images_with_tags(["comic", "1girl"], csv_path, root), ["a.jpg"])
+            self.assertEqual(images_with_tags(["comic", "portrait"], csv_path, root), [])
 
     def test_language_detects_browser_and_keeps_a_choice(self):
         import tempfile
@@ -206,7 +216,7 @@ class LayoutTests(unittest.TestCase):
         packs = load_catalogs()
         self.assertEqual(packs["ru"]["1"], "Опознать")
         self.assertEqual(packs["en"]["11"], "filename")
-        self.assertEqual(packs["ru"]["11"], "filename")
+        self.assertEqual(packs["ru"]["11"], "Имя файла")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "language"
             self.assertEqual(read_lang(path, "fr"), "en")
