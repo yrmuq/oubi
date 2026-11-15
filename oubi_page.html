@@ -288,9 +288,9 @@ function applyI18n() {
   document.getElementById("plan").textContent = t(3);
   document.getElementById("stop").textContent = t(4);
   document.getElementById("retry").textContent = t(5);
-  document.querySelector('[data-theme="light"]').textContent = t(8);
-  document.querySelector('[data-theme="dark"]').textContent = t(9);
-  document.querySelector('[data-theme="auto"]').textContent = t(10);
+  document.querySelector('.themes [data-theme="light"]').textContent = t(8);
+  document.querySelector('.themes [data-theme="dark"]').textContent = t(9);
+  document.querySelector('.themes [data-theme="auto"]').textContent = t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("lang").title = t(21);
   document.getElementById("lang").textContent = lang === "ru" ? "RU" : "EN";
