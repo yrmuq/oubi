@@ -133,4 +133,13 @@ jobs:
         run: |
           docker logout ghcr.io || true
           docker rmi "${IMAGE}:${{ inputs.tag }}" || true
-          docker pull "${IMAGE}:${{ inputs.tag }}"
+          ok=0
+          for i in 1 2 3 4 5 6; do
+            if docker pull "${IMAGE}:${{ inputs.tag }}"; then
+              ok=1
+              break
+            fi
+            echo "Registry has not published the manifest yet. Retry ${i}." >&2
+            sleep 10
+          done
+          test "$ok" = 1
