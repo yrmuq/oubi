@@ -112,6 +112,18 @@ def clean_blocks(value):
     return clean
 
 
+def clean_heights(value):
+    if not isinstance(value, dict):
+        return None
+    clean = {}
+    for key, number in value.items():
+        if key not in BLOCK_NAMES:
+            continue
+        if isinstance(number, (int, float)) and 24 <= float(number) <= 8000:
+            clean[key] = int(number)
+    return clean
+
+
 def read_layout(path=LAYOUT_PATH):
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -127,6 +139,9 @@ def read_layout(path=LAYOUT_PATH):
     blocks = clean_blocks(data.get("blocks"))
     if blocks:
         clean["blocks"] = blocks
+    heights = clean_heights(data.get("heights")) if isinstance(data.get("heights"), dict) else None
+    if heights:
+        clean["heights"] = heights
     return clean
 
 
@@ -146,6 +161,11 @@ def write_layout(values, path=LAYOUT_PATH):
         if not blocks:
             return False
         current["blocks"] = blocks
+    if "heights" in values:
+        heights = clean_heights(values.get("heights"))
+        if heights is None:
+            return False
+        current["heights"] = heights
     file = Path(path)
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(json.dumps(current), encoding="utf-8")

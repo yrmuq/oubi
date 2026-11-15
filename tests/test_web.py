@@ -170,6 +170,8 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(read_layout(path)["blocks"], order)
             self.assertFalse(write_layout({"blocks": {"left": ["log"]}}, path))
             self.assertEqual(read_layout(path)["blocks"]["left"], ["log"])
+            self.assertTrue(write_layout({"heights": {"folders": 240, "nope": 10}}, path))
+            self.assertEqual(read_layout(path)["heights"], {"folders": 240})
 
     def test_images_with_tag(self):
         import tempfile

@@ -64,7 +64,7 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .themes button { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
 .themes button.on { background: var(--btn); color: #fff; }
 .top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
-.pane { border: 1px solid var(--line); background: var(--pane); margin: 8px 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.pane { border: 1px solid var(--line); background: var(--pane); margin: 8px 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 button { font: inherit; color: #fff; background: var(--btn); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
@@ -94,9 +94,10 @@ button:disabled { opacity: 0.45; cursor: default; }
 .bar { height: 10px; background: var(--bar); border-radius: 99px; overflow: hidden; }
 .bar > div { height: 100%; width: 0; background: var(--fill); }
 .detail { color: var(--muted); min-height: 1.2em; }
-.mid { position: relative; text-align: center; gap: 8px; display: flex; flex-direction: column; }
+.mid { position: relative; text-align: center; gap: 0; display: flex; flex-direction: column; }
 .block { min-width: 0; min-height: 0; }
 .block.grow { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; }
+.block-split { flex: 0 0 8px; height: 8px; margin: 6px 0; }
 body.arrange .block { outline: 1px dashed var(--pick); cursor: grab; border-radius: 8px; }
 body.arrange .block * { pointer-events: none; }
 .block.dragging { opacity: 0.4; }
@@ -136,7 +137,7 @@ body.arrange .block * { pointer-events: none; }
 .genre-8, .genre-handle.genre-8 { background: #f3e7a1; }
 .genre-9, .genre-handle.genre-9 { background: #d7c4b0; }
 .genre-10, .genre-handle.genre-10 { background: #d5dbe3; }
-#right { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+#right { padding: 12px; display: flex; flex-direction: column; gap: 0; }
 #info { min-height: 0; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; text-align: left; }
 #right .split-h { margin: 0; }
 .genre-11, .genre-handle.genre-11 { background: #c9e8a9; }
@@ -462,6 +463,44 @@ function dragSplit(which, event) {
   window.addEventListener("pointerup", up);
 }
 
+function fitSplits() {
+  for (const id of ["left", "mid", "right"]) {
+    const host = document.getElementById(id);
+    for (const old of host.querySelectorAll(":scope > .block-split")) old.remove();
+    const blocks = [...host.querySelectorAll(":scope > .block")];
+    for (let index = 0; index < blocks.length - 1; index += 1) {
+      const split = document.createElement("div");
+      split.className = "split split-h block-split";
+      split.onpointerdown = (event) => dragBlockSplit(split, event);
+      blocks[index].after(split);
+    }
+  }
+}
+
+function dragBlockSplit(split, event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const above = split.previousElementSibling;
+  const below = split.nextElementSibling;
+  if (!above || !below) return;
+  const startY = event.clientY;
+  const aboveH = above.getBoundingClientRect().height;
+  const belowH = below.getBoundingClientRect().height;
+  const pair = aboveH + belowH;
+  function move(ev) {
+    const next = Math.min(pair - 36, Math.max(36, aboveH + ev.clientY - startY));
+    above.style.flex = "0 0 " + next + "px";
+    below.style.flex = "0 0 " + (pair - next) + "px";
+  }
+  function up() {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    saveLayout();
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
 function placeBlocks(order) {
   if (!order || !Array.isArray(order.left) || !Array.isArray(order.mid) || !Array.isArray(order.right)) return;
   for (const panel of ["left", "mid", "right"]) {
@@ -475,14 +514,28 @@ function placeBlocks(order) {
 
 function applyLayout() {
   placeBlocks(layout.blocks);
+  if (layout.heights) {
+    for (const name of Object.keys(layout.heights)) {
+      const block = document.querySelector('.block[data-block="' + name + '"]');
+      if (block) block.style.flex = "0 0 " + layout.heights[name] + "px";
+    }
+  }
   if (layout.left && layout.mid && layout.right) {
     panes.left = layout.left;
     panes.mid = layout.mid;
     panes.right = layout.right;
     paintPanes();
   }
+  fitSplits();
 }
 
+function blockHeights() {
+  const heights = {};
+  for (const block of document.querySelectorAll(".block")) {
+    if ((block.style.flex || "").indexOf("px") >= 0) heights[block.dataset.block] = Math.round(block.getBoundingClientRect().height);
+  }
+  return heights;
+}
 function blockOrder() {
   const order = {};
   for (const id of ["left", "mid", "right"]) {
@@ -501,6 +554,7 @@ function saveLayout() {
     info: Math.round(document.getElementById("info").getBoundingClientRect().height),
     log: Math.round(document.getElementById("log").getBoundingClientRect().height),
     blocks: blockOrder(),
+    heights: blockHeights(),
   };
   fetch("/api/layout", {
     method: "POST",
@@ -702,6 +756,7 @@ function arrangeUp() {
     if (dropAt.before) dropAt.panel.insertBefore(dragBlock, dropAt.before);
     else dropAt.panel.appendChild(dragBlock);
   }
+  fitSplits();
   if (dragBlock) dragBlock.classList.remove("dragging");
   clearDrop();
   dragBlock = null;
