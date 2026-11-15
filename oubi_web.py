@@ -357,6 +357,95 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES):
     return found
 
 
+def tags_in_folders(rels, path=CSV_PATH, root=IMAGES):
+    base = Path(root).resolve()
+    folder_rels = []
+    for rel in rels or []:
+        folder = resolve_under(base, rel)
+        if not folder.is_dir():
+            raise ValueError(rel)
+        folder_rels.append("" if folder == base else folder.relative_to(base).as_posix())
+    file = Path(path)
+    stamp = (file.stat().st_mtime_ns, file.stat().st_size) if file.is_file() else (0, 0)
+    key = (str(file), stamp, tuple(sorted(folder_rels)), str(base))
+    cached = getattr(tags_in_folders, "cache", None)
+    if cached and cached["key"] == key:
+        return cached["tags"]
+    seen = set()
+    found = []
+
+    def add(raw):
+        token = str(raw or "").strip()
+        folded = token.casefold()
+        if not token or folded in seen:
+            return
+        seen.add(folded)
+        found.append(token)
+
+    def listed(rel):
+        rel = rel.strip("/")
+        for folder in folder_rels:
+            if folder == "" or rel == folder or rel.startswith(folder + "/"):
+                return True
+        return False
+
+    def relative_file(raw):
+        text = str(raw or "").strip().replace("\\", "/")
+        if not text:
+            return ""
+        image = Path(text)
+        if image.is_absolute():
+            prefix = base.as_posix().rstrip("/") + "/"
+            full = image.as_posix()
+            if full == base.as_posix():
+                return ""
+            if not full.startswith(prefix):
+                return ""
+            return full[len(prefix):]
+        return image.as_posix().lstrip("/")
+
+    columns = ("rating", "character", "copyright", "style", "general", "meta")
+    if file.is_file():
+        import csv
+        csv.field_size_limit(10**9)
+        try:
+            handle = file.open(encoding="utf-8", errors="replace")
+        except OSError:
+            handle = None
+        if handle is not None:
+            try:
+                for row in csv.DictReader(handle):
+                    if not listed(relative_file(row.get("file"))):
+                        continue
+                    for column in columns:
+                        for part in (row.get(column) or "").split(","):
+                            add(part)
+            except (OSError, csv.Error):
+                pass
+            finally:
+                handle.close()
+    else:
+        for rel in folder_rels:
+            folder = base if rel == "" else base / rel
+            try:
+                images = images_under(folder)
+            except OSError:
+                images = []
+            for image in images:
+                txt = image.with_suffix(".txt")
+                if not txt.is_file():
+                    continue
+                try:
+                    raw = txt.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                for part in raw.split(","):
+                    add(part)
+    found.sort(key=str.casefold)
+    tags_in_folders.cache = {"key": key, "tags": found}
+    return found
+
+
 def mark(done, total):
     if total <= 0 or done <= 0:
         return "none"
@@ -1019,6 +1108,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/tagged":
             self._send(200, {"files": images_with_tags(query.get("tag", []))})
+            return
+        if path == "/api/vocabulary":
+            try:
+                self._send(200, {"tags": tags_in_folders(query.get("folder", []))})
+            except ValueError:
+                self._send(404, {"error": "нет такой папки"})
             return
         if path == "/api/tags":
             try:

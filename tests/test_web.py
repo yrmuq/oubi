@@ -27,6 +27,7 @@ from oubi_web import (
     write_layout,
     images_with_tag,
     images_with_tags,
+    tags_in_folders,
     detect_lang,
     read_lang,
     write_lang,
@@ -211,6 +212,26 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(images_with_tag("missing", csv_path, root), [])
             self.assertEqual(images_with_tags(["comic", "1girl"], csv_path, root), ["a.jpg"])
             self.assertEqual(images_with_tags(["comic", "portrait"], csv_path, root), [])
+
+    def test_vocabulary_comes_from_selected_folders(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "images"
+            (root / "set").mkdir(parents=True)
+            (root / "other").mkdir()
+            (root / "set" / "a.jpg").write_bytes(b"x")
+            (root / "set" / "b.jpg").write_bytes(b"x")
+            (root / "other" / "c.jpg").write_bytes(b"x")
+            csv_path = Path(tmp) / "tags.csv"
+            csv_path.write_text(
+                "file,rating,character,copyright,style,general,meta\n"
+                f"{root / 'set' / 'a.jpg'},rating:s,,original,,comic,1girl\n"
+                f"{root / 'set' / 'b.jpg'},rating:s,,title,,portrait,\n"
+                f"{root / 'other' / 'c.jpg'},rating:q,,title,,goblin,\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(tags_in_folders(["set"], csv_path, root), ["1girl", "comic", "original", "portrait", "rating:s", "title"])
+            self.assertEqual(tags_in_folders([""], csv_path, root), ["1girl", "comic", "goblin", "original", "portrait", "rating:q", "rating:s", "title"])
 
     def test_language_detects_browser_and_keeps_a_choice(self):
         import tempfile

@@ -285,6 +285,7 @@ const catalogs = __OUBI_LANGS__;
 let tagText = "";
 let hasFile = false;
 let pinned = [];
+let vocab = [];
 let theme = savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto" ? savedTheme : "auto";
 let wasBusy = false;
 const panes = { left: null, mid: null, right: null };
@@ -365,6 +366,7 @@ function renderFolders() {
       else selected.add(folder.path);
       renderFolders();
       loadRecent();
+      loadVocab();
     };
     box.appendChild(button);
   }
@@ -406,6 +408,24 @@ async function loadRecent() {
   reel = data.files || [];
   if (!reel.length) showEmpty();
   else if (follow && reel.length) showAt(reel.length - 1);
+}
+
+async function loadVocab() {
+  const key = [...selected].sort().join("\n");
+  if (!key) {
+    vocab = [];
+    return;
+  }
+  const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
+  try {
+    const data = await (await fetch("/api/vocabulary?" + query)).json();
+    if ([...selected].sort().join("\n") !== key) return;
+    vocab = data.tags || [];
+  } catch (error) {
+    return;
+  }
+  const input = document.getElementById("filter-query");
+  if (input && document.activeElement === input) applyGhost(input, document.getElementById("filter-ghost"));
 }
 
 function rainbow(index) {
@@ -759,21 +779,26 @@ function tagList() {
   return String(tagText || "").split(",").map((part) => part.trim()).filter(Boolean);
 }
 
-function pendingTags(prefix) {
+function pendingTags(prefix, source) {
   const folded = String(prefix || "").trim().toLowerCase();
   if (!folded) return [];
-  return tagList().filter((item) => {
+  const tags = source || tagList();
+  return tags.filter((item) => {
     const key = item.toLowerCase();
     return key.startsWith(folded) && key.length > folded.length;
-  });
+  }).slice(0, 40);
 }
 
-function matchTag(prefix) {
+function matchTag(prefix, source) {
   const typed = String(prefix || "");
-  const tags = pendingTags(typed);
+  const tags = pendingTags(typed, source);
   if (!tags.length) return null;
   const tag = tags[Math.min(suggestPick, tags.length - 1)];
   return { tag, used: typed.length };
+}
+
+function suggestSource(input) {
+  return input && input.id === "filter-query" ? vocab : null;
 }
 
 function hideSuggest() {
@@ -784,7 +809,7 @@ function hideSuggest() {
 
 function showSuggest(input) {
   const box = document.getElementById("suggest");
-  const tags = pendingTags(input.value);
+  const tags = pendingTags(input.value, suggestSource(input));
   if (document.activeElement !== input || !tags.length) {
     if (document.activeElement !== input) return;
     hideSuggest();
@@ -831,7 +856,7 @@ function applyGhost(input, ghost) {
   if (!ghost) return;
   ghost.style.paddingLeft = "";
   ghost.replaceChildren();
-  const found = matchTag(input.value);
+  const found = matchTag(input.value, suggestSource(input));
   if (!found) {
     showSuggest(input);
     return;
@@ -1047,6 +1072,7 @@ document.getElementById("lang").onclick = () => {
     body: JSON.stringify({ language: lang }),
   });
 };
+document.getElementById("filter-query").onfocus = () => loadVocab();
 document.getElementById("filter-query").oninput = () => {
   suggestPick = 0;
   applyGhost(document.getElementById("filter-query"), document.getElementById("filter-ghost"));
@@ -1054,7 +1080,7 @@ document.getElementById("filter-query").oninput = () => {
 document.getElementById("filter-query").onkeydown = (event) => {
   const input = event.currentTarget;
   const ghost = document.getElementById("filter-ghost");
-  const tags = pendingTags(input.value);
+  const tags = pendingTags(input.value, vocab);
   if ((event.key === "ArrowDown" || event.key === "ArrowUp") && tags.length) {
     event.preventDefault();
     suggestPick = (suggestPick + (event.key === "ArrowDown" ? 1 : tags.length - 1)) % tags.length;
@@ -1062,7 +1088,7 @@ document.getElementById("filter-query").onkeydown = (event) => {
     return;
   }
   if (event.key === " " && !event.ctrlKey && !event.altKey && !event.metaKey) {
-    const next = matchTag(input.value);
+    const next = matchTag(input.value, vocab);
     if (!next) return;
     event.preventDefault();
     suggestPick = 0;
@@ -1087,6 +1113,7 @@ document.getElementById("all-folders").onclick = () => {
   else for (const folder of folders) selected.add(folder.path);
   renderFolders();
   loadRecent();
+  loadVocab();
 };
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };
