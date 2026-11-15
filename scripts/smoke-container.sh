@@ -1,16 +1,40 @@
 #!/bin/sh
 set -eu
 
-# ===== CHECK THE CPU IMAGE STARTS =====
 image="${1:?image}"
 platform="${2:?platform}"
 
-docker run --rm --platform "$platform" --entrypoint python "$image" -c 'import pathlib, sys, torch
-sys.path.insert(0, "/opt/oubi")
-import oubi_web
-assert torch.cuda.is_available() is False, "CPU image loaded CUDA"
-for path in ("/usr/local/bin/entrypoint.sh", "/opt/oubi/tag_folder.py", "/opt/oubi/sort_images.py", "/opt/oubi/oubi_web.py"):
-    assert pathlib.Path(path).is_file(), path
-found = oubi_web.parse_progress("Скачивание: 25% (1.0 КБ из 4.0 КБ), сейчас 1.0 КБ/с")
-assert found["percent"] == 25, found
-print(torch.__version__)'
+# A local model directory exercises the real entrypoint without downloading weights.
+container=$(docker run --detach --platform "$platform" -e OUBI_MODEL=/opt/oubi "$image")
+trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+if ! docker exec -i "$container" python - <<'PY'
+import json
+import time
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+base = "http://127.0.0.1:8080"
+for attempt in range(30):
+    try:
+        with urlopen(base + "/api/status", timeout=2) as response:
+            status = json.load(response)
+        if status["model"] == "ready":
+            break
+    except (OSError, URLError):
+        pass
+    time.sleep(1)
+else:
+    raise SystemExit("Oubi did not start with a ready local model")
+
+with urlopen(Request(base, headers={"Accept-Language": "en"}), timeout=2) as response:
+    page = response.read()
+assert b'<html lang="en">' in page
+assert b'id="tag"' in page
+
+import torch
+assert not torch.cuda.is_available(), "CPU image loaded CUDA"
+PY
+then
+    docker logs "$container" >&2
+    exit 1
+fi

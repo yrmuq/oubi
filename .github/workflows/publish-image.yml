@@ -1,145 +1,84 @@
-name: Publish one image tag
+name: Publish an Oubi image
 
 on:
   workflow_call:
     inputs:
-      tag:
+      channel:
         required: true
         type: string
       ref:
         required: true
         type: string
-      version:
-        required: false
-        type: string
-        default: ""
-
-env:
-  IMAGE: ghcr.io/yrmuq/oubi
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    concurrency:
+      group: oubi-publish-${{ inputs.channel }}
+      cancel-in-progress: false
     permissions:
-      contents: read
+      contents: write
       packages: write
+    env:
+      IMAGE: ghcr.io/yrmuq/oubi
+      CHANNEL: ${{ inputs.channel }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
-
-      - name: Refuse a tag from the wrong branch
-        run: |
-          if [ "${{ inputs.tag }}" = "latest" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
-            echo "latest is published only from main." >&2
-            exit 1
-          fi
-          if [ "${{ inputs.tag }}" = "dev" ] && [ "${GITHUB_REF}" != "refs/heads/dev" ]; then
-            echo "dev is published only from dev." >&2
-            exit 1
-          fi
-          if [ "${{ inputs.tag }}" != "latest" ] && [ "${{ inputs.tag }}" != "dev" ]; then
-            echo "Unknown image tag: ${{ inputs.tag }}" >&2
-            exit 1
-          fi
-
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            version="${{ inputs.version }}"
-          else
-            version="$(tr -d '[:space:]' < VERSION)"
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: docker/setup-buildx-action@v3
-
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build amd64
+      - name: Determine the release source and image tags
+        id: image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/publish-image.sh prepare
+      - name: Test stable and dependency releases
+        if: ${{ steps.image.outputs.source != '' && inputs.channel != 'dev' }}
+        run: sh scripts/check.sh
+      - name: Build the candidate
+        if: ${{ steps.image.outputs.source != '' && inputs.channel != 'dev' }}
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           load: true
-          tags: ${{ env.IMAGE }}:smoke-amd64
-          cache-from: type=gha,scope=amd64
-          cache-to: type=gha,mode=max,scope=amd64
-          labels: |
-            org.opencontainers.image.source=https://github.com/yrmuq/oubi
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.licenses=GPL-3.0-only
-            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
-
-      - name: Start amd64
-        run: sh scripts/smoke-container.sh "${IMAGE}:smoke-amd64" linux/amd64
-
-      - name: Select tags
-        id: tags
-        run: |
-          moving="${IMAGE}:${{ inputs.tag }}"
-          sha="${IMAGE}:sha-${GITHUB_SHA}"
-          version="${{ inputs.version }}"
-          {
-            echo "list<<EOF"
-            echo "${moving}"
-            if docker buildx imagetools inspect "${sha}" >/dev/null 2>&1; then
-              echo "SHA tag already published, not replacing it." >&2
-            else
-              echo "${sha}"
-            fi
-            if [ "${{ inputs.tag }}" = "latest" ] && [ -n "${version}" ]; then
-              numbered="${IMAGE}:${version}"
-              if docker buildx imagetools inspect "${numbered}" >/dev/null 2>&1; then
-                echo "Version tag already published, not replacing it." >&2
-              else
-                echo "${numbered}"
-              fi
-            fi
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Push ${{ inputs.tag }}
+          tags: oubi:smoke
+          labels: ${{ steps.image.outputs.labels }}
+          cache-from: type=gha,scope=oubi-bookworm-3.12-amd64
+          cache-to: type=gha,mode=max,scope=oubi-bookworm-3.12-amd64
+      - name: Start the candidate
+        if: ${{ steps.image.outputs.source != '' && inputs.channel != 'dev' }}
+        run: sh scripts/smoke-container.sh oubi:smoke linux/amd64
+      - name: Reserve the dependency release version
+        if: ${{ steps.image.outputs.source != '' && inputs.channel == 'deps' }}
+        env:
+          RELEASE_VERSION: ${{ steps.image.outputs.version }}
+          SOURCE_SHA: ${{ steps.image.outputs.source }}
+        run: git push origin "$SOURCE_SHA:refs/tags/v$RELEASE_VERSION"
+      - name: Publish immutable tags
+        if: ${{ steps.image.outputs.tags != '' }}
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.tags.outputs.list }}
-          cache-from: type=gha,scope=amd64
-          cache-to: type=gha,mode=max,scope=amd64
-          labels: |
-            org.opencontainers.image.source=https://github.com/yrmuq/oubi
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.licenses=GPL-3.0-only
-            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
-
-      - name: Make the package public
-        continue-on-error: true
+          tags: ${{ steps.image.outputs.tags }}
+          labels: ${{ steps.image.outputs.labels }}
+          cache-from: type=gha,scope=oubi-bookworm-3.12-amd64
+          cache-to: type=gha,mode=max,scope=oubi-bookworm-3.12-amd64
+      - name: Verify the published image and update its release channel
+        if: ${{ steps.image.outputs.source != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api --method PATCH \
-            -H "Accept: application/vnd.github+json" \
-            "/users/yrmuq/packages/container/oubi" \
-            -f visibility=public
-
-      - name: Pull without credentials
-        run: |
-          docker logout ghcr.io || true
-          docker rmi "${IMAGE}:${{ inputs.tag }}" || true
-          ok=0
-          for i in 1 2 3 4 5 6; do
-            if docker pull "${IMAGE}:${{ inputs.tag }}"; then
-              ok=1
-              break
-            fi
-            echo "Registry has not published the manifest yet. Retry ${i}." >&2
-            sleep 10
-          done
-          test "$ok" = 1
+          SOURCE_SHA: ${{ steps.image.outputs.source }}
+          RELEASE_VERSION: ${{ steps.image.outputs.version }}
+        run: bash scripts/publish-image.sh finish

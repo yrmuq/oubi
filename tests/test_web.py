@@ -30,10 +30,12 @@ from oubi_web import (
     tags_in_folders,
     detect_lang,
     read_lang,
+    read_language_choice,
+    page_bytes,
     write_lang,
     load_catalogs,
     text,
-    placeholder_names,
+    placeholder_fields,
 )
 from sort_images import under_roots
 
@@ -115,7 +117,7 @@ class WebTests(unittest.TestCase):
             paths, error = absolute_folders(["pack"], base)
             self.assertIsNone(error)
             self.assertEqual(paths, [str(folder.resolve())])
-            self.assertEqual(absolute_folders([], base)[1], "Нужно выбрать папки.")
+            self.assertEqual(absolute_folders([], base, language="ru")[1], "Нужно выбрать папки.")
             (base / "b.jpg").write_bytes(b"jpg")
             self.assertEqual(folder_names(base / "empty" if False else base), ["pack"])
             only = base / "loose"
@@ -236,7 +238,8 @@ class LayoutTests(unittest.TestCase):
     def test_language_detects_browser_and_keeps_a_choice(self):
         import tempfile
         self.assertEqual(detect_lang("ru-RU,ru;q=0.9,en;q=0.8"), "ru")
-        self.assertEqual(detect_lang("fr-FR,fr;q=0.9"), "en")
+        self.assertEqual(detect_lang("fr-FR,fr;q=0.9", {}), "en")
+        self.assertEqual(detect_lang("ru;q=0,en;q=0.8,ru-RU;q=0.4", {}), "en")
         self.assertEqual(detect_lang("", {"LANG": "ru_RU.UTF-8"}), "ru")
         packs = load_catalogs()
         self.assertEqual(packs["ru"]["1"], "Опознать")
@@ -248,9 +251,36 @@ class LayoutTests(unittest.TestCase):
             self.assertTrue(write_lang("ru", path))
             self.assertEqual(read_lang(path, "en-US"), "ru")
             self.assertFalse(write_lang("de", path))
-        self.assertNotEqual(placeholder_names("Опознать {missing}"), placeholder_names("Identify"))
+            self.assertTrue(write_lang("auto", path))
+            self.assertEqual(read_language_choice(path), "auto")
+            self.assertEqual(read_lang(path, "en-US"), "en")
+            self.assertEqual(read_lang(path, "ru-RU"), "ru")
+        rendered = page_bytes([], lang="en", language_choice="auto")
+        self.assertIn(b'<html lang="en">', rendered)
+        self.assertIn(b'let languageChoice = "auto";', rendered)
         self.assertIn("1", packs["en"])
         self.assertTrue(text(1))
+
+    def test_catalog_falls_back_for_invalid_fields_or_format_specs(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            english = root / "English.ini"
+            original = "{name} {0:03d} {value:{width}}"
+            rows = "\n".join(f"{number} = {original} = {original}" for number in range(1, 7))
+            english.write_text(f"; code = en\n{rows}", encoding="utf-8-sig")
+            russian = root / "Russian.ini"
+            valid = "{0:03d} {value:{width}} {name}"
+            candidates = [valid, "{name} {1:03d} {value:{width}}", "{name} {0:d} {value:{width}}", "{name} {0:03d} {value:{size}}", "", "{name"]
+            rows = "\n".join(f"{number} = {original} = {value}" for number, value in enumerate(candidates, 1))
+            russian.write_text(f"; code = ru\n{rows}", encoding="utf-8-sig")
+            actual = load_catalogs(root)["ru"]
+            self.assertEqual(actual["1"], valid)
+            for number in range(2, 7):
+                self.assertEqual(actual[str(number)], original)
+        self.assertNotEqual(placeholder_fields("{:d} {:s}"), placeholder_fields("{:s} {:d}"))
+        self.assertEqual(placeholder_fields("{{name}}"), placeholder_fields("literal"))
 
 
 if __name__ == "__main__":

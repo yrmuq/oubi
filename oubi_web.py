@@ -10,6 +10,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from string import Formatter
 from urllib.parse import parse_qs, urlparse
 
 # ===== SETTINGS =====
@@ -28,21 +29,23 @@ PAGE_PATH = HERE / "oubi_page.html"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 SORTED_LIST = "/data/sorted.txt"
 LANG_PATH = "/data/language"
-LANG_CODES = {"en", "ru"}
-PLACEHOLDERS = re.compile(r"\{[a-zA-Z0-9_]+\}")
+LANG_FILES = {"en": "English.ini", "ru": "Russian.ini"}
+LANG_CHOICES = {"auto", *LANG_FILES}
 
-def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalogs=None):
+def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalogs=None, language_choice="auto"):
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
     chosen = theme if theme in THEMES else "auto"
     genre_payload = json.dumps(list(genres or [])[:MAX_GENRES], ensure_ascii=False).replace("<", "\\u003c")
     layout_payload = json.dumps(layout or {}, ensure_ascii=False).replace("<", "\\u003c")
-    lang_code = lang if lang in LANG_CODES else "en"
+    lang_code = lang if lang in LANG_FILES else "en"
+    language_choice = language_choice if language_choice in LANG_CHOICES else "auto"
     lang_payload = json.dumps(catalogs or {}, ensure_ascii=False).replace("<", "\\u003c")
     html = PAGE_PATH.read_text(encoding="utf-8")
     html = html.replace("FOLDERS_JSON", payload, 1).replace("__OUBI_THEME__", chosen, 1)
     html = html.replace("__OUBI_GENRES__", genre_payload, 1)
     html = html.replace("__OUBI_LAYOUT__", layout_payload, 1)
-    html = html.replace("__OUBI_LANG__", lang_code, 1)
+    html = html.replace("__OUBI_LANG__", lang_code)
+    html = html.replace("__OUBI_LANGUAGE_CHOICE__", language_choice, 1)
     html = html.replace("__OUBI_LANGS__", lang_payload, 1)
     return html.encode()
 
@@ -66,77 +69,105 @@ def parse_catalog(text):
     return code, rows
 
 
-def placeholder_names(text):
-    return tuple(sorted(PLACEHOLDERS.findall(text or "")))
+def placeholder_fields(template):
+    fields = []
+    formatter = Formatter()
+
+    def collect(value, depth=0):
+        for _, field, spec, conversion in formatter.parse(value):
+            if field is None:
+                continue
+            if depth > 1 or conversion not in {None, "s", "r", "a"}:
+                raise ValueError("Invalid format field")
+            fields.append((field, spec, conversion or ""))
+            if spec:
+                collect(spec, depth + 1)
+
+    try:
+        collect(template)
+    except ValueError:
+        return None
+    numbered = [item for item in fields if not item[0].split(".")[0].split("[")[0]]
+    return tuple(sorted(fields)), tuple(numbered)
 
 
 def load_catalogs(root=None):
-    base = Path(root) if root else HERE / "languages"
-    english = parse_catalog((base / "English.ini").read_text(encoding="utf-8-sig"))[1]
+    base = (Path(root) if root else HERE / "languages").resolve()
     catalogs = {}
-    for file in sorted(base.glob("*.ini")):
-        code, rows = parse_catalog(file.read_text(encoding="utf-8-sig"))
-        if code not in LANG_CODES:
-            continue
+    english = {}
+    for code, name in LANG_FILES.items():
+        try:
+            file = (base / name).resolve()
+            file.relative_to(base)
+            declared_code, rows = parse_catalog(file.read_text(encoding="utf-8-sig"))
+            if declared_code != code:
+                rows = {}
+        except (OSError, ValueError):
+            rows = {}
+        if code == "en":
+            english = rows
         packed = {}
         for number, (original, _) in english.items():
             translated = rows.get(number, ("", ""))[1]
-            if not translated.strip() or placeholder_names(translated) != placeholder_names(original):
+            fields = placeholder_fields(translated)
+            if not translated or fields is None or fields != placeholder_fields(original):
                 translated = original
             packed[str(number)] = translated
         catalogs[code] = packed
-    catalogs.setdefault("en", {str(number): original for number, (original, _) in english.items()})
     return catalogs
 
 
 def language_code(value):
-    token = (value or "").strip().lower().replace("-", "_").split(".")[0]
-    if token.startswith("ru"):
-        return "ru"
-    if token.startswith("en"):
-        return "en"
-    return ""
+    token = re.split(r"[-_.@]", (value or "").strip().lower(), maxsplit=1)[0]
+    return token if token in LANG_FILES else ""
 
 
 def detect_lang(header="", environ=None):
-    for part in (header or "").split(","):
-        found = language_code(part.split(";", 1)[0])
-        if found:
-            return found
+    preferred = []
+    for part in header.split(","):
+        tag, _, weight = part.strip().partition(";")
+        try:
+            quality = float(weight.strip().removeprefix("q=")) if weight else 1
+        except ValueError:
+            continue
+        if 0 < quality <= 1 and (found := language_code(tag)):
+            preferred.append((quality, found))
+    if preferred:
+        return max(preferred, key=lambda item: item[0])[1]
     env = environ if environ is not None else os.environ
     for key in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
-        raw = env.get(key, "")
-        if not raw or raw.lower() == "c":
-            continue
-        found = language_code(raw.split(":", 1)[0])
-        if found:
-            return found
+        for value in env.get(key, "").split(":"):
+            if found := language_code(value):
+                return found
     return "en"
 
 
-def read_lang(path=None, header=""):
+def read_language_choice(path=None):
     path = LANG_PATH if path is None else path
     try:
         saved = Path(path).read_text(encoding="utf-8").strip().lower()
     except OSError:
         saved = ""
-    if saved in LANG_CODES:
-        return saved
-    return detect_lang(header)
+    return saved if saved in LANG_CHOICES else "auto"
 
 
-def write_lang(value, path=LANG_PATH):
-    if value not in LANG_CODES:
+def read_lang(path=None, header=""):
+    saved = read_language_choice(path)
+    return detect_lang(header) if saved == "auto" else saved
+
+
+def write_lang(value, path=None):
+    if not isinstance(value, str) or value not in LANG_CHOICES:
         return False
-    file = Path(path)
+    file = Path(LANG_PATH if path is None else path)
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(value, encoding="utf-8")
     return True
 
 
-def text(number, **values):
+def text(number, *, language=None, **values):
     packs = load_catalogs()
-    pack = packs.get(read_lang()) or packs.get("en") or {}
+    pack = packs.get(language or os.environ.get("OUBI_JOB_LANGUAGE") or read_lang()) or packs.get("en") or {}
     template = pack.get(str(number)) or (packs.get("en") or {}).get(str(number)) or ""
     try:
         return template.format(**values)
@@ -186,7 +217,7 @@ def read_theme(path=THEME_PATH):
 
 
 def write_theme(value, path=THEME_PATH):
-    if value not in THEMES:
+    if not isinstance(value, str) or value not in THEMES:
         return False
     file = Path(path)
     file.parent.mkdir(parents=True, exist_ok=True)
@@ -561,7 +592,7 @@ def summarize_images(rel, images, csv_paths, sorted_paths, root=None):
     total = len(images)
     return {
         "path": rel,
-        "name": "Картинки" if rel == "" else Path(rel).name,
+        "name": text(84) if rel == "" else Path(rel).name,
         "total": total,
         "tagged": tagged,
         "sorted": laid,
@@ -595,19 +626,19 @@ def source_folders(root=IMAGES):
     return found
 
 
-def absolute_folders(rels, root=IMAGES):
+def absolute_folders(rels, root=IMAGES, *, language=None):
     if not isinstance(rels, list) or not rels:
-        return None, "Нужно выбрать папки."
+        return None, text(85, language=language)
     paths = []
     for rel in rels:
         if not isinstance(rel, str):
-            return None, "Нет такой папки."
+            return None, text(86, language=language)
         try:
             path = resolve_under(root, rel)
         except ValueError:
-            return None, "Нет такой папки."
+            return None, text(86, language=language)
         if not path.is_dir():
-            return None, "Нет такой папки."
+            return None, text(86, language=language)
         paths.append(str(path))
     return paths, None
 
@@ -744,28 +775,28 @@ def flag_on(value):
     return str(value or "").strip() in {"1", "true", "TRUE", "yes", "YES"}
 
 
-def reject_reason(model_state, job_running, mode):
-    if mode not in MODES:
-        return text(32)
+def reject_reason(model_state, job_running, mode, *, language=None):
+    if not isinstance(mode, str) or mode not in MODES:
+        return text(32, language=language)
     if job_running:
-        return text(33)
+        return text(33, language=language)
     if mode in {"tag", "all"} and model_state != "ready":
-        return text(34)
+        return text(34, language=language)
     return None
 
 
-def preflight(mode):
+def preflight(mode, *, language=None):
     if mode in {"tag", "all"} and not os.path.isdir(IMAGES):
-        return text(35)
+        return text(35, language=language)
     batch = os.environ.get("OUBI_BATCH_SIZE", "1")
     if mode in {"tag", "all"} and (not batch.isdigit() or int(batch) < 1):
-        return text(36)
+        return text(36, language=language)
     if mode in {"sort", "plan", "all"} and not os.path.isdir(OUTPUT):
-        return text(37)
+        return text(37, language=language)
     if mode in {"sort", "plan"} and not os.path.isfile(CSV_PATH):
-        return text(38)
+        return text(38, language=language)
     if mode in {"sort", "plan", "all"} and os.environ.get("OUBI_NSFW_FROM", "q") not in {"q", "e"}:
-        return text(39)
+        return text(39, language=language)
     return None
 
 
@@ -895,7 +926,7 @@ class App:
         return [
             {
                 "path": name,
-                "name": "Картинки" if name == "" else name,
+                "name": text(84) if name == "" else name,
                 "total": 0,
                 "tagged": 0,
                 "sorted": 0,
@@ -991,32 +1022,33 @@ class App:
         threading.Thread(target=self.download, daemon=True).start()
         return True
 
-    def start(self, mode, folders):
-        paths, error = absolute_folders(folders)
-        reason = error or preflight(mode)
+    def start(self, mode, folders, *, language=None):
+        paths, error = absolute_folders(folders, language=language)
+        reason = error or preflight(mode, language=language)
         if reason:
-            self.note(text(79, reason=reason))
-            return False
+            self.note(text(79, reason=reason, language=language))
+            return reason
         with self.lock:
             if self.job_running:
-                return False
+                return text(33, language=language)
             self.job_running = True
             self.job_mode = mode
             self.percent = None
             self.detail = ""
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
-            self.step = text(25)
+            self.step = text(25, language=language)
             self.folder_cache = None
-        threading.Thread(target=self._run, args=(mode, paths), daemon=True).start()
-        return True
+        threading.Thread(target=self._run, args=(mode, paths, language), daemon=True).start()
+        return None
 
-    def _run(self, mode, folders):
+    def _run(self, mode, folders, language=None):
         commands = []
         if mode in {"tag", "all"}:
             commands.append(tag_command(folders))
         if mode in {"sort", "plan", "all"}:
             commands.append(sort_command(plan=mode == "plan", folders=folders))
         code = 0
+        env = dict(os.environ, OUBI_JOB_LANGUAGE=language or read_lang())
         try:
             for command in commands:
                 if not self.job_running:
@@ -1030,6 +1062,7 @@ class App:
                     command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
+                    env=env,
                     text=True,
                     bufsize=1,
                     start_new_session=True,
@@ -1047,11 +1080,11 @@ class App:
                 self.proc = None
                 self.folder_cache = None
             if code == 0:
-                self.note(text(80))
+                self.note(text(80, language=language))
             elif code < 0:
-                self.note(text(81))
+                self.note(text(81, language=language))
             else:
-                self.note(text(82, code=code))
+                self.note(text(82, code=code, language=language))
 
     def stop(self):
         with self.lock:
@@ -1079,13 +1112,22 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _language(self):
+        return read_lang(header=self.headers.get("Accept-Language", ""))
+
+    def _error(self, status, message):
+        self._send(status, {"error": text(message, language=self._language())})
+
     def do_GET(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         path = parsed.path
         if path == "/":
-            chosen = read_lang(header=self.headers.get("Accept-Language", ""))
-            self._send(200, page_bytes(self.app.folders(), read_theme(), read_genres(), read_layout(), chosen, load_catalogs()), "text/html; charset=utf-8")
+            page = page_bytes(
+                self.app.folders(), read_theme(), read_genres(), read_layout(),
+                self._language(), load_catalogs(), read_language_choice(),
+            )
+            self._send(200, page, "text/html; charset=utf-8")
             return
         if path == "/api/status":
             self._send(200, self.app.status())
@@ -1098,13 +1140,13 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._send(200, browse_dir(root, query.get("path", [""])[0]))
             except ValueError:
-                self._send(404, {"error": "нет такой папки"})
+                self._error(404, 86)
             return
         if path == "/api/recent":
             try:
                 self._send(200, {"files": recent_tagged(query.get("folder", []))})
             except ValueError:
-                self._send(404, {"error": "нет такой папки"})
+                self._error(404, 86)
             return
         if path == "/api/tagged":
             self._send(200, {"files": images_with_tags(query.get("tag", []))})
@@ -1113,58 +1155,62 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._send(200, {"tags": tags_in_folders(query.get("folder", []))})
             except ValueError:
-                self._send(404, {"error": "нет такой папки"})
+                self._error(404, 86)
             return
         if path == "/api/tags":
             try:
                 self._send(200, read_info(query.get("path", [""])[0]))
             except ValueError:
-                self._send(404, {"error": "нет файла"})
+                self._error(404, 87)
             return
         if path == "/api/file":
             root = OUTPUT if query.get("root", ["images"])[0] == "output" else IMAGES
             try:
                 file = resolve_under(root, query.get("path", [""])[0])
             except ValueError:
-                self._send(404, {"error": "нет файла"})
+                self._error(404, 87)
                 return
             if not file.is_file() or file.suffix.lower() not in IMAGE_EXTS:
-                self._send(404, {"error": "нет файла"})
+                self._error(404, 87)
                 return
             self._send(200, file.read_bytes(), content_type(file))
             return
-        self._send(404, {"error": "нет такой страницы"})
+        self._error(404, 88)
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        length = int(self.headers.get("Content-Length", "0") or 0)
-        raw = self.rfile.read(min(length, 200000)) if length else b"{}"
         try:
-            payload = json.loads(raw.decode() or "{}")
-        except json.JSONDecodeError:
-            self._send(400, {"error": "непонятный запрос"})
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            if not 0 <= length <= 200000:
+                raise ValueError("Invalid body length")
+            raw = self.rfile.read(length) if length else b"{}"
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+        except ValueError:
+            self._error(400, 89)
             return
         if parsed.path == "/api/theme":
             if not write_theme(payload.get("theme")):
-                self._send(400, {"error": "нет такой темы"})
+                self._error(400, 90)
                 return
             self._send(200, {"theme": read_theme()})
             return
         if parsed.path == "/api/language":
-            if not write_lang(str(payload.get("language") or "")):
-                self._send(400, {"error": "нет такого языка"})
+            if not write_lang(payload.get("language")):
+                self._error(400, 91)
                 return
-            self._send(200, {"language": read_lang()})
+            self._send(200, {"choice": read_language_choice(), "language": self._language()})
             return
         if parsed.path == "/api/layout":
             if not write_layout(payload if isinstance(payload, dict) else {}):
-                self._send(400, {"error": "непонятные размеры"})
+                self._error(400, 92)
                 return
             self._send(200, read_layout())
             return
         if parsed.path == "/api/genres":
             if not write_genres(payload.get("genres")):
-                self._send(400, {"error": "непонятные жанры"})
+                self._error(400, 93)
                 return
             self._send(200, {"genres": read_genres()})
             return
@@ -1174,21 +1220,22 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/download":
             if not self.app.retry_download():
-                self._send(409, {"error": "скачивание уже идёт"})
+                self._error(409, 99)
                 return
             self._send(200, {"ok": True})
             return
         if parsed.path != "/api/job":
-            self._send(404, {"error": "нет такой страницы"})
+            self._error(404, 88)
             return
         mode = payload.get("mode")
         state = self.app.status()
-        reason = reject_reason(state["model"], state["job_running"], mode)
+        language = self._language()
+        reason = reject_reason(state["model"], state["job_running"], mode, language=language)
         if reason:
             self._send(409, {"error": reason})
             return
-        if not self.app.start(mode, payload.get("folders") or []):
-            self._send(409, {"error": self.app.status()["step"]})
+        if reason := self.app.start(mode, payload.get("folders") or [], language=language):
+            self._send(409, {"error": reason})
             return
         self._send(200, {"ok": True})
 

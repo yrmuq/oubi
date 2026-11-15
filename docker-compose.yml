@@ -1,5 +1,4 @@
 services:
-
   oubi:
     container_name: oubi
     image: ghcr.io/yrmuq/oubi:${OUBI_CHANNEL}
@@ -15,13 +14,11 @@ services:
       - TZ=${TZ}
       - HF_HOME=/cache
       - HUGGINGFACE_HUB_CACHE=/cache
-      - OUBI_MODE=${OUBI_MODE}
       - OUBI_MODEL=${OUBI_MODEL}
       - OUBI_BATCH_SIZE=${OUBI_BATCH_SIZE}
       - OUBI_NO_TXT=${OUBI_NO_TXT}
       - OUBI_FORCE=${OUBI_FORCE}
       - OUBI_MOVE=${OUBI_MOVE}
-      - OUBI_DRY_RUN=${OUBI_DRY_RUN}
       - OUBI_NSFW_FROM=${OUBI_NSFW_FROM}
       - OUBI_GENRE_1=${OUBI_GENRE_1}
       - OUBI_GENRE_2=${OUBI_GENRE_2}
@@ -52,9 +49,3 @@ services:
         max-size: "55m"
         max-file: "1"
     restart: unless-stopped
-    networks:
-      - homelab
-
-networks:
-  homelab:
-    external: true

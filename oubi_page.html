@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="__OUBI_LANG__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -110,6 +110,7 @@ body.arrange .block * { pointer-events: none; }
 .block.drop-before { box-shadow: inset 0 3px 0 var(--pick); }
 .block.drop-after { box-shadow: inset 0 -3px 0 var(--pick); }
 .head-tools { display: flex; align-items: center; gap: 8px; }
+.head-tools select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
 #arrange { width: 32px; height: 32px; padding: 0; background: var(--btn-2); color: var(--text); }
 #arrange.on { background: var(--pick); color: #111; }
 #lang { height: 32px; padding: 0 8px; background: var(--btn-2); color: var(--text); }
@@ -198,7 +199,11 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   <span class="brand">oubi</span>
   <div class="head-tools">
     <button id="arrange" type="button" title="Move blocks">✎</button>
-    <button id="lang" type="button" title="Language">EN</button>
+    <select id="lang" aria-label="Language">
+      <option value="auto">System language</option>
+      <option value="en" lang="en">English</option>
+      <option value="ru" lang="ru">Русский</option>
+    </select>
     <button id="theme" type="button">auto</button>
   </div>
 </header>
@@ -221,6 +226,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <p id="step" class="step">Открываю…</p>
       <div class="bar"><div id="fill"></div></div>
       <p id="detail" class="detail"></p>
+      <p id="notice" class="detail" role="status" hidden></p>
     </div>
     <div class="block grow" data-block="log">
       <pre id="log" class="log"></pre>
@@ -275,6 +281,7 @@ let shown = "";
 let genres = __OUBI_GENRES__;
 let layout = __OUBI_LAYOUT__;
 let lang = "__OUBI_LANG__";
+let languageChoice = "__OUBI_LANGUAGE_CHOICE__";
 const catalogs = __OUBI_LANGS__;
 let tagText = "";
 let hasFile = false;
@@ -307,6 +314,7 @@ function showEmpty() {
 }
 
 function applyI18n() {
+  document.documentElement.lang = lang;
   document.getElementById("tag").textContent = t(1);
   document.getElementById("sort").textContent = t(2);
   document.getElementById("plan").textContent = t(3);
@@ -315,8 +323,13 @@ function applyI18n() {
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("all-folders").title = t(83);
-  document.getElementById("lang").title = t(21);
-  document.getElementById("lang").textContent = lang === "ru" ? "RU" : "EN";
+  const language = document.getElementById("lang");
+  language.setAttribute("aria-label", t(21));
+  language.options[0].textContent = t(102);
+  language.value = languageChoice;
+  for (const [id, key] of [["prev", 94], ["next", 95], ["filter-query", 96], ["zoom-close", 97]]) {
+    document.getElementById(id).setAttribute("aria-label", t(key));
+  }
   if (!hasFile) showEmpty();
   renderFolders();
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
@@ -351,7 +364,7 @@ function renderFolders() {
     button.className = "folder" + (selected.has(folder.path) ? " on" : "");
     const label = document.createElement("span");
     label.className = "name";
-    label.textContent = folder.name;
+    label.textContent = folder.path === "" ? t(84) : folder.name;
     button.append(folderIcon(folder.scan, folder.sort), label);
     button.onclick = () => {
       if (selected.has(folder.path)) selected.delete(folder.path);
@@ -527,6 +540,10 @@ async function showImage(root, path) {
 async function tick() {
   const data = await (await fetch("/api/status")).json();
   let step = data.step || t(7);
+  if (data.phase === "download" && !data.job_running) {
+    if (data.model === "ready") step = t(23);
+    if (data.model === "downloading" && !data.detail) step = t(22);
+  }
   const named = step.match(/Сейчас: размечаю (.+) \((\d+ из \d+)\)/);
   if (named) step = "Сейчас: размечаю " + fileName(named[1]) + " (" + named[2] + ").";
   document.getElementById("step").textContent = step;
@@ -551,14 +568,29 @@ async function tick() {
   }
 }
 
+function showNotice(message = "") {
+  const notice = document.getElementById("notice");
+  notice.textContent = message;
+  notice.hidden = !message;
+}
+
 async function start(mode) {
-  await fetch("/api/job", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, folders: [...selected] }),
-  });
-  follow = true;
-  tick();
+  showNotice();
+  try {
+    const response = await fetch("/api/job", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode, folders: [...selected] }),
+    });
+    if (!response.ok) {
+      showNotice((await response.json()).error || t(100));
+      return;
+    }
+    follow = true;
+    tick();
+  } catch {
+    showNotice(t(100));
+  }
 }
 
 function paintPanes() {
@@ -976,6 +1008,7 @@ function renderGenreRow(focusAt) {
     add.type = "button";
     add.id = "genre-add";
     add.textContent = "+";
+    add.setAttribute("aria-label", t(101));
     add.onclick = () => {
       if (genres.length >= 20) return;
       genres.push("");
@@ -1054,14 +1087,28 @@ document.getElementById("arrange").onclick = () => {
   document.getElementById("arrange").classList.toggle("on", arranging);
   if (!arranging) saveLayout();
 };
-document.getElementById("lang").onclick = () => {
-  lang = lang === "ru" ? "en" : "ru";
-  applyI18n();
-  fetch("/api/language", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ language: lang }),
-  });
+document.getElementById("lang").onchange = async (event) => {
+  const selector = event.currentTarget;
+  selector.disabled = true;
+  showNotice();
+  try {
+    const response = await fetch("/api/language", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language: selector.value }),
+    });
+    if (!response.ok) throw new Error();
+    const choice = await response.json();
+    languageChoice = choice.choice;
+    lang = choice.language;
+    applyI18n();
+    tick();
+  } catch {
+    selector.value = languageChoice;
+    showNotice(t(98));
+  } finally {
+    selector.disabled = false;
+  }
 };
 document.getElementById("filter-query").onfocus = () => loadVocab();
 document.getElementById("filter-query").oninput = () => {

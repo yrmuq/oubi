@@ -3,6 +3,11 @@ name: Publish dev image
 on:
   push:
     branches: [dev]
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
 
 jobs:
   checks:
@@ -10,29 +15,33 @@ jobs:
     permissions:
       contents: read
     concurrency:
-      group: dev-checks
+      group: dev-image-checks
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Test
-        run: |
-          bash tests/bump-version.test.sh
-          python -m unittest tests.test_tag_folder tests.test_web
-          sh -n entrypoint.sh
+      - run: sh scripts/check.sh
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: oubi:smoke
+          cache-from: type=gha,scope=oubi-bookworm-3.12-amd64
+          cache-to: type=gha,mode=max,scope=oubi-bookworm-3.12-amd64
+      - run: sh scripts/smoke-container.sh oubi:smoke linux/amd64
 
   publish:
     needs: checks
-    concurrency:
-      group: dev-image-push
-      cancel-in-progress: false
     permissions:
-      contents: read
+      contents: write
       packages: write
     uses: ./.github/workflows/publish-image.yml
     with:
-      tag: dev
-      ref: ${{ github.sha }}
-    secrets: inherit
+      channel: dev
+      ref: ${{ inputs.ref || github.sha }}

@@ -14,44 +14,38 @@
 
 ---
 
-`oubi` tags a folder of anime images with [PixAI Tagger v1.0](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) and sorts them into folders by series, rating, and character. Tagging and sorting are separate steps, so the sort can be repeated without running the model again. This image runs on CPU.
+`oubi` tags anime images with [PixAI Tagger v1.0](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) and sorts them by series, rating, character, and selected genres. The self-hosted web interface runs in a CPU container. Tagging and sorting are separate steps, so you can sort again using saved tags.
+
+![Oubi web interface showing the folder list, image preview, tag filter, and job controls](docs/oubi-web.png)
 
 ---
 
 ## Features
 
-* Tags every image under the source folder and writes `tags.csv` with columns `file`, `rating`, `character`, `copyright`, `style`, `general`, and `meta`. Tags inside a column are ordered by confidence.
-* Skips an image when a `.txt` sidecar is already next to it, so an interrupted run can continue. `--force` retags.
-* Sorts from `tags.csv` only, without loading the model, into `<title>/<sfw|nsfw>/<character>/<character>_<title>_0001.jpg`.
-* The `dev` image opens a page, downloads the model, and waits. Tagging and sorting start from the buttons on that page.
-* Reads optional gender corrections from `genders.csv`.
+- Select source folders, identify images, and preview saved tags in the browser.
+- Resume tagging from existing `.txt` sidecars. Set `OUBI_FORCE=1` to tag those images again.
+- Plan a sort from `tags.csv`, then copy or move images. Numbered pages stay in their series and original art can be sorted by configured genres.
+- Filter the preview by tags, correct character genders through `genders.csv`, and customize the layout, theme, and language.
 
 ---
 
-## Configuration
-
 <details>
-<summary>Environment</summary>
+<summary><h2>Configuration</h2></summary>
 
 | Input | Action |
 | :--- | :--- |
-| `OUBI_MODE` | Ignored on the `dev` image. The page starts tagging and sorting. On `latest`, `all`, `tag`, or `sort` still run at startup and there is no page. |
-| `OUBI_PORT` | Host port for the `dev` page. The container listens on `8080`. |
-| `OUBI_DRY_RUN=1` | Print the sort plan and do not copy or move. Tagging still writes when the mode is `all`. |
-| `OUBI_MOVE=1` | Move files instead of copying them. |
-| `OUBI_NSFW_FROM=q` | `rating:q` and `rating:e` go to `nsfw`. `e` sends only `rating:e` to `nsfw`. |
-| `OUBI_NO_TXT=1` | Do not write `.txt` sidecars. Resume then has nothing to skip. |
-| `OUBI_FORCE=1` | Tag images again even when a `.txt` sidecar exists. |
-| `OUBI_COPY_TXT=1` | Copy or move the `.txt` sidecar next to the sorted image. |
-| `OUBI_BATCH_SIZE=1` | Images per model pass. Leave this at `1` on CPU. |
-| `OUBI_MODEL` | Hugging Face id or a local model directory. |
-| `HSA_OVERRIDE_GFX_VERSION` | Kept for a later ROCm image. This CPU image ignores it. |
+| `Identify` | Tag images in the selected folders when the model is ready. |
+| `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
+| `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
+| `OUBI_PORT` | Choose the host port. The container listens on `8080`. |
+| `OUBI_NO_TXT=1` | Skip writing tag sidecars. Resume relies on sidecars that already exist. |
+| `OUBI_NSFW_FROM` | Use `q` to include `rating:q` and `rating:e`, or `e` to include only `rating:e`. |
+| `OUBI_COPY_TXT=1` | Copy or move accompanying `.txt` files with sorted images. |
+| `OUBI_BATCH_SIZE` | Set the number of images in a model pass. The CPU default is `1`. |
+| `OUBI_MODEL` | Use a Hugging Face model ID or a model directory visible to the container. |
+| `OUBI_GENRE_1`–`OUBI_GENRE_20` | Set initial genre tags in order. A saved genre list in the web interface takes precedence. |
 
-`OUBI_DRY_RUN` is not used by the page. `Sort plan` prints the destination and does not copy. A dry-run still writes `unknown_genders.txt` when some characters have no gender vote.
-
-The container prints the compute device before tagging. On this image the line is `Device: CPU (no graphics card found!)`. That is expected: AMD and Nvidia are not wired up yet. `HSA_OVERRIDE_GFX_VERSION` does not turn a GPU on.
-
-`genders.csv` is optional. Put it in the data volume, with no header. One row is a character tag and `f` or `m`, for example `hatsune_miku,f`. If the file exists, sort loads it. After sort, characters that still have no gender are listed in `unknown_genders.txt` in the same folder. Add those rows to `genders.csv` and run sort again.
+Put optional gender overrides in `genders.csv` under the data directory as headerless rows like `hatsune_miku,f`. Copy entries from `unknown_genders.txt` into that file, add `f` or `m`, then sort again.
 
 </details>
 
@@ -66,105 +60,33 @@ The container prints the compute device before tagging. On this image the line i
 | `x86_64` | ✅ |
 | `arm64` | ❌ |
 
+The published container supports `linux/amd64` and uses CPU inference.
+
 ### Release Scheme
 
-A push to `dev` publishes `ghcr.io/yrmuq/oubi:dev`. It does not create a release and it does not move `latest`.
-
-`v0.1.0` is the current stable release on `main`. It has no web page. Its image is `ghcr.io/yrmuq/oubi:latest` until the next merge. The next merge into `main` publishes `v0.2.0`, moves `latest` to that image, and also tags the image with `0.2.0`, which stays put. GitHub opens the release and writes the number back. A second push created by that write does not publish another version.
-
-Each commit is also tagged `sha-<commit>` once, and that tag is not replaced. Only `linux/amd64` is built.
+Use the [latest stable release](https://github.com/yrmuq/oubi/releases/latest) for regular use and the [release list](https://github.com/yrmuq/oubi/releases) for versioned images. Stable releases are `X.Y.0` and publish `ghcr.io/yrmuq/oubi:latest`. Automated dependency prereleases use `X.Y.Z` with `Z > 0` and use their numbered tag. Development builds use `:dev`. All three channels run the web interface.
 
 ### Docker
 
+Put the [Compose file](docker-compose.yml) and the [environment example](.env.example) in the same folder. Copy the example to `.env` and fill in your image and output paths, `LOCATION`, `PUID`, and `PGID`. The example uses `OUBI_CHANNEL=dev`. Set `OUBI_CHANNEL=latest` for the stable image.
 
-Copy `.env.example` to `.env` and set the paths, `PUID`, and `PGID`.
+Create the host directories for `/data`, `/cache`, and `/output`, and give your configured container user write access. The user also needs write access to the source folder when writing sidecars or moving originals.
 
-```bash
-mkdir -p "$LOCATION/docker/data/oubi/data" "$LOCATION/docker/data/oubi/cache" "$OUBI_OUTPUT"
-sudo chown -R "$PUID:$PGID" "$LOCATION/docker/data/oubi" "$OUBI_OUTPUT"
-```
-
-The source folder must be writable by that user, because tagging writes a `.txt` file next to each image unless `OUBI_NO_TXT=1`.
-
-`docker-compose.yml`:
-
-```yaml
-services:
-
-  oubi:
-    container_name: oubi
-    image: ghcr.io/yrmuq/oubi:dev
-    ports:
-      - ${OUBI_PORT}:8080
-    user: "${PUID}:${PGID}"
-    volumes:
-      - ${OUBI_IMAGES}:/images
-      - ${OUBI_OUTPUT}:/output
-      - ${LOCATION}/docker/data/oubi/data:/data
-      - ${LOCATION}/docker/data/oubi/cache:/cache
-    environment:
-      - TZ=${TZ}
-      - HF_HOME=/cache
-      - HUGGINGFACE_HUB_CACHE=/cache
-      - OUBI_MODEL=pixai-labs/pixai-tagger-v1.0
-      - OUBI_BATCH_SIZE=1
-      - OUBI_NO_TXT=0
-      - OUBI_FORCE=0
-      - OUBI_MOVE=0
-      - OUBI_DRY_RUN=0
-      - OUBI_NSFW_FROM=q
-      - OUBI_COPY_TXT=0
-      - HF_TOKEN=${HF_TOKEN}
-      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION}
-    logging:
-      driver: json-file
-      options:
-        max-size: "55m"
-        max-file: "1"
-    restart: "unless-stopped"
-
-```
-
-`.env`:
-
-```dotenv
-TZ=UTC
-LOCATION=/path/to/data
-PUID=1000
-PGID=1000
-OUBI_IMAGES=/path/to/pictures
-OUBI_OUTPUT=/path/to/sorted
-OUBI_PORT=8080
-HF_TOKEN=
-HSA_OVERRIDE_GFX_VERSION=
-```
+Run these commands for installation and updates.
 
 ```bash
 docker compose pull
-docker compose up
-```
-
-Open `http://<server>:${OUBI_PORT}`. On startup the `dev` image only downloads the model and serves the page. Pick one or more folders in the mounted pictures, then start tagging or sorting. The buttons do nothing until a folder is selected. A folder carries two marks: tagging (not started, partial, done) and sorting (the same three states). `Identify` tags. `Sort` copies. `Sort plan` does not copy. Running the sort again copies the pictures once more under the next numbers.
-
-`latest` has no page. It still runs the job from `OUBI_MODE` and exits when that job finishes.
-
-For a long run:
-
-```bash
 docker compose up -d
-docker compose logs -f oubi
 ```
 
-`tags.csv` stores container paths under `/images`. Keep that mount path. The page downloads the model weights into the cache volume when the container starts. They are not in the image.
+Open the server address on `OUBI_PORT` (default `8080`), choose source folders, and use `Identify`, `Sort plan`, or `Sort`. The application downloads model weights into `/cache` on startup. If the selected model requires Hugging Face authentication, set `HF_TOKEN` in your local `.env`.
 
 | Container Path | Purpose |
 | :--- | :--- |
-| `/images` | Source pictures. Writable, so `.txt` sidecars can be saved next to them. |
-| `/output` | Sorted copies or moves. |
-| `/data` | `tags.csv`, optional `genders.csv`, and `unknown_genders.txt`. |
-| `/cache` | Hugging Face download of the tagger weights. |
-
-To preview the folders before copying, use `Sort plan` on the page.
+| `/images` | Source images and optional tag sidecars. Keep this mount path because saved indexes use it. |
+| `/output` | Sorted images. |
+| `/data` | Saved tags, sorting history, gender overrides, and web settings. |
+| `/cache` | Downloaded model weights, kept across image updates. |
 
 ---
 
@@ -174,7 +96,7 @@ The scripts and `Dockerfile` in this repository are licensed under `GPL-3.0-only
 
 | Component | Upstream | License | Integration Details |
 | --- | --- | --- | --- |
-| PixAI Tagger v1.0 | [pixai-labs/pixai-tagger-v1.0](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) | `Apache-2.0` | Weights download into `/cache` on first tag. Not baked into the image. |
+| PixAI Tagger v1.0 | [pixai-labs/pixai-tagger-v1.0](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) | `Apache-2.0` | Weights download into `/cache` when the app starts. |
 | PyTorch | [pytorch/pytorch](https://github.com/pytorch/pytorch) | `BSD-3-Clause` | CPU build installed in the image. |
 | Transformers | [huggingface/transformers](https://github.com/huggingface/transformers) | `Apache-2.0` | Loads the tagger pipeline. |
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | `Apache-2.0` | Required by the tagger model code. |
