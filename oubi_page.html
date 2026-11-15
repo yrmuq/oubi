@@ -133,7 +133,9 @@ body.arrange .block * { pointer-events: none; }
 .genre-field { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .genre-field input, .genre-ghost { font: inherit; padding: 4px 6px; box-sizing: border-box; }
 .genre-ghost { position: absolute; inset: 0; z-index: 2; color: var(--muted); pointer-events: none; white-space: pre; overflow: visible; border: 1px solid transparent; }
-.ghost-typed { color: transparent; }
+#suggest { position: fixed; z-index: 30; max-height: 180px; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+#suggest button { display: block; width: 100%; text-align: left; background: transparent; color: var(--text); border: 0; border-radius: 0; padding: 6px 8px; }
+#suggest button.on { background: var(--line); }
 .ghost-tail { color: var(--muted); }
 .genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
 #genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
@@ -264,6 +266,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     </div>
   </section>
 </div>
+<div id="suggest" hidden></div>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
   <img id="zoom-img" alt="">
@@ -750,20 +753,78 @@ for (const id of ["tag", "sort", "plan"]) document.getElementById(id).onclick = 
 if (!Array.isArray(genres) || !genres.length) genres = [""];
 let genreTimer = 0;
 let genreDrag = -1;
+let suggestPick = 0;
 
 function tagList() {
   return String(tagText || "").split(",").map((part) => part.trim()).filter(Boolean);
 }
 
-function matchTag(prefix) {
-  const typed = String(prefix || "");
-  const folded = typed.toLowerCase();
-  if (!folded.trim()) return null;
-  const tag = tagList().find((item) => {
+function pendingTags(prefix) {
+  const folded = String(prefix || "").trim().toLowerCase();
+  if (!folded) return [];
+  return tagList().filter((item) => {
     const key = item.toLowerCase();
     return key.startsWith(folded) && key.length > folded.length;
   });
-  return tag ? { tag, used: typed.length } : null;
+}
+
+function matchTag(prefix) {
+  const typed = String(prefix || "");
+  const tags = pendingTags(typed);
+  if (!tags.length) return null;
+  const tag = tags[Math.min(suggestPick, tags.length - 1)];
+  return { tag, used: typed.length };
+}
+
+function hideSuggest() {
+  const box = document.getElementById("suggest");
+  box.hidden = true;
+  box.innerHTML = "";
+}
+
+function showSuggest(input) {
+  const box = document.getElementById("suggest");
+  const tags = pendingTags(input.value);
+  if (document.activeElement !== input || !tags.length) {
+    if (document.activeElement !== input) return;
+    hideSuggest();
+    return;
+  }
+  suggestPick = Math.min(suggestPick, tags.length - 1);
+  box.innerHTML = "";
+  tags.forEach((tag, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = tag;
+    if (index === suggestPick) button.className = "on";
+    button.onmousedown = (event) => {
+      event.preventDefault();
+      suggestPick = 0;
+      input.value = tag;
+      takeSuggestion(input);
+    };
+    box.append(button);
+  });
+  const rect = input.getBoundingClientRect();
+  box.hidden = false;
+  box.style.left = rect.left + "px";
+  box.style.top = (rect.bottom + 4) + "px";
+  box.style.width = Math.max(rect.width, 180) + "px";
+}
+
+function takeSuggestion(input) {
+  const ghost = input.id === "filter-query"
+    ? document.getElementById("filter-ghost")
+    : input.parentElement.querySelector(".genre-ghost");
+  if (input.id !== "filter-query") {
+    const index = [...document.querySelectorAll("#genre-row .genre-field input")].indexOf(input);
+    if (index >= 0) {
+      genres[index] = input.value.trim();
+      paintTags(tagText);
+      saveGenres();
+    }
+  }
+  applyGhost(input, ghost);
 }
 
 function applyGhost(input, ghost) {
@@ -771,7 +832,10 @@ function applyGhost(input, ghost) {
   ghost.style.paddingLeft = "";
   ghost.replaceChildren();
   const found = matchTag(input.value);
-  if (!found) return;
+  if (!found) {
+    showSuggest(input);
+    return;
+  }
   const typed = document.createElement("span");
   typed.className = "ghost-typed";
   typed.textContent = input.value;
@@ -780,6 +844,7 @@ function applyGhost(input, ghost) {
   tail.textContent = found.tag.slice(found.used);
   ghost.style.font = getComputedStyle(input).font;
   ghost.append(typed, tail);
+  showSuggest(input);
 }
 
 function saveGenres() {
@@ -859,23 +924,33 @@ function renderGenreRow(focusAt) {
     input.value = value || "";
     applyGhost(input, ghost);
     input.oninput = () => {
+      suggestPick = 0;
       genres[index] = input.value.trim();
       applyGhost(input, ghost);
       paintTags(tagText);
       saveGenres();
     };
     input.onkeydown = (event) => {
+      const tags = pendingTags(input.value);
+      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && tags.length) {
+        event.preventDefault();
+        suggestPick = (suggestPick + (event.key === "ArrowDown" ? 1 : tags.length - 1)) % tags.length;
+        applyGhost(input, ghost);
+        return;
+      }
       if (event.key !== " " || event.ctrlKey || event.altKey || event.metaKey) return;
       const next = matchTag(input.value);
       if (!next) return;
       event.preventDefault();
+      suggestPick = 0;
       input.value = next.tag;
       genres[index] = next.tag;
-      ghost.textContent = "";
-      ghost.style.paddingLeft = "";
+      ghost.replaceChildren();
       paintTags(tagText);
       saveGenres();
+      applyGhost(input, ghost);
     };
+    input.onblur = () => setTimeout(hideSuggest, 0);
     field.append(ghost, input);
     slot.append(handle, pin, field);
     row.append(slot);
@@ -973,26 +1048,37 @@ document.getElementById("lang").onclick = () => {
   });
 };
 document.getElementById("filter-query").oninput = () => {
+  suggestPick = 0;
   applyGhost(document.getElementById("filter-query"), document.getElementById("filter-ghost"));
 };
 document.getElementById("filter-query").onkeydown = (event) => {
   const input = event.currentTarget;
   const ghost = document.getElementById("filter-ghost");
+  const tags = pendingTags(input.value);
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && tags.length) {
+    event.preventDefault();
+    suggestPick = (suggestPick + (event.key === "ArrowDown" ? 1 : tags.length - 1)) % tags.length;
+    applyGhost(input, ghost);
+    return;
+  }
   if (event.key === " " && !event.ctrlKey && !event.altKey && !event.metaKey) {
     const next = matchTag(input.value);
     if (!next) return;
     event.preventDefault();
+    suggestPick = 0;
     input.value = next.tag;
-    ghost.textContent = "";
-    ghost.style.paddingLeft = "";
+    ghost.replaceChildren();
+    applyGhost(input, ghost);
     return;
   }
   if (event.key !== "Enter") return;
   event.preventDefault();
   addFilterTag(input.value);
   input.value = "";
-  document.getElementById("filter-ghost").textContent = "";
+  document.getElementById("filter-ghost").replaceChildren();
+  hideSuggest();
 };
+document.getElementById("filter-query").onblur = () => setTimeout(hideSuggest, 0);
 applyI18n();
 document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
 document.getElementById("all-folders").onclick = () => {
