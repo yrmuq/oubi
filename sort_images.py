@@ -25,6 +25,13 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 csv.field_size_limit(10**9)
+
+
+def say(number, **values):
+    from oubi_web import text
+    return text(number, **values)
+
+
 GIRLS = {"1girl": 1, "2girls": 2, "3girls": 3, "4girls": 4, "5girls": 5, "6+girls": 6, "multiple_girls": 2}
 BOYS = {"1boy", "2boys", "3boys", "4boys", "5boys", "6+boys", "multiple_boys"}
 
@@ -286,18 +293,18 @@ def main():
     work = [r for r in rows if under_roots(r["file"], args.only)]
     series, stuck = series_targets(work, gender, nsfw_set, title_of, args.genres)
     for path, tag in stuck:
-        print(f"Тег серии: {path} -> {tag}", flush=True)
+        print(say(72, path=path, tag=tag), flush=True)
     if stuck and not args.dry_run and fieldnames:
         write_tags(args.csv, fieldnames, rows)
         for path, tag in stuck:
             stick_txt(path, tag)
-    print(f"Сейчас: раскладываю {len(work)} строк из tags.csv.", flush=True)
+    print(say(73, count=len(work)), flush=True)
     for index, r in enumerate(work, 1):
         if index == 1 or index % 25 == 0 or index == len(work):
-            print(f"Раскладка: {index} из {len(work)}", flush=True)
+            print(say(74, index=index, total=len(work)), flush=True)
         src = Path(r["file"])
         if not src.exists():
-            stats["нет файла"] += 1
+            stats[say(77)] += 1
             continue
         planned = series.get(r["file"])
         if planned:
@@ -357,14 +364,13 @@ def main():
             if args.sorted_list:
                 with open(args.sorted_list, "a", encoding="utf-8") as mark:
                     mark.write(str(src.resolve()) + "\n")
-        stats[folder_char == "group" and "group" or ("unknown" if folder_char == "unknown" else "персонаж")] += 1
+        stats["group" if folder_char == "group" else ("unknown" if folder_char == "unknown" else say(78))] += 1
 
-    print("Итого:", dict(stats))
+    print(say(75, stats=dict(stats)))
     unknown_gender = sorted({c for r in rows for c in r["_chars"]} - set(gender))
     if unknown_gender:
         Path("unknown_genders.txt").write_text("\n".join(unknown_gender), encoding="utf-8")
-        print(f"Пол не определён у {len(unknown_gender)} персонажей, список в unknown_genders.txt "
-              "(их можно дописать в genders.csv)")
+        print(say(76, count=len(unknown_gender)))
 
 if __name__ == "__main__":
     main()

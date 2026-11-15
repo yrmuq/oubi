@@ -129,7 +129,7 @@ body.arrange .block * { pointer-events: none; }
 .genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
 #genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
 .tag-hit { cursor: pointer; border-radius: 4px; padding: 0 3px; }
-#filter { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; min-height: 28px; }
+.filter-find { margin: 0 0 8px; }
 .filter-tag { color: #111; border-radius: 6px; }
 .genre { border-radius: 4px; padding: 0 3px; color: #111; }
 .genre-1, .genre-handle.genre-1 { background: #ffb4b4; }
@@ -238,6 +238,10 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       </div>
     </div>
     <div class="block" data-block="filter">
+      <div class="genre-field filter-find">
+        <span id="filter-ghost" class="genre-ghost"></span>
+        <input id="filter-query" spellcheck="false" autocomplete="off">
+      </div>
       <div id="filter"></div>
     </div>
     <div class="block grow" data-block="log">
@@ -405,6 +409,16 @@ function renderFilter() {
     button.onclick = () => togglePin(tag);
     box.append(button);
   });
+}
+
+function addFilterTag(raw) {
+  const token = String(raw || "").trim();
+  if (!token || pinIndex(token) >= 0) return;
+  pinned.push(token);
+  renderFilter();
+  paintTags(tagText);
+  renderGenreRow();
+  applyFilter();
 }
 
 function togglePin(tag) {
@@ -742,10 +756,14 @@ function saveGenres() {
 
 function refreshGenreGhosts() {
   for (const input of document.querySelectorAll(".genre-field input")) {
+    if (input.id === "filter-query") continue;
     const ghost = input.parentElement.querySelector(".genre-ghost");
     const hint = suggestGenre(input.value);
     ghost.textContent = hint || "";
   }
+  const filterQuery = document.getElementById("filter-query");
+  const filterGhost = document.getElementById("filter-ghost");
+  if (filterQuery && filterGhost) filterGhost.textContent = suggestGenre(filterQuery.value) || "";
 }
 
 async function toggleGenre(index) {
@@ -916,6 +934,25 @@ document.getElementById("lang").onclick = () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ language: lang }),
   });
+};
+document.getElementById("filter-query").oninput = () => {
+  document.getElementById("filter-ghost").textContent = suggestGenre(document.getElementById("filter-query").value) || "";
+};
+document.getElementById("filter-query").onkeydown = (event) => {
+  const input = event.currentTarget;
+  if (event.key === " " && !event.ctrlKey && !event.altKey && !event.metaKey) {
+    const next = suggestGenre(input.value);
+    if (!next) return;
+    event.preventDefault();
+    input.value = next;
+    document.getElementById("filter-ghost").textContent = "";
+    return;
+  }
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  addFilterTag(input.value);
+  input.value = "";
+  document.getElementById("filter-ghost").textContent = "";
 };
 applyI18n();
 document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });

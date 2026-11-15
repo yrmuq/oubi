@@ -114,7 +114,8 @@ def detect_lang(header="", environ=None):
     return "en"
 
 
-def read_lang(path=LANG_PATH, header=""):
+def read_lang(path=None, header=""):
+    path = LANG_PATH if path is None else path
     try:
         saved = Path(path).read_text(encoding="utf-8").strip().lower()
     except OSError:
@@ -619,30 +620,33 @@ def read_info(rel):
 def parse_progress(line):
     text = line.strip()
     found = {}
-    download = re.search(r"Скачивание:\s+(\d+)%", text)
+    download = re.search(r"(?:Скачивание|Download):\s+(\d+)%", text)
     if download:
         found["percent"] = int(download.group(1))
         found["detail"] = text
         found["kind"] = "download"
         return found
-    tagging = re.search(r"Разметка:\s+(\d+)%", text)
+    tagging = re.search(r"(?:Разметка|Tagging):\s+(\d+)%", text)
     if tagging:
         found["percent"] = int(tagging.group(1))
         found["detail"] = text
         found["kind"] = "tag"
         return found
-    sorting = re.search(r"Раскладка:\s+(\d+)\s+из\s+(\d+)", text)
+    sorting = re.search(r"(?:Раскладка|Sorting):\s+(\d+)\s+(?:из|of)\s+(\d+)", text)
     if sorting:
         done, total = int(sorting.group(1)), int(sorting.group(2))
         found["percent"] = int(done * 100 / total) if total else 0
         found["detail"] = text
         found["kind"] = "sort"
         return found
-    if text.startswith("Сейчас:"):
+    if text.startswith(("Сейчас:", "Now:")):
         found["step"] = text
-    elif text.startswith(("Модель скачана", "Модель уже скачана", "Модель загружена", "Готово", "Итого:")):
+    elif text.startswith((
+        "Модель скачана", "Модель уже скачана", "Модель загружена", "Готово", "Итого:",
+        "Model downloaded", "Model already downloaded", "Model loaded", "Done", "Result:",
+    )):
         found["step"] = text
-        if text.startswith(("Готово", "Итого:")):
+        if text.startswith(("Готово", "Итого:", "Done", "Result:")):
             found["percent"] = 100
     return found
 
@@ -653,26 +657,26 @@ def flag_on(value):
 
 def reject_reason(model_state, job_running, mode):
     if mode not in MODES:
-        return "Неизвестная кнопка."
+        return text(32)
     if job_running:
-        return "Уже идёт другая работа."
+        return text(33)
     if mode in {"tag", "all"} and model_state != "ready":
-        return "Сначала должна скачаться модель."
+        return text(34)
     return None
 
 
 def preflight(mode):
     if mode in {"tag", "all"} and not os.path.isdir(IMAGES):
-        return "Папка картинок не смонтирована в /images."
+        return text(35)
     batch = os.environ.get("OUBI_BATCH_SIZE", "1")
     if mode in {"tag", "all"} and (not batch.isdigit() or int(batch) < 1):
-        return "OUBI_BATCH_SIZE должен быть 1 или больше."
+        return text(36)
     if mode in {"sort", "plan", "all"} and not os.path.isdir(OUTPUT):
-        return "Папка результата не смонтирована в /output."
+        return text(37)
     if mode in {"sort", "plan"} and not os.path.isfile(CSV_PATH):
-        return "Нет tags.csv. Сначала разметка."
+        return text(38)
     if mode in {"sort", "plan", "all"} and os.environ.get("OUBI_NSFW_FROM", "q") not in {"q", "e"}:
-        return "OUBI_NSFW_FROM должен быть q или e."
+        return text(39)
     return None
 
 
@@ -780,7 +784,7 @@ class App:
                 self.step = parsed["step"]
             if "kind" in parsed:
                 self.phase = parsed["kind"]
-            found = re.search(r"Сейчас: размечаю (.+) \(\d+ из \d+\)\.?$", text)
+            found = re.search(r"(?:Сейчас: размечаю|Now: tagging) (.+) \(\d+ (?:из|of) \d+\)\.?$", text)
             if found:
                 path = found.group(1).strip()
                 if self.current_file:
@@ -788,7 +792,7 @@ class App:
                 self.current_file = path
                 if not self.preview_file:
                     self.preview_file = path
-            elif text.startswith("Готово") and self.current_file:
+            elif text.startswith(("Готово", "Done")) and self.current_file:
                 self.preview_file = self.current_file
         if echo:
             print(text, flush=True)
@@ -871,7 +875,7 @@ class App:
         model = os.environ.get("OUBI_MODEL", "pixai-labs/pixai-tagger-v1.0")
         try:
             if os.path.isdir(model):
-                self.note("Сейчас: модель локальная, скачивание не нужно.")
+                self.note(text(56))
             else:
                 from tag_folder import download_model
 
@@ -902,7 +906,7 @@ class App:
         paths, error = absolute_folders(folders)
         reason = error or preflight(mode)
         if reason:
-            self.note(f"Сейчас: {reason}")
+            self.note(text(79, reason=reason))
             return False
         with self.lock:
             if self.job_running:
@@ -954,11 +958,11 @@ class App:
                 self.proc = None
                 self.folder_cache = None
             if code == 0:
-                self.note("Сейчас: работа закончилась.")
+                self.note(text(80))
             elif code < 0:
-                self.note("Сейчас: работу остановили.")
+                self.note(text(81))
             else:
-                self.note(f"Сейчас: работа завершилась с ошибкой {code}.")
+                self.note(text(82, code=code))
 
     def stop(self):
         with self.lock:
@@ -1101,14 +1105,14 @@ def main():
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     threading.Thread(target=app.download, daemon=True).start()
     threading.Thread(target=app._ensure_count, daemon=True).start()
-    print(f"Сейчас: страница на порту {port}.", flush=True)
+    print(text(28, port=port), flush=True)
     names = folder_names()
     if not names:
-        print("Сейчас: в /images папок не видно.", flush=True)
+        print(text(29), flush=True)
     elif names == [""]:
-        print("Сейчас: в /images нет вложенных папок, слева одна общая.", flush=True)
+        print(text(30), flush=True)
     else:
-        print(f"Сейчас: в /images папок {len(names)}.", flush=True)
+        print(text(31, count=len(names)), flush=True)
     server.serve_forever()
 
 

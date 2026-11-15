@@ -42,6 +42,10 @@ class WebTests(unittest.TestCase):
         self.assertEqual(parse_progress("Скачивание: 25% (1.0 КБ из 4.0 КБ), сейчас 1.0 КБ/с")["percent"], 25)
         self.assertEqual(parse_progress("Разметка: 10% (2 из 20), 0.20 карт./с, осталось ~1.0 ч")["kind"], "tag")
         self.assertEqual(parse_progress("Раскладка: 25 из 100")["percent"], 25)
+        self.assertEqual(parse_progress("Download: 25% (1.0 KB of 4.0 KB), now 1.0 KB/s")["percent"], 25)
+        self.assertEqual(parse_progress("Tagging: 10% (2 of 20), 0.20 img/s, about 1.0 h left")["kind"], "tag")
+        self.assertEqual(parse_progress("Sorting: 25 of 100")["percent"], 25)
+        self.assertEqual(parse_progress("Now: tagging a.jpg (1 of 2).")["step"], "Now: tagging a.jpg (1 of 2).")
         self.assertEqual(parse_progress("Сейчас: размечаю a.jpg.")["step"], "Сейчас: размечаю a.jpg.")
 
     def test_tag_waits_for_the_model_and_a_free_job(self):
