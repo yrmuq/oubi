@@ -72,8 +72,8 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .compute { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
 .compute select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 6px; padding: 4px; }
 .compute button { padding: 5px 8px; }
-#rocm-status { width: 100%; margin: 0; color: var(--muted); font-size: .9em; overflow-wrap: anywhere; }
-#rocm-progress { width: 100%; accent-color: var(--fill); }
+.compute-status { width: 100%; margin: 0; color: var(--muted); font-size: .9em; overflow-wrap: anywhere; }
+.compute progress { width: 100%; accent-color: var(--fill); }
 #all-folders { margin-left: auto; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
 #all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
 #all-folders.on .box { background: currentColor; }
@@ -231,11 +231,16 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <select id="compute-device">
           <option value="cpu">CPU</option>
           <option value="amd" disabled>AMD GPU</option>
+          <option value="nvidia" disabled>NVIDIA GPU</option>
         </select>
         <select id="rocm-arch" hidden></select>
         <button type="button" class="secondary" id="rocm-install" hidden>Install AMD support</button>
         <progress id="rocm-progress" max="1" hidden></progress>
-        <p id="rocm-status" aria-live="polite" hidden></p>
+        <p id="rocm-status" class="compute-status" aria-live="polite" hidden></p>
+        <select id="nvidia-card" hidden><option value="auto">Auto</option></select>
+        <button type="button" class="secondary" id="nvidia-install" hidden>Install NVIDIA support</button>
+        <progress id="nvidia-progress" max="1" hidden></progress>
+        <p id="nvidia-status" class="compute-status" aria-live="polite" hidden></p>
       </div>
     </div>
     <div class="block grow" data-block="folders">
@@ -313,8 +318,12 @@ const panes = { left: null, mid: null, right: null };
 const deviceInput = document.getElementById("compute-device");
 const rocmArch = document.getElementById("rocm-arch");
 const rocmInstall = document.getElementById("rocm-install");
+const nvidiaCard = document.getElementById("nvidia-card");
+const nvidiaInstall = document.getElementById("nvidia-install");
 let rocmState = null;
+let nvidiaState = null;
 let requestingRocm = false;
+let requestingNvidia = false;
 
 function fileName(path) {
   const parts = String(path || "").split("/");
@@ -348,9 +357,13 @@ function applyI18n() {
   document.getElementById("compute-device-label").textContent = t(104);
   deviceInput.options[0].textContent = t(105);
   deviceInput.options[1].textContent = t(106);
+  deviceInput.options[2].textContent = t(127);
   rocmArch.setAttribute("aria-label", t(107));
   rocmInstall.textContent = t(108);
   document.getElementById("rocm-progress").setAttribute("aria-label", t(109));
+  nvidiaCard.setAttribute("aria-label", t(128));
+  nvidiaInstall.textContent = t(135);
+  document.getElementById("nvidia-progress").setAttribute("aria-label", t(140));
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("all-folders").title = t(83);
@@ -362,6 +375,7 @@ function applyI18n() {
     document.getElementById(id).setAttribute("aria-label", t(key));
   }
   showRocm();
+  showNvidia();
   if (!hasFile) showEmpty();
   renderFolders();
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
@@ -572,7 +586,8 @@ async function showImage(root, path) {
 async function tick() {
   const data = await (await fetch("/api/status")).json();
   rocmState = data.rocm;
-  const gpuReady = showRocm();
+  nvidiaState = data.nvidia;
+  const readyDevices = { cpu: true, amd: showRocm(), nvidia: showNvidia() };
   let step = data.step || t(7);
   if (data.phase === "download" && !data.job_running) {
     if (data.model === "ready") step = t(23);
@@ -591,7 +606,7 @@ async function tick() {
   const picked = selected.size > 0;
   for (const id of ["tag", "sort", "plan"]) {
     document.getElementById(id).disabled = busy || !picked ||
-      (id === "tag" && (!ready || (deviceInput.value === "amd" && !gpuReady)));
+      (id === "tag" && (!ready || !readyDevices[deviceInput.value]));
   }
   document.getElementById("stop").disabled = !busy;
   document.getElementById("retry").hidden = data.model !== "error";
@@ -601,6 +616,20 @@ async function tick() {
     if (!reel.includes(data.preview_file)) reel.push(data.preview_file);
     showAt(reel.indexOf(data.preview_file));
   }
+}
+
+function gpuInstallProgress(id, install, working, messageId) {
+  const progress = document.getElementById(id);
+  progress.hidden = !working;
+  if (working && install.total) {
+    progress.max = install.total;
+    progress.value = install.received || 0;
+    const size = new Intl.NumberFormat(lang, { maximumFractionDigits: 1 });
+    const mib = value => size.format(value / (1024 * 1024));
+    return t(messageId) + " " + t(123).replace("{received}", mib(install.received || 0)).replace("{total}", mib(install.total));
+  }
+  progress.removeAttribute("value");
+  return t(messageId);
 }
 
 function showRocm() {
@@ -619,31 +648,18 @@ function showRocm() {
   const matches = !detected.length || detected.includes(arch);
   const name = visible && matches && installed[arch];
   const working = ["installing", "checking"].includes(install.state);
-  const progress = document.getElementById("rocm-progress");
   rocmArch.hidden = !visible;
   rocmArch.disabled = working || requestingRocm;
   rocmInstall.hidden = !visible;
   rocmInstall.disabled = working || requestingRocm || !arch || !matches || Boolean(name);
-  progress.hidden = !working;
-  if (working && install.total) {
-    progress.max = install.total;
-    progress.value = install.received || 0;
-  } else {
-    progress.removeAttribute("value");
-  }
+  const progress = gpuInstallProgress("rocm-progress", install, working, install.state === "checking" ? 111 : 110);
   deviceInput.options[1].disabled = !name;
   const status = document.getElementById("rocm-status");
-  status.hidden = false;
+  status.hidden = !visible && Boolean(nvidiaState?.gpus.length);
   let message;
-  if (!visible) message = t(113);
-  else if (working) {
-    message = t(install.state === "checking" ? 111 : 110);
-    if (install.total) {
-      const size = new Intl.NumberFormat(lang, { maximumFractionDigits: 1 });
-      const mib = value => size.format(value / (1024 * 1024));
-      message += " " + t(123).replace("{received}", mib(install.received || 0)).replace("{total}", mib(install.total));
-    }
-  } else if (!arch) message = t(detected.length ? 115 : 114);
+  if (!visible) message = t(139);
+  else if (working) message = progress;
+  else if (!arch) message = t(detected.length ? 115 : 114);
   else if (!matches) message = t(116);
   else if (name) message = t(124).replace("{gpu}", name).replace("{arch}", arch);
   else if (install.arch === arch && install.state === "error") message = t(install.error);
@@ -658,27 +674,74 @@ function showRocm() {
   return Boolean(name);
 }
 
+function showNvidia() {
+  if (!nvidiaState) return false;
+  const { gpus, installed, install } = nvidiaState;
+  const options = JSON.stringify(gpus.map(({ uuid, name }) => [uuid, name]));
+  if (nvidiaCard.dataset.options !== options) {
+    const selected = nvidiaCard.value;
+    nvidiaCard.replaceChildren(new Option(t(10), "auto"));
+    for (const { uuid, name } of gpus) nvidiaCard.add(new Option(name, uuid));
+    nvidiaCard.value = selected;
+    nvidiaCard.dataset.options = options;
+  }
+  nvidiaCard.options[0].textContent = t(10);
+  const uuid = nvidiaCard.value === "auto" ? nvidiaState.default : nvidiaCard.value;
+  const gpu = gpus.find(item => item.uuid === uuid);
+  const name = installed[uuid];
+  const working = ["installing", "checking"].includes(install.state);
+  const progress = gpuInstallProgress("nvidia-progress", install, working, install.state === "checking" ? 111 : 136);
+  nvidiaCard.hidden = !gpus.length;
+  nvidiaCard.disabled = working || requestingNvidia;
+  nvidiaInstall.hidden = !gpus.length;
+  nvidiaInstall.disabled = working || requestingNvidia || !gpu?.build || Boolean(name);
+  deviceInput.options[2].disabled = !name;
+  const status = document.getElementById("nvidia-status");
+  status.hidden = !gpus.length && !working;
+  let message;
+  if (working) message = progress;
+  else if (!gpu) message = t(130);
+  else if (!gpu.build) message = t(134);
+  else if (name) message = t(138).replace("{gpu}", name).replace("{build}", gpu.build);
+  else if (install.gpu === uuid && install.state === "error") message = t(install.error);
+  else message = t(137).replace("{gpu}", gpu.name).replace("{build}", gpu.build);
+  if (status.textContent !== message) status.textContent = message;
+  return Boolean(name);
+}
+
+async function installGpu(endpoint, payload, errorId) {
+  showNotice();
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (response.ok) return data;
+    showNotice(data.error || t(errorId));
+  } catch {
+    showNotice(t(errorId));
+  }
+  return null;
+}
+
 rocmArch.onchange = () => { showRocm(); tick(); };
+nvidiaCard.onchange = () => { showNvidia(); tick(); };
 deviceInput.onchange = () => tick();
 rocmInstall.onclick = async () => {
   requestingRocm = true;
   showRocm();
-  showNotice();
-  try {
-    const response = await fetch("/api/rocm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ architecture: rocmArch.value }),
-    });
-    const data = await response.json();
-    if (response.ok) rocmState = data;
-    else showNotice(data.error || t(121));
-  } catch {
-    showNotice(t(121));
-  } finally {
-    requestingRocm = false;
-    showRocm();
-  }
+  rocmState = await installGpu("/api/rocm", { architecture: rocmArch.value }, 121) || rocmState;
+  requestingRocm = false;
+  showRocm();
+};
+nvidiaInstall.onclick = async () => {
+  requestingNvidia = true;
+  showNvidia();
+  nvidiaState = await installGpu("/api/nvidia", { gpu: nvidiaCard.value }, 133) || nvidiaState;
+  requestingNvidia = false;
+  showNvidia();
 };
 
 function showNotice(message = "") {
@@ -695,6 +758,7 @@ async function start(mode) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode, folders: [...selected], device: deviceInput.value, architecture: rocmArch.value || "auto",
+        gpu: nvidiaCard.value,
       }),
     });
     if (!response.ok) {

@@ -13,7 +13,9 @@ from pathlib import Path
 from string import Formatter
 from urllib.parse import parse_qs, urlparse
 
-from oubi_rocm import RocmError, RocmRuntime
+from oubi_gpu import GpuError
+from oubi_nvidia import NvidiaRuntime
+from oubi_rocm import RocmRuntime
 
 # ===== SETTINGS =====
 HERE = Path(__file__).resolve().parent
@@ -803,7 +805,7 @@ def preflight(mode, *, language=None):
 
 
 # ===== COMMANDS =====
-def tag_command(folders, *, device="cpu", architecture=None, python=None):
+def tag_command(folders, *, device="cpu", architecture=None, gpu=None, python=None):
     command = [
         python or sys.executable,
         str(HERE / "tag_folder.py"),
@@ -819,6 +821,8 @@ def tag_command(folders, *, device="cpu", architecture=None, python=None):
     ]
     if architecture:
         command.extend(["--gpu-arch", architecture])
+    if gpu:
+        command.extend(["--gpu-uuid", gpu])
     if flag_on(os.environ.get("OUBI_NO_TXT")):
         command.append("--no-txt")
     if flag_on(os.environ.get("OUBI_FORCE")):
@@ -880,6 +884,7 @@ class App:
     def __init__(self):
         self.lock = threading.Lock()
         self.rocm = RocmRuntime()
+        self.nvidia = NvidiaRuntime()
         self.lines = []
         self.model_state = "downloading"
         self.job_running = False
@@ -1029,7 +1034,7 @@ class App:
         threading.Thread(target=self.download, daemon=True).start()
         return True
 
-    def start(self, mode, folders, *, language=None, device="cpu", architecture="auto"):
+    def start(self, mode, folders, *, language=None, device="cpu", architecture="auto", gpu="auto"):
         paths, error = absolute_folders(folders, language=language)
         reason = error or preflight(mode, language=language)
         if reason:
@@ -1037,14 +1042,19 @@ class App:
             return reason
         tagging = None
         if mode in {"tag", "all"}:
-            if device not in ("cpu", "amd"):
+            if device not in ("cpu", "amd", "nvidia"):
                 return text(122, language=language)
+            arch = uuid = python = None
             try:
-                arch = self.rocm.resolve(architecture) if device == "amd" else None
-                python = self.rocm.python_for(arch) if arch else None
-            except RocmError as error:
+                if device == "amd":
+                    arch = self.rocm.resolve(architecture)
+                    python = self.rocm.python_for(arch)
+                elif device == "nvidia":
+                    build, uuid = self.nvidia.resolve(gpu)
+                    python = self.nvidia.python_for(build, uuid)
+            except GpuError as error:
                 return text(error.message_id, language=language)
-            tagging = tag_command(paths, device=device, architecture=arch, python=python)
+            tagging = tag_command(paths, device=device, architecture=arch, gpu=uuid, python=python)
         with self.lock:
             if self.job_running:
                 return text(33, language=language)
@@ -1148,7 +1158,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, page, "text/html; charset=utf-8")
             return
         if path == "/api/status":
-            self._send(200, {**self.app.status(), "rocm": self.app.rocm.status()})
+            self._send(200, {**self.app.status(), "rocm": self.app.rocm.status(), "nvidia": self.app.nvidia.status()})
             return
         if path == "/api/folders":
             self._send(200, self.app.folders())
@@ -1242,16 +1252,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, {"ok": True})
             return
-        if parsed.path == "/api/rocm":
+        if parsed.path in {"/api/rocm", "/api/nvidia"}:
             if self.headers.get_content_type() != "application/json":
                 self._error(400, 89)
                 return
+            runtime, field = (self.app.rocm, "architecture") if parsed.path == "/api/rocm" else (self.app.nvidia, "gpu")
             try:
-                self.app.rocm.start(payload.get("architecture", "auto"))
-            except RocmError as error:
+                runtime.start(payload.get(field, "auto"))
+            except GpuError as error:
                 self._error(409, error.message_id)
                 return
-            self._send(202, self.app.rocm.status())
+            self._send(202, runtime.status())
             return
         if parsed.path != "/api/job":
             self._error(404, 88)
@@ -1266,6 +1277,7 @@ class Handler(BaseHTTPRequestHandler):
         if reason := self.app.start(
             mode, payload.get("folders") or [], language=language,
             device=payload.get("device", "cpu"), architecture=payload.get("architecture", "auto"),
+            gpu=payload.get("gpu", "auto"),
         ):
             self._send(409, {"error": reason})
             return

@@ -69,7 +69,7 @@ class RocmTests(unittest.TestCase):
             self.assertFalse(self.runtime.installed(arch))
             return SimpleNamespace(stdout=json.dumps("AMD Radeon RX 7600") + "\n")
 
-        with patch("oubi_rocm.subprocess.run", side_effect=run):
+        with patch("oubi_gpu.subprocess.run", side_effect=run):
             with patch.object(self.runtime, "_pip", side_effect=RocmError(121)):
                 self.runtime._install(arch)
             self.assertEqual(self.runtime.install["state"], "error")

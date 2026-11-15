@@ -11,7 +11,9 @@ import sys
 import time
 from pathlib import Path
 
-from oubi_rocm import RocmError, amd_device
+from oubi_gpu import GpuError
+from oubi_nvidia import GPU_UUID, nvidia_device
+from oubi_rocm import amd_device
 
 # ===== SETTINGS =====
 EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
@@ -298,6 +300,8 @@ def load_tagger(model, device="auto", architecture=None):
     print(say(57), flush=True)
     if device == "amd":
         index = amd_device(torch, architecture)
+    elif device == "nvidia":
+        index = nvidia_device(torch)
     else:
         index = 0 if device == "auto" and torch.cuda.is_available() else -1
     if index >= 0:
@@ -324,8 +328,9 @@ def main():
     ap.add_argument("--no-txt", action="store_true", help="не писать .txt рядом с картинками")
     ap.add_argument("--force", action="store_true", help="переразметить уже размеченные")
     ap.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
-    ap.add_argument("--device", choices=("auto", "cpu", "amd"), default="auto")
+    ap.add_argument("--device", choices=("auto", "cpu", "amd", "nvidia"), default="auto")
     ap.add_argument("--gpu-arch")
+    ap.add_argument("--gpu-uuid")
     args = ap.parse_args()
     if args.batch_size < 1:
         print(say(61), file=sys.stderr)
@@ -333,6 +338,11 @@ def main():
 
     if args.device == "amd":
         os.environ.pop("HSA_OVERRIDE_GFX_VERSION", None)
+    elif args.device == "nvidia":
+        if not args.gpu_uuid or not GPU_UUID.fullmatch(args.gpu_uuid):
+            print(say(129), file=sys.stderr, flush=True)
+            return 1
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_uuid
     gfx = apply_gfx_override()
     if gfx:
         print("HSA_OVERRIDE_GFX_VERSION:", gfx)
@@ -341,7 +351,7 @@ def main():
 
     try:
         tagger = load_tagger(args.model, args.device, args.gpu_arch)
-    except RocmError as error:
+    except GpuError as error:
         print(say(error.message_id), file=sys.stderr, flush=True)
         return 1
     from PIL import Image

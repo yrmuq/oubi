@@ -7,7 +7,7 @@
 - Keep numbered pages of a series together in the destination and preserve their page numbers.
 - Apply genre folders only to `original` images and use the first matching configured genre so the order chosen in the UI decides ties.
 - Keep the genre add and remove buttons together in one field-width slot so a shorter row does not stretch its numbered fields.
-- Keep AMD runtime downloads opt-in and separate from the CPU Python environment so standard Docker pulls and CPU tagging never require ROCm packages.
+- Keep GPU runtime downloads opt-in and separate from the CPU Python environment so standard Docker pulls and CPU tagging never require ROCm or CUDA packages.
 
 ## Compatibility Workarounds
 

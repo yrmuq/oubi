@@ -29,6 +29,9 @@ else:
 assert not status["rocm"]["visible"]
 assert status["rocm"]["installed"] == {}
 assert status["rocm"]["install"]["state"] == "idle"
+assert status["nvidia"]["gpus"] == []
+assert status["nvidia"]["installed"] == {}
+assert status["nvidia"]["install"]["state"] == "idle"
 
 with urlopen(Request(base, headers={"Accept-Language": "en"}), timeout=2) as response:
     page = response.read()
