@@ -63,6 +63,17 @@ class TagBatchTests(unittest.TestCase):
 
 
 class DownloadProgressTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        import oubi_web
+        self._old_lang = oubi_web.LANG_PATH
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.lang_path = Path(self._tmp.name) / "language"
+        self.lang_path.write_text("ru", encoding="utf-8")
+        oubi_web.LANG_PATH = self.lang_path
+        self.addCleanup(setattr, oubi_web, "LANG_PATH", self._old_lang)
+
     def test_format_bytes(self):
         self.assertEqual(format_bytes(0), "0 Б")
         self.assertEqual(format_bytes(1536), "1.5 КБ")
@@ -72,6 +83,9 @@ class DownloadProgressTests(unittest.TestCase):
         self.assertEqual(progress_line(256, 1024, None), "Скачивание: 25% (256 Б из 1.0 КБ), скорость ещё считается")
         self.assertEqual(progress_line(2048, 1024, 1024), "Скачивание: 100% (1.0 КБ из 1.0 КБ), сейчас 1.0 КБ/с")
         self.assertEqual(progress_line(2048, 1024, None), "Скачивание: 100% (1.0 КБ из 1.0 КБ), уже в кэше")
+        self.lang_path.write_text("en", encoding="utf-8")
+        self.assertEqual(progress_line(256, 1024, None), "Download: 25% (256 B of 1.0 KB), speed still counting")
+        self.lang_path.write_text("ru", encoding="utf-8")
 
     def test_model_status_line(self):
         self.assertEqual(model_status_line(0, 0), "Модель: размер на Hugging Face неизвестен.")

@@ -3,6 +3,8 @@ services:
   oubi:
     container_name: oubi
     image: ghcr.io/yrmuq/oubi:${OUBI_CHANNEL}
+    ports:
+      - ${OUBI_PORT}:8080
     user: "${PUID}:${PGID}"
     volumes:
       - ${OUBI_IMAGES}:/images
@@ -21,14 +23,35 @@ services:
       - OUBI_MOVE=${OUBI_MOVE}
       - OUBI_DRY_RUN=${OUBI_DRY_RUN}
       - OUBI_NSFW_FROM=${OUBI_NSFW_FROM}
+      - OUBI_GENRE_1=${OUBI_GENRE_1}
+      - OUBI_GENRE_2=${OUBI_GENRE_2}
+      - OUBI_GENRE_3=${OUBI_GENRE_3}
+      - OUBI_GENRE_4=${OUBI_GENRE_4}
+      - OUBI_GENRE_5=${OUBI_GENRE_5}
+      - OUBI_GENRE_6=${OUBI_GENRE_6}
+      - OUBI_GENRE_7=${OUBI_GENRE_7}
+      - OUBI_GENRE_8=${OUBI_GENRE_8}
+      - OUBI_GENRE_9=${OUBI_GENRE_9}
+      - OUBI_GENRE_10=${OUBI_GENRE_10}
+      - OUBI_GENRE_11=${OUBI_GENRE_11}
+      - OUBI_GENRE_12=${OUBI_GENRE_12}
+      - OUBI_GENRE_13=${OUBI_GENRE_13}
+      - OUBI_GENRE_14=${OUBI_GENRE_14}
+      - OUBI_GENRE_15=${OUBI_GENRE_15}
+      - OUBI_GENRE_16=${OUBI_GENRE_16}
+      - OUBI_GENRE_17=${OUBI_GENRE_17}
+      - OUBI_GENRE_18=${OUBI_GENRE_18}
+      - OUBI_GENRE_19=${OUBI_GENRE_19}
+      - OUBI_GENRE_20=${OUBI_GENRE_20}
       - OUBI_COPY_TXT=${OUBI_COPY_TXT}
       - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION}
+      - HF_TOKEN=${HF_TOKEN}
     logging:
       driver: json-file
       options:
         max-size: "55m"
         max-file: "1"
-    restart: "no"
+    restart: unless-stopped
     networks:
       - homelab
 

@@ -65,11 +65,11 @@ def tag_images(tagger, images):
         raw = tagger.postprocess(tagger.forward(tagger.preprocess(images)))
         results = unwrap_results(raw)
     except Exception as error:
-        print(f"[ошибка] пачка из {len(images)}: {error}; повторяю по одной", file=sys.stderr)
+        print(say(40, count=len(images), error=error), file=sys.stderr)
         return [tag_or_error(tagger, image) for image in images]
     if len(results) != len(images):
         print(
-            f"[ошибка] пачка вернула {len(results)} вместо {len(images)}; повторяю по одной",
+            say(41, got=len(results), expected=len(images)),
             file=sys.stderr,
         )
         return [tag_or_error(tagger, image) for image in images]
@@ -77,41 +77,50 @@ def tag_images(tagger, images):
 
 
 # ===== DESCRIBE A DOWNLOAD =====
+def say(number, **values):
+    from oubi_web import text
+    return text(number, **values)
+
+
 def format_bytes(amount):
+    from oubi_web import read_lang
+    units = ("Б", "КБ", "МБ", "ГБ") if read_lang() == "ru" else ("B", "KB", "MB", "GB")
     value = float(max(0, amount))
-    for unit in ("Б", "КБ", "МБ", "ГБ"):
-        if value < 1024 or unit == "ГБ":
-            if unit == "Б":
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit == units[0]:
                 return f"{int(value)} {unit}"
             return f"{value:.1f} {unit}"
         value /= 1024
-    return f"{value:.1f} ГБ"
+    return f"{value:.1f} {units[-1]}"
 
 
 def format_speed(amount):
-    return f"{format_bytes(amount)}/с"
+    from oubi_web import read_lang
+    suffix = "/с" if read_lang() == "ru" else "/s"
+    return f"{format_bytes(amount)}{suffix}"
 
 
 def progress_line(done, total, speed):
     if total > 0:
         shown = min(float(done), float(total))
         percent = shown / float(total) * 100
-        body = f"Скачивание: {percent:.0f}% ({format_bytes(shown)} из {format_bytes(total)})"
+        body = say(42, percent=f"{percent:.0f}", done=format_bytes(shown), total=format_bytes(total))
     else:
         shown = float(done)
-        body = f"Скачивание: {format_bytes(shown)}"
+        body = say(43, done=format_bytes(shown))
     if speed is None:
         if total > 0 and shown >= float(total):
-            return f"{body}, уже в кэше"
-        return f"{body}, скорость ещё считается"
-    return f"{body}, сейчас {format_speed(speed)}"
+            return body + say(44)
+        return body + say(45)
+    return body + say(46, speed=format_speed(speed))
 
 
 def model_status_line(cached, total):
     if total <= 0:
-        return "Модель: размер на Hugging Face неизвестен."
+        return say(47)
     percent = min(100, float(cached) / float(total) * 100)
-    return f"Модель: в кэше {format_bytes(cached)} из {format_bytes(total)} ({percent:.0f}%)."
+    return say(48, done=format_bytes(cached), total=format_bytes(total), percent=f"{percent:.0f}")
 
 
 class DownloadMeter:
@@ -239,7 +248,7 @@ def list_model_files(repo_id):
 def download_model(repo_id):
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
-    print("Сейчас: проверяю файлы модели на Hugging Face.", flush=True)
+    print(say(49), flush=True)
     files = list_model_files(repo_id)
     total = sum(size for _, size in files)
     cached = 0
@@ -251,25 +260,22 @@ def download_model(repo_id):
             missing.append((name, size))
     print(model_status_line(cached, total), flush=True)
     if not missing:
-        print("Модель уже скачана.", flush=True)
+        print(say(50), flush=True)
         return
-    print(f"Сейчас: скачиваю ещё {format_bytes(max(0, total - cached))}, файлов: {len(missing)}.", flush=True)
+    print(say(51, size=format_bytes(max(0, total - cached)), count=len(missing)), flush=True)
     meter = DownloadMeter(total=total, cached=cached)
     from huggingface_hub import hf_hub_download
 
     try:
         for name, size in missing:
-            print(f"Сейчас: файл {name} ({format_bytes(size)}).", flush=True)
+            print(say(52, name=name, size=format_bytes(size)), flush=True)
             hf_hub_download(repo_id=repo_id, filename=name, tqdm_class=byte_progress(meter, name, size))
-            print(f"Файл скачан: {name}", flush=True)
+            print(say(53, name=name), flush=True)
     except Exception as error:
         if rate_limited(error):
-            print(
-                "Сейчас: Hugging Face ограничил скачивание. Добавь HF_TOKEN и запусти снова. Кэш сохранится.",
-                flush=True,
-            )
+            print(say(54), flush=True)
         raise
-    print("Модель скачана.", flush=True)
+    print(say(55), flush=True)
 
 
 def categories_of(result):
@@ -282,17 +288,17 @@ def load_tagger(model):
     from transformers import pipeline
 
     if os.path.isdir(model):
-        print("Сейчас: модель локальная, скачивание не нужно.", flush=True)
+        print(say(56), flush=True)
         source = model
     else:
         download_model(model)
         source = model
-    print("Сейчас: загружаю модель в память. Это может занять несколько минут.", flush=True)
+    print(say(57), flush=True)
     device = 0 if torch.cuda.is_available() else -1
     if device == 0:
-        print("Устройство:", torch.cuda.get_device_name(0), flush=True)
+        print(say(58, name=torch.cuda.get_device_name(0)), flush=True)
     else:
-        print("Устройство: CPU (видеокарта не найдена!)", flush=True)
+        print(say(59), flush=True)
     tagger = pipeline(
         model=source,
         image_processor=source,
@@ -300,14 +306,14 @@ def load_tagger(model):
         device=device,
         dtype=torch.float16 if device == 0 else torch.float32,
     )
-    print("Модель загружена.", flush=True)
+    print(say(60), flush=True)
     return tagger
 
 
 # ===== TAG THE FOLDER =====
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("folder")
+    ap.add_argument("folder", nargs="+")
     ap.add_argument("--model", default="pixai-labs/pixai-tagger-v1.0")
     ap.add_argument("--csv", default="tags.csv")
     ap.add_argument("--no-txt", action="store_true", help="не писать .txt рядом с картинками")
@@ -315,31 +321,36 @@ def main():
     ap.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     args = ap.parse_args()
     if args.batch_size < 1:
-        print("Размер пачки должен быть 1 или больше.", file=sys.stderr)
+        print(say(61), file=sys.stderr)
         return 1
 
     gfx = apply_gfx_override()
     if gfx:
         print("HSA_OVERRIDE_GFX_VERSION:", gfx)
-    print("Пачка:", args.batch_size, flush=True)
-    print("Сейчас: готовлю модель.", flush=True)
+    print(say(62, count=args.batch_size), flush=True)
+    print(say(63), flush=True)
 
     tagger = load_tagger(args.model)
     from PIL import Image
 
-    print("Сейчас: ищу картинки.", flush=True)
-    files = sorted(path for path in Path(args.folder).rglob("*") if path.suffix.lower() in EXTS)
+    print(say(64), flush=True)
+    files = []
+    seen = set()
+    for folder in args.folder:
+        for path in Path(folder).rglob("*"):
+            if path.suffix.lower() not in EXTS or path in seen:
+                continue
+            seen.add(path)
+            files.append(path)
+    files.sort()
     pending = []
     for index, path in enumerate(files, 1):
         if path.with_suffix(".txt").exists() and not args.force:
             continue
         pending.append((index, path))
-    print(
-        f"Сейчас: картинок {len(files)}, уже размечено {len(files) - len(pending)}, осталось {len(pending)}.",
-        flush=True,
-    )
+    print(say(65, total=len(files), done=len(files) - len(pending), left=len(pending)), flush=True)
     if not pending:
-        print("Сейчас: размечать нечего.", flush=True)
+        print(say(66), flush=True)
 
     csv_path = Path(args.csv)
     new_csv = not csv_path.exists()
@@ -355,22 +366,19 @@ def main():
                 try:
                     loaded.append((index, path, Image.open(path).convert("RGB")))
                 except Exception as error:
-                    print(f"[ошибка] {path}: {error}", file=sys.stderr)
+                    print(say(67, path=path, error=error), file=sys.stderr)
             if not loaded:
                 continue
             if len(loaded) == 1:
                 index, path, _image = loaded[0]
-                print(f"Сейчас: размечаю {path.name} ({index} из {len(files)}).", flush=True)
+                print(say(68, path=path, index=index, total=len(files)), flush=True)
             else:
-                print(
-                    f"Сейчас: размечаю пачку {loaded[0][0]}–{loaded[-1][0]} из {len(files)}.",
-                    flush=True,
-                )
+                print(say(69, start=loaded[0][0], end=loaded[-1][0], total=len(files)), flush=True)
             results = tag_images(tagger, [image for _, _, image in loaded])
             for (index, path, image), result in zip(loaded, results):
                 image.close()
                 if isinstance(result, Exception):
-                    print(f"[ошибка] {path}: {result}", file=sys.stderr)
+                    print(say(67, path=path, error=result), file=sys.stderr)
                     continue
                 cats = categories_of(result)
                 if not args.no_txt:
@@ -387,10 +395,17 @@ def main():
                 left = (len(pending) - done) / rate / 3600 if rate else 0
                 percent = done / len(pending) * 100 if pending else 100
                 print(
-                    f"Разметка: {percent:.0f}% ({done} из {len(pending)}), {rate:.2f} карт./с, осталось ~{left:.1f} ч",
+                    say(
+                        70,
+                        percent=f"{percent:.0f}",
+                        done=done,
+                        total=len(pending),
+                        rate=f"{rate:.2f}",
+                        left=f"{left:.1f}",
+                    ),
                     flush=True,
                 )
-    print("Готово, размечено:", done)
+    print(say(71, count=done))
     return 0
 
 

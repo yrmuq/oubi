@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oubi</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f2f2f2;
+  --text: #1c1c1c;
+  --muted: #5e5e5e;
+  --pane: #fff;
+  --line: #c6c6c6;
+  --folder-tab: #d7a441;
+  --folder: #e7b84a;
+  --folder-front: #f6d78a;
+  --folder-edge: #8a5a12;
+  --yellow: #f5c400;
+  --blue: #2f6fed;
+  --iron-a: #f7f8f9;
+  --iron-b: #8d98a3;
+  --iron-c: #d5dbe0;
+  --bar: #e4e4e4;
+  --fill: #e7b341;
+  --btn: #2c4a3e;
+  --btn-2: #dedede;
+  --btn-2-text: #1c1c1c;
+  --danger: #8d3a3a;
+  --pick: #c98400;
+  --log: 200px;
+  --search-bg: #fff;
+  --search-edge: #c8c8c8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #111;
+    --text: #eee;
+    --muted: #aaa;
+    --pane: #161616;
+    --line: #3a3a3a;
+    --folder-tab: #e0b44a;
+    --folder: #f0c85a;
+    --folder-front: #ffe39a;
+    --folder-edge: #6a4310;
+    --yellow: #f5c400;
+    --blue: #4c86ff;
+    --iron-a: #f4f6f8;
+    --iron-b: #7e8b97;
+    --iron-c: #c5ced6;
+    --bar: #2a2a2a;
+    --fill: #e7b341;
+    --btn: #2c4a3e;
+    --btn-2: #333;
+    --btn-2-text: #fff;
+    --danger: #6e2e2e;
+    --pick: #e7b341;
+    --search-bg: #0c0c0c;
+    --search-edge: #4a4a4a;
+  }
+}
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.topbar { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--pane); }
+.brand { font-size: 18px; font-weight: 650; }
+#theme { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
+.top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
+.pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
+h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#all-folders { margin-left: auto; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
+#all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
+#all-folders.on .box { background: currentColor; }
+button { font: inherit; color: #fff; background: var(--btn); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+button.secondary { background: var(--btn-2); color: var(--btn-2-text); }
+button.danger { background: var(--danger); color: #fff; }
+button:disabled { opacity: 0.45; cursor: default; }
+#folders { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 16px; margin-left: 16px; padding: 4px; }
+.folder { width: 104px; background: transparent; color: inherit; border: 2px solid transparent; border-radius: 8px; padding: 4px; box-sizing: border-box; }
+.folder .icon { width: 72px; height: 56px; margin: 0 auto 6px; position: relative; background: none; border: 0; }
+.folder .icon svg { width: 100%; height: 100%; display: block; }
+.folder .name { display: block; font-size: 12px; line-height: 1.2; word-break: break-word; }
+.folder.on { border-color: var(--pick); }
+.badge { position: absolute; bottom: 7px; width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; }
+.badge.scan { left: 12px; }
+.badge.sort { right: 12px; }
+.badge.none { background: #8d8d8d; border: 1px solid #5a5a5a; }
+.badge.part { background: #f5c400; border: 1px solid #8a6d00; }
+.badge.done { background: #3dba6a; border: 1px solid #1e7a3a; }
+.split { position: relative; touch-action: none; }
+.split-v { cursor: col-resize; margin: 8px 0 0; }
+.split-h { cursor: row-resize; }
+.split-h::before { content: ""; position: absolute; left: 8px; right: 8px; top: 3px; height: 2px; background: var(--line); border-radius: 99px; }
+.split-v::after, .split-h::after { content: ""; position: absolute; }
+.split-v::after { left: -6px; right: -6px; top: 0; bottom: 0; }
+.split-h::after { left: 8px; right: 8px; top: -6px; bottom: -6px; }
+.step { margin: 0; }
+.bar { height: 10px; background: var(--bar); border-radius: 99px; overflow: hidden; }
+.bar > div { height: 100%; width: 0; background: var(--fill); }
+.detail { color: var(--muted); min-height: 1.2em; }
+.mid { position: relative; text-align: center; gap: 0; display: flex; flex-direction: column; }
+.block { min-width: 0; min-height: 0; position: relative; }
+.block.grow { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; }
+.block-split { flex: 0 0 8px; height: 8px; margin: 6px 0; }
+.edge-split { position: absolute; left: 0; right: 0; bottom: 0; height: 10px; margin: 0; z-index: 3; }
+body.arrange .block { outline: 1px dashed var(--pick); cursor: grab; border-radius: 8px; }
+body.arrange .block * { pointer-events: none; }
+.block.dragging { opacity: 0.4; }
+.block.drop-before { box-shadow: inset 0 3px 0 var(--pick); }
+.block.drop-after { box-shadow: inset 0 -3px 0 var(--pick); }
+.head-tools { display: flex; align-items: center; gap: 8px; }
+#arrange { width: 32px; height: 32px; padding: 0; background: var(--btn-2); color: var(--text); }
+#arrange.on { background: var(--pick); color: #111; }
+#lang { height: 32px; padding: 0 8px; background: var(--btn-2); color: var(--text); }
+#preview { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+#shot { width: 100%; flex: 1 1 auto; min-height: 80px; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
+#switch { position: relative; width: 100%; height: 44px; flex: 0 0 44px; margin-bottom: 8px; }
+#prev, #next { position: absolute; top: 0; z-index: 2; height: 44px; margin: 0; padding: 0 10px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; line-height: 1; background: transparent; color: var(--text); font-size: 22px; }
+#prev { left: 0; }
+#next { right: 0; }
+#name { position: absolute; left: 48px; right: 48px; top: 0; height: 44px; margin: 0; display: flex; align-items: center; justify-content: center; line-height: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#who { margin: 0; min-height: 1.2em; font-size: 22px; font-weight: 700; }
+#tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
+#genre-row { display: flex; flex-wrap: wrap; gap: 8px 16px; width: 100%; flex: 1; min-height: 0; overflow: auto; align-items: flex-start; align-content: flex-start; }
+.genre-slot { display: flex; gap: 6px; align-items: center; flex: 1 1 180px; max-width: 280px; min-width: 0; overflow: hidden; }
+.genre-handle, .genre-pin { width: 22px; height: 28px; padding: 0; border-radius: 6px; flex: 0 0 22px; box-sizing: border-box; }
+.genre-handle { cursor: grab; color: #111; }
+.genre-pin { background: var(--btn-2); color: var(--text); border: 2px solid transparent; }
+.genre-pin.on { background: var(--pick); border-color: var(--pick); color: #111; }
+.genre-field { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.genre-field input, .genre-ghost { font: inherit; padding: 4px 6px; box-sizing: border-box; }
+.genre-ghost { position: absolute; inset: 0; z-index: 2; color: var(--muted); pointer-events: none; white-space: pre; overflow: visible; border: 1px solid transparent; }
+#suggest { position: fixed; z-index: 30; max-height: 180px; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+#suggest button { display: block; width: 100%; text-align: left; background: transparent; color: var(--text); border: 0; border-radius: 0; padding: 6px 8px; }
+#suggest button.on { background: var(--line); }
+.ghost-tail { color: var(--muted); }
+.genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
+#genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
+.tag-hit { cursor: pointer; border-radius: 4px; padding: 0 3px; }
+.filter-find { margin: 0 0 8px; background: var(--search-bg); border: 1px solid var(--search-edge); border-radius: 6px; }
+.filter-find input, .filter-find .genre-ghost { border: 0; background: transparent; padding-right: 30px; }
+.search-icon { position: absolute; right: 8px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.filter-tag { color: #111; border-radius: 6px; }
+.genre { border-radius: 4px; padding: 0 3px; color: #111; }
+.genre-1, .genre-handle.genre-1 { background: #ffb4b4; }
+.genre-2, .genre-handle.genre-2 { background: #b9d0ff; }
+.genre-3, .genre-handle.genre-3 { background: #b7efc9; }
+.genre-4, .genre-handle.genre-4 { background: #ffd39a; }
+.genre-5, .genre-handle.genre-5 { background: #e0c2ff; }
+.genre-6, .genre-handle.genre-6 { background: #b8efe8; }
+.genre-7, .genre-handle.genre-7 { background: #ffc4e0; }
+.genre-8, .genre-handle.genre-8 { background: #f3e7a1; }
+.genre-9, .genre-handle.genre-9 { background: #d7c4b0; }
+.genre-10, .genre-handle.genre-10 { background: #d5dbe3; }
+#right { padding: 12px; display: flex; flex-direction: column; gap: 0; }
+#info { min-height: 0; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+#right .split-h { margin: 0; }
+.genre-11, .genre-handle.genre-11 { background: #c9e8a9; }
+.genre-12, .genre-handle.genre-12 { background: #f7c6b2; }
+.genre-13, .genre-handle.genre-13 { background: #c5d4f7; }
+.genre-14, .genre-handle.genre-14 { background: #f8e1b0; }
+.genre-15, .genre-handle.genre-15 { background: #e7b7d8; }
+.genre-16, .genre-handle.genre-16 { background: #bfe3d4; }
+.genre-17, .genre-handle.genre-17 { background: #f0d0c0; }
+.genre-18, .genre-handle.genre-18 { background: #d4c6f2; }
+.genre-19, .genre-handle.genre-19 { background: #ead9a4; }
+.genre-20, .genre-handle.genre-20 { background: #c8d5dc; }
+.log { margin: 0; border: 0; flex: 1; min-height: 0; background: #000; color: #e6e6e6; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
+#zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
+#zoom[hidden] { display: none; }
+#zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; color: #fff; }
+#zoom-img { max-width: 100%; max-height: 100%; transform-origin: center center; user-select: none; }
+#zoom-img.zoomed { cursor: grab; }
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f2f2; --text: #1c1c1c; --muted: #5e5e5e; --pane: #fff; --line: #c6c6c6;
+  --folder-tab: #d7a441; --folder: #e7b84a; --folder-front: #f6d78a; --folder-edge: #8a5a12;
+  --bar: #e4e4e4; --btn-2: #dedede; --btn-2-text: #1c1c1c; --danger: #8d3a3a; --pick: #c98400;
+  --search-bg: #fff; --search-edge: #c8c8c8;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111; --text: #eee; --muted: #aaa; --pane: #161616; --line: #3a3a3a;
+  --folder-tab: #e0b44a; --folder: #f0c85a; --folder-front: #ffe39a; --folder-edge: #6a4310;
+  --yellow: #f5c400; --blue: #4c86ff; --iron-a: #f4f6f8; --iron-b: #7e8b97; --iron-c: #c5ced6;
+  --bar: #2a2a2a; --btn-2: #333; --btn-2-text: #fff; --danger: #6e2e2e; --pick: #e7b341;
+  --search-bg: #0c0c0c; --search-edge: #4a4a4a;
+}
+</style>
+<script>
+var savedTheme = "__OUBI_THEME__";
+if (savedTheme === "light" || savedTheme === "dark") document.documentElement.setAttribute("data-theme", savedTheme);
+</script>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">oubi</span>
+  <div class="head-tools">
+    <button id="arrange" type="button" title="Move blocks">✎</button>
+    <button id="lang" type="button" title="Language">EN</button>
+    <button id="theme" type="button">auto</button>
+  </div>
+</header>
+<div class="top">
+  <section class="pane" id="left">
+    <div class="block" data-block="buttons">
+      <div class="buttons">
+        <button id="tag">Опознать</button>
+        <button id="sort">Сортировать</button>
+        <button id="plan" class="secondary">План сортировки</button>
+        <button id="stop" class="danger" disabled>Остановить</button>
+        <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
+        <button id="all-folders" class="secondary" type="button" title="Select all folders"><span class="box"></span></button>
+      </div>
+    </div>
+    <div class="block grow" data-block="folders">
+      <div id="folders"></div>
+    </div>
+    <div class="block" data-block="progress">
+      <p id="step" class="step">Открываю…</p>
+      <div class="bar"><div id="fill"></div></div>
+      <p id="detail" class="detail"></p>
+    </div>
+    <div class="block grow" data-block="log">
+      <pre id="log" class="log"></pre>
+    </div>
+  </section>
+  <div class="split split-v" id="split-left"></div>
+  <section class="pane mid" id="mid">
+    <div class="block grow" data-block="preview">
+      <div id="preview">
+        <img id="shot" alt="">
+        <div id="switch">
+          <button id="prev" type="button">❮</button>
+          <span id="name">filename</span>
+          <button id="next" type="button">❯</button>
+        </div>
+      </div>
+    </div>
+    <div class="block grow" data-block="genres">
+      <div id="genre-row"></div>
+    </div>
+  </section>
+  <div class="split split-v" id="split-mid"></div>
+  <section class="pane" id="right">
+    <div class="block grow" data-block="info">
+      <div id="info">
+        <p id="who"></p>
+        <p id="tags">Select a file to show tags</p>
+      </div>
+    </div>
+    <div class="block" data-block="filter">
+      <div class="genre-field filter-find">
+        <span id="filter-ghost" class="genre-ghost"></span>
+        <input id="filter-query" spellcheck="false" autocomplete="off">
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.2 15.2 L21 21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </div>
+      <div id="filter"></div>
+    </div>
+  </section>
+</div>
+<div id="suggest" hidden></div>
+<div id="zoom" hidden>
+  <button id="zoom-close" type="button">×</button>
+  <img id="zoom-img" alt="">
+</div>
+<script>
+const selected = new Set();
+let folders = FOLDERS_JSON;
+let reel = [];
+let reelAt = -1;
+let follow = true;
+let shown = "";
+let genres = __OUBI_GENRES__;
+let layout = __OUBI_LAYOUT__;
+let lang = "__OUBI_LANG__";
+const catalogs = __OUBI_LANGS__;
+let tagText = "";
+let hasFile = false;
+let pinned = [];
+let vocab = [];
+let theme = savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto" ? savedTheme : "auto";
+let wasBusy = false;
+const panes = { left: null, mid: null, right: null };
+
+function fileName(path) {
+  const parts = String(path || "").split("/");
+  return parts[parts.length - 1] || "";
+}
+
+function t(id) {
+  const pack = catalogs[lang] || catalogs.en || {};
+  const english = catalogs.en || {};
+  return pack[String(id)] || english[String(id)] || "";
+}
+
+function showEmpty() {
+  hasFile = false;
+  shown = "";
+  const shot = document.getElementById("shot");
+  shot.removeAttribute("src");
+  document.getElementById("name").textContent = t(11);
+  document.getElementById("who").textContent = "";
+  tagText = "";
+  document.getElementById("tags").textContent = t(12);
+}
+
+function applyI18n() {
+  document.getElementById("tag").textContent = t(1);
+  document.getElementById("sort").textContent = t(2);
+  document.getElementById("plan").textContent = t(3);
+  document.getElementById("stop").textContent = t(4);
+  document.getElementById("retry").textContent = t(5);
+  document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
+  document.getElementById("arrange").title = t(20);
+  document.getElementById("all-folders").title = t(83);
+  document.getElementById("lang").title = t(21);
+  document.getElementById("lang").textContent = lang === "ru" ? "RU" : "EN";
+  if (!hasFile) showEmpty();
+  renderFolders();
+  if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
+}
+
+function badge(kind, state) {
+  const title = {
+    scan: { none: t(13), part: t(14), done: t(15) },
+    sort: { none: t(16), part: t(17), done: t(18) },
+  }[kind][state] || "";
+  if (!title) return "";
+  return `<span class="badge ${kind} ${state}" title="${title}"></span>`;
+}
+
+function folderIcon(scan, sort) {
+  const icon = document.createElement("div");
+  icon.className = "icon";
+  icon.innerHTML = `<svg viewBox="0 0 64 52" aria-hidden="true">
+    <path fill="var(--folder-tab)" d="M8 18h14l4-8h24a4 4 0 0 1 4 4v8H8z"/>
+    <path fill="var(--folder)" stroke="var(--folder-edge)" stroke-width="1.4" d="M4 18h56a4 4 0 0 1 4 4v22a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V18z"/>
+    <path fill="var(--folder-front)" d="M4 28h56v16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V28z"/>
+  </svg>` + badge("scan", scan) + badge("sort", sort);
+  return icon;
+}
+
+function renderFolders() {
+  const box = document.getElementById("folders");
+  box.innerHTML = "";
+  for (const folder of folders) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "folder" + (selected.has(folder.path) ? " on" : "");
+    const label = document.createElement("span");
+    label.className = "name";
+    label.textContent = folder.name;
+    button.append(folderIcon(folder.scan, folder.sort), label);
+    button.onclick = () => {
+      if (selected.has(folder.path)) selected.delete(folder.path);
+      else selected.add(folder.path);
+      renderFolders();
+      loadRecent();
+      loadVocab();
+    };
+    box.appendChild(button);
+  }
+  const all = document.getElementById("all-folders");
+  if (all) all.classList.toggle("on", folders.length > 0 && folders.every((folder) => selected.has(folder.path)));
+}
+
+function takeFolders(data) {
+  const prev = new Map(folders.map((folder) => [folder.path, folder]));
+  folders = data.map((folder) => {
+    if (!folder.scan && prev.has(folder.path) && prev.get(folder.path).scan) {
+      const old = prev.get(folder.path);
+      return Object.assign({}, folder, { scan: old.scan, sort: old.sort });
+    }
+    return folder;
+  });
+  renderFolders();
+}
+
+async function loadFolders() {
+  try {
+    const data = await (await fetch("/api/folders")).json();
+    if (!Array.isArray(data)) return;
+    takeFolders(data);
+  } catch (error) {
+    return;
+  }
+}
+
+async function loadRecent() {
+  if (pinned.length) return;
+  if (!selected.size) {
+    reel = [];
+    showEmpty();
+    return;
+  }
+  const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
+  const data = await (await fetch("/api/recent?" + query)).json();
+  reel = data.files || [];
+  if (!reel.length) showEmpty();
+  else if (follow && reel.length) showAt(reel.length - 1);
+}
+
+async function loadVocab() {
+  const key = [...selected].sort().join("\n");
+  if (!key) {
+    vocab = [];
+    return;
+  }
+  const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
+  try {
+    const data = await (await fetch("/api/vocabulary?" + query)).json();
+    if ([...selected].sort().join("\n") !== key) return;
+    vocab = data.tags || [];
+  } catch (error) {
+    return;
+  }
+  const input = document.getElementById("filter-query");
+  if (input && document.activeElement === input) applyGhost(input, document.getElementById("filter-ghost"));
+}
+
+function rainbow(index) {
+  return "hsl(" + ((index * 47) % 360) + " 78% 72%)";
+}
+
+function pinIndex(tag) {
+  const key = String(tag || "").trim().toLowerCase();
+  return pinned.findIndex((item) => item.toLowerCase() === key);
+}
+
+function renderFilter() {
+  const box = document.getElementById("filter");
+  if (!box) return;
+  box.replaceChildren();
+  pinned.forEach((tag, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "filter-tag";
+    button.style.background = rainbow(index);
+    button.textContent = tag;
+    button.onclick = () => togglePin(tag);
+    box.append(button);
+  });
+}
+
+function addFilterTag(raw) {
+  const token = String(raw || "").trim();
+  if (!token || pinIndex(token) >= 0) return;
+  pinned.push(token);
+  renderFilter();
+  paintTags(tagText);
+  renderGenreRow();
+  applyFilter();
+}
+
+function togglePin(tag) {
+  const token = String(tag || "").trim();
+  if (!token) return;
+  const index = pinIndex(token);
+  if (index >= 0) pinned.splice(index, 1);
+  else pinned.push(token);
+  renderFilter();
+  paintTags(tagText);
+  renderGenreRow();
+  applyFilter();
+}
+
+async function applyFilter() {
+  if (!pinned.length) {
+    follow = true;
+    loadRecent();
+    return;
+  }
+  const query = pinned.map((tag) => "tag=" + encodeURIComponent(tag)).join("&");
+  const data = await (await fetch("/api/tagged?" + query)).json();
+  reel = data.files || [];
+  follow = false;
+  if (reel.length) showAt(0);
+  else showEmpty();
+}
+function paintTags(text) {
+  const box = document.getElementById("tags");
+  box.replaceChildren();
+  const parts = String(text || "").split(",");
+  parts.forEach((part, index) => {
+    if (index) box.append(", ");
+    const token = part.trim();
+    if (!token) return;
+    const span = document.createElement("span");
+    span.className = "tag-hit";
+    const pinnedAt = pinIndex(token);
+    const rank = genres.findIndex((item) => item && item.toLowerCase() === token.toLowerCase());
+    if (pinnedAt >= 0) {
+      span.style.background = rainbow(pinnedAt);
+      span.style.color = "#111";
+    } else if (rank >= 0 && rank < 20) span.classList.add("genre", "genre-" + (rank + 1));
+    span.textContent = part;
+    span.onclick = () => togglePin(token);
+    box.append(span);
+  });
+}
+
+function showAt(index) {
+  if (!reel.length) return;
+  reelAt = (index + reel.length) % reel.length;
+  showImage("images", reel[reelAt]);
+}
+
+async function showImage(root, path) {
+  if (!path) return;
+  shown = root + ":" + path;
+  document.getElementById("shot").src = "/api/file?root=" + root + "&path=" + encodeURIComponent(path);
+  document.getElementById("name").textContent = fileName(path);
+  hasFile = true;
+  document.getElementById("who").textContent = "";
+  document.getElementById("tags").replaceChildren();
+  tagText = "";
+  if (root !== "images") return;
+  const data = await (await fetch("/api/tags?path=" + encodeURIComponent(path))).json();
+  document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
+  tagText = data.text || "";
+  paintTags(tagText);
+  refreshGenreGhosts();
+}
+
+async function tick() {
+  const data = await (await fetch("/api/status")).json();
+  let step = data.step || t(7);
+  const named = step.match(/Сейчас: размечаю (.+) \((\d+ из \d+)\)/);
+  if (named) step = "Сейчас: размечаю " + fileName(named[1]) + " (" + named[2] + ").";
+  document.getElementById("step").textContent = step;
+  document.getElementById("detail").textContent = data.detail || "";
+  document.getElementById("fill").style.width = (data.percent || 0) + "%";
+  const log = document.getElementById("log");
+  log.textContent = (data.log || []).join(String.fromCharCode(10));
+  log.scrollTop = log.scrollHeight;
+  const busy = data.job_running;
+  const ready = data.model === "ready";
+  const picked = selected.size > 0;
+  for (const id of ["tag", "sort", "plan"]) {
+    document.getElementById(id).disabled = busy || !picked || (id === "tag" && !ready);
+  }
+  document.getElementById("stop").disabled = !busy;
+  document.getElementById("retry").hidden = data.model !== "error";
+  if (wasBusy && !busy) loadFolders();
+  wasBusy = !!busy;
+  if (follow && data.preview_file && data.preview_file !== (reel[reelAt] || "")) {
+    if (!reel.includes(data.preview_file)) reel.push(data.preview_file);
+    showAt(reel.indexOf(data.preview_file));
+  }
+}
+
+async function start(mode) {
+  await fetch("/api/job", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, folders: [...selected] }),
+  });
+  follow = true;
+  tick();
+}
+
+function paintPanes() {
+  const top = document.querySelector(".top");
+  if (panes.left == null) return;
+  top.style.gridTemplateColumns = panes.left + "px 8px " + panes.mid + "px 8px " + panes.right + "px";
+}
+
+function dragSplit(which, event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  event.preventDefault();
+  const left = document.getElementById("left");
+  const mid = document.getElementById("mid");
+  const right = document.getElementById("right");
+  const log = document.getElementById("log");
+  const info = document.getElementById("info");
+  const preview = document.getElementById("preview");
+  const genres = document.getElementById("genre-row");
+  const start = {
+    x: event.clientX,
+    y: event.clientY,
+    left: left.getBoundingClientRect().width,
+    mid: mid.getBoundingClientRect().width,
+    right: right.getBoundingClientRect().width,
+    info: info.getBoundingClientRect().height,
+    log: log.getBoundingClientRect().height,
+    preview: preview.getBoundingClientRect().height,
+    genres: genres.getBoundingClientRect().height,
+  };
+  function move(ev) {
+    if (which === "left") {
+      const pair = start.left + start.mid;
+      const floor = Math.min(96, pair / 2);
+      const next = Math.min(pair - floor, Math.max(floor, start.left + ev.clientX - start.x));
+      panes.left = next;
+      panes.mid = pair - next;
+      panes.right = start.right;
+    } else if (which === "mid") {
+      const pair = start.mid + start.right;
+      const floor = Math.min(96, pair / 2);
+      const next = Math.min(pair - floor, Math.max(floor, start.mid + ev.clientX - start.x));
+      panes.left = start.left;
+      panes.mid = next;
+      panes.right = pair - next;
+    }
+    paintPanes();
+  }
+  function up() {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    saveLayout();
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+function fitSplits() {
+  for (const id of ["left", "mid", "right"]) {
+    const host = document.getElementById(id);
+    for (const old of host.querySelectorAll(":scope > .block-split, :scope .edge-split")) old.remove();
+    const blocks = [...host.querySelectorAll(":scope > .block")];
+    for (let index = 0; index < blocks.length - 1; index += 1) {
+      const split = document.createElement("div");
+      split.className = "split split-h block-split";
+      split.onpointerdown = (event) => dragBlockSplit(split, event);
+      blocks[index].after(split);
+    }
+    if (blocks.length === 1) {
+      const edge = document.createElement("div");
+      edge.className = "split split-h edge-split";
+      edge.onpointerdown = (event) => dragEdge(blocks[0], event);
+      blocks[0].appendChild(edge);
+    }
+  }
+}
+
+function dragEdge(block, event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const pane = block.parentElement;
+  const startY = event.clientY;
+  const startH = block.getBoundingClientRect().height;
+  const limit = Math.max(36, pane.getBoundingClientRect().height - 24);
+  function move(ev) {
+    const next = Math.min(limit, Math.max(36, startH + ev.clientY - startY));
+    block.style.flex = "0 0 " + next + "px";
+  }
+  function up() {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    saveLayout();
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+function dragBlockSplit(split, event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const above = split.previousElementSibling;
+  const below = split.nextElementSibling;
+  if (!above || !below) return;
+  const startY = event.clientY;
+  const aboveH = above.getBoundingClientRect().height;
+  const belowH = below.getBoundingClientRect().height;
+  const pair = aboveH + belowH;
+  function move(ev) {
+    const next = Math.min(pair - 36, Math.max(36, aboveH + ev.clientY - startY));
+    above.style.flex = "0 0 " + next + "px";
+    below.style.flex = "0 0 " + (pair - next) + "px";
+  }
+  function up() {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    saveLayout();
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+function placeBlocks(order) {
+  if (!order || !Array.isArray(order.left) || !Array.isArray(order.mid) || !Array.isArray(order.right)) return;
+  for (const panel of ["left", "mid", "right"]) {
+    const host = document.getElementById(panel);
+    for (const name of order[panel]) {
+      const block = document.querySelector('.block[data-block="' + name + '"]');
+      if (block) host.appendChild(block);
+    }
+  }
+}
+
+function applyLayout() {
+  placeBlocks(layout.blocks);
+  if (layout.heights) {
+    for (const name of Object.keys(layout.heights)) {
+      const block = document.querySelector('.block[data-block="' + name + '"]');
+      if (block) block.style.flex = "0 0 " + layout.heights[name] + "px";
+    }
+  }
+  if (layout.left && layout.mid && layout.right) {
+    panes.left = layout.left;
+    panes.mid = layout.mid;
+    panes.right = layout.right;
+    paintPanes();
+  }
+  fitSplits();
+}
+
+function blockHeights() {
+  const heights = {};
+  for (const block of document.querySelectorAll(".block")) {
+    if ((block.style.flex || "").indexOf("px") >= 0) heights[block.dataset.block] = Math.round(block.getBoundingClientRect().height);
+  }
+  return heights;
+}
+function blockOrder() {
+  const order = {};
+  for (const id of ["left", "mid", "right"]) {
+    order[id] = [...document.getElementById(id).querySelectorAll(":scope > .block")].map((block) => block.dataset.block);
+  }
+  return order;
+}
+
+function saveLayout() {
+  layout = {
+    left: Math.round(document.getElementById("left").getBoundingClientRect().width),
+    mid: Math.round(document.getElementById("mid").getBoundingClientRect().width),
+    right: Math.round(document.getElementById("right").getBoundingClientRect().width),
+    preview: Math.round(document.getElementById("preview").getBoundingClientRect().height),
+    genres: Math.round(document.getElementById("genre-row").getBoundingClientRect().height),
+    info: Math.round(document.getElementById("info").getBoundingClientRect().height),
+    log: Math.round(document.getElementById("log").getBoundingClientRect().height),
+    blocks: blockOrder(),
+    heights: blockHeights(),
+  };
+  fetch("/api/layout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(layout),
+  });
+}
+
+function applyTheme(next) {
+  theme = next;
+  if (next === "light" || next === "dark") document.documentElement.setAttribute("data-theme", next);
+  else document.documentElement.removeAttribute("data-theme");
+  const button = document.getElementById("theme");
+  if (button) button.textContent = next === "light" ? t(8) : next === "dark" ? t(9) : t(10);
+}
+applyTheme(theme);
+document.getElementById("theme").onclick = () => {
+  const order = ["light", "dark", "auto"];
+  const next = order[(order.indexOf(theme) + 1) % order.length];
+  applyTheme(next);
+  fetch("/api/theme", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ theme: next }),
+  });
+};
+for (const id of ["tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
+if (!Array.isArray(genres) || !genres.length) genres = [""];
+let genreTimer = 0;
+let genreDrag = -1;
+let suggestPick = 0;
+
+function tagList() {
+  return String(tagText || "").split(",").map((part) => part.trim()).filter(Boolean);
+}
+
+function pendingTags(prefix, source) {
+  const folded = String(prefix || "").trim().toLowerCase();
+  if (!folded) return [];
+  const tags = source || tagList();
+  return tags.filter((item) => {
+    const key = item.toLowerCase();
+    return key.startsWith(folded) && key.length > folded.length;
+  }).slice(0, 40);
+}
+
+function matchTag(prefix, source) {
+  const typed = String(prefix || "");
+  const tags = pendingTags(typed, source);
+  if (!tags.length) return null;
+  const tag = tags[Math.min(suggestPick, tags.length - 1)];
+  return { tag, used: typed.length };
+}
+
+function suggestSource(input) {
+  return input && input.id === "filter-query" ? vocab : null;
+}
+
+function hideSuggest() {
+  const box = document.getElementById("suggest");
+  box.hidden = true;
+  box.innerHTML = "";
+}
+
+function showSuggest(input) {
+  const box = document.getElementById("suggest");
+  const tags = pendingTags(input.value, suggestSource(input));
+  if (document.activeElement !== input || !tags.length) {
+    if (document.activeElement !== input) return;
+    hideSuggest();
+    return;
+  }
+  suggestPick = Math.min(suggestPick, tags.length - 1);
+  box.innerHTML = "";
+  tags.forEach((tag, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = tag;
+    if (index === suggestPick) button.className = "on";
+    button.onmousedown = (event) => {
+      event.preventDefault();
+      suggestPick = 0;
+      input.value = tag;
+      takeSuggestion(input);
+    };
+    box.append(button);
+  });
+  const rect = input.getBoundingClientRect();
+  box.hidden = false;
+  box.style.left = rect.left + "px";
+  box.style.top = (rect.bottom + 4) + "px";
+  box.style.width = Math.max(rect.width, 180) + "px";
+}
+
+function takeSuggestion(input) {
+  const ghost = input.id === "filter-query"
+    ? document.getElementById("filter-ghost")
+    : input.parentElement.querySelector(".genre-ghost");
+  if (input.id !== "filter-query") {
+    const index = [...document.querySelectorAll("#genre-row .genre-field input")].indexOf(input);
+    if (index >= 0) {
+      genres[index] = input.value.trim();
+      paintTags(tagText);
+      saveGenres();
+    }
+  }
+  applyGhost(input, ghost);
+}
+
+function applyGhost(input, ghost) {
+  if (!ghost) return;
+  ghost.style.paddingLeft = "";
+  ghost.replaceChildren();
+  const found = matchTag(input.value, suggestSource(input));
+  if (!found) {
+    showSuggest(input);
+    return;
+  }
+  const typed = document.createElement("span");
+  typed.className = "ghost-typed";
+  typed.textContent = input.value;
+  const tail = document.createElement("span");
+  tail.className = "ghost-tail";
+  tail.textContent = found.tag.slice(found.used);
+  ghost.style.font = getComputedStyle(input).font;
+  ghost.append(typed, tail);
+  showSuggest(input);
+}
+
+function saveGenres() {
+  clearTimeout(genreTimer);
+  genreTimer = setTimeout(() => {
+    fetch("/api/genres", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ genres: genres.slice(0, 20) }),
+    });
+  }, 300);
+}
+
+function refreshGenreGhosts() {
+  for (const input of document.querySelectorAll(".genre-field input")) {
+    if (input.id === "filter-query") continue;
+    const ghost = input.parentElement.querySelector(".genre-ghost");
+    applyGhost(input, ghost);
+  }
+  const filterQuery = document.getElementById("filter-query");
+  const filterGhost = document.getElementById("filter-ghost");
+  if (filterQuery && filterGhost) applyGhost(filterQuery, filterGhost);
+}
+
+async function toggleGenre(index) {
+  togglePin(genres[index] || "");
+}
+
+function renderGenreRow(focusAt) {
+  const row = document.getElementById("genre-row");
+  row.innerHTML = "";
+  genres.forEach((value, index) => {
+    const slot = document.createElement("div");
+    slot.className = "genre-slot";
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "genre-handle genre-" + (index + 1);
+    handle.textContent = String(index + 1);
+    handle.draggable = true;
+    let moved = false;
+    handle.ondragstart = (event) => {
+      moved = true;
+      genreDrag = index;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+    };
+    handle.ondragend = () => { genreDrag = -1; };
+    handle.onclick = () => {
+      if (moved) { moved = false; return; }
+      toggleGenre(index);
+    };
+    if (pinIndex(value || "") >= 0) handle.style.background = rainbow(pinIndex(value || ""));
+    const pin = document.createElement("button");
+    pin.type = "button";
+    pin.className = "genre-pin" + (pinIndex(value || "") >= 0 ? " on" : "");
+    pin.title = t(19);
+    if (pinIndex(value || "") >= 0) pin.style.background = rainbow(pinIndex(value || ""));
+    pin.onclick = () => toggleGenre(index);
+    slot.ondragover = (event) => event.preventDefault();
+    slot.ondrop = (event) => {
+      event.preventDefault();
+      const from = genreDrag;
+      if (from < 0 || from === index) return;
+      const [moved] = genres.splice(from, 1);
+      genres.splice(index, 0, moved);
+      genreDrag = -1;
+      renderGenreRow(index);
+      paintTags(tagText);
+      saveGenres();
+    };
+    const field = document.createElement("div");
+    field.className = "genre-field";
+    const ghost = document.createElement("span");
+    ghost.className = "genre-ghost";
+    const input = document.createElement("input");
+    input.spellcheck = false;
+    input.value = value || "";
+    applyGhost(input, ghost);
+    input.oninput = () => {
+      suggestPick = 0;
+      genres[index] = input.value.trim();
+      applyGhost(input, ghost);
+      paintTags(tagText);
+      saveGenres();
+    };
+    input.onkeydown = (event) => {
+      const tags = pendingTags(input.value);
+      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && tags.length) {
+        event.preventDefault();
+        suggestPick = (suggestPick + (event.key === "ArrowDown" ? 1 : tags.length - 1)) % tags.length;
+        applyGhost(input, ghost);
+        return;
+      }
+      if (event.key !== " " || event.ctrlKey || event.altKey || event.metaKey) return;
+      const next = matchTag(input.value);
+      if (!next) return;
+      event.preventDefault();
+      suggestPick = 0;
+      input.value = next.tag;
+      genres[index] = next.tag;
+      ghost.replaceChildren();
+      paintTags(tagText);
+      saveGenres();
+      applyGhost(input, ghost);
+    };
+    input.onblur = () => setTimeout(hideSuggest, 0);
+    field.append(ghost, input);
+    slot.append(handle, pin, field);
+    row.append(slot);
+  });
+  if (genres.length < 20) {
+    const add = document.createElement("button");
+    add.type = "button";
+    add.id = "genre-add";
+    add.textContent = "+";
+    add.onclick = () => {
+      if (genres.length >= 20) return;
+      genres.push("");
+      renderGenreRow(genres.length - 1);
+    };
+    row.append(add);
+  }
+  if (focusAt !== undefined) {
+    const inputs = row.querySelectorAll(".genre-field input");
+    const target = inputs[focusAt];
+    if (target) target.focus();
+  }
+}
+renderGenreRow();
+renderFilter();
+applyLayout();
+let arranging = false;
+let dragBlock = null;
+let dropAt = null;
+function clearDrop() {
+  for (const item of document.querySelectorAll(".drop-before, .drop-after")) {
+    item.classList.remove("drop-before", "drop-after");
+  }
+}
+function arrangeMove(event) {
+  clearDrop();
+  dropAt = null;
+  const hit = document.elementFromPoint(event.clientX, event.clientY);
+  const panel = hit && hit.closest(".pane");
+  if (!panel || !dragBlock) return;
+  const blocks = [...panel.querySelectorAll(":scope > .block")].filter((item) => item !== dragBlock);
+  let before = null;
+  let after = null;
+  for (const item of blocks) {
+    const box = item.getBoundingClientRect();
+    if (event.clientY < box.top + box.height / 2) {
+      before = item;
+      break;
+    }
+    after = item;
+  }
+  if (before) before.classList.add("drop-before");
+  else if (after) after.classList.add("drop-after");
+  dropAt = { panel, before };
+}
+function arrangeUp() {
+  if (dragBlock && dropAt) {
+    if (dropAt.before) dropAt.panel.insertBefore(dragBlock, dropAt.before);
+    else dropAt.panel.appendChild(dragBlock);
+  }
+  fitSplits();
+  if (dragBlock) dragBlock.classList.remove("dragging");
+  clearDrop();
+  dragBlock = null;
+  dropAt = null;
+}
+for (const block of document.querySelectorAll(".block")) {
+  block.onpointerdown = (event) => {
+    if (!arranging || event.button !== 0) return;
+    event.preventDefault();
+    dragBlock = block;
+    block.classList.add("dragging");
+    block.setPointerCapture(event.pointerId);
+    block.onpointermove = arrangeMove;
+    block.onpointerup = (upEvent) => {
+      block.onpointermove = null;
+      block.onpointerup = null;
+      arrangeUp();
+      if (block.hasPointerCapture(upEvent.pointerId)) block.releasePointerCapture(upEvent.pointerId);
+    };
+  };
+}
+document.getElementById("arrange").onclick = () => {
+  arranging = !arranging;
+  document.body.classList.toggle("arrange", arranging);
+  document.getElementById("arrange").classList.toggle("on", arranging);
+  if (!arranging) saveLayout();
+};
+document.getElementById("lang").onclick = () => {
+  lang = lang === "ru" ? "en" : "ru";
+  applyI18n();
+  fetch("/api/language", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language: lang }),
+  });
+};
+document.getElementById("filter-query").onfocus = () => loadVocab();
+document.getElementById("filter-query").oninput = () => {
+  suggestPick = 0;
+  applyGhost(document.getElementById("filter-query"), document.getElementById("filter-ghost"));
+};
+document.getElementById("filter-query").onkeydown = (event) => {
+  const input = event.currentTarget;
+  const ghost = document.getElementById("filter-ghost");
+  const tags = pendingTags(input.value, vocab);
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && tags.length) {
+    event.preventDefault();
+    suggestPick = (suggestPick + (event.key === "ArrowDown" ? 1 : tags.length - 1)) % tags.length;
+    applyGhost(input, ghost);
+    return;
+  }
+  if (event.key === " " && !event.ctrlKey && !event.altKey && !event.metaKey) {
+    const next = matchTag(input.value, vocab);
+    if (!next) return;
+    event.preventDefault();
+    suggestPick = 0;
+    input.value = next.tag;
+    ghost.replaceChildren();
+    applyGhost(input, ghost);
+    return;
+  }
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  addFilterTag(input.value);
+  input.value = "";
+  document.getElementById("filter-ghost").replaceChildren();
+  hideSuggest();
+};
+document.getElementById("filter-query").onblur = () => setTimeout(hideSuggest, 0);
+applyI18n();
+document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
+document.getElementById("all-folders").onclick = () => {
+  const every = folders.length > 0 && folders.every((folder) => selected.has(folder.path));
+  if (every) selected.clear();
+  else for (const folder of folders) selected.add(folder.path);
+  renderFolders();
+  loadRecent();
+  loadVocab();
+};
+document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
+document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };
+document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
+document.getElementById("split-left").onpointerdown = (event) => dragSplit("left", event);
+document.getElementById("split-mid").onpointerdown = (event) => dragSplit("mid", event);
+const zoom = document.getElementById("zoom");
+const zoomImg = document.getElementById("zoom-img");
+const view = { scale: 1, x: 0, y: 0, drag: null };
+function paintZoom() {
+  zoomImg.style.transform = "translate(" + view.x + "px, " + view.y + "px) scale(" + view.scale + ")";
+  zoomImg.classList.toggle("zoomed", view.scale > 1);
+}
+function closeZoom() {
+  zoom.hidden = true;
+  view.drag = null;
+}
+document.getElementById("shot").onclick = () => {
+  if (!document.getElementById("shot").src) return;
+  view.scale = 1;
+  view.x = 0;
+  view.y = 0;
+  view.drag = null;
+  zoomImg.src = document.getElementById("shot").src;
+  zoom.hidden = false;
+  paintZoom();
+};
+document.getElementById("zoom-close").onclick = closeZoom;
+document.addEventListener("keydown", (event) => {
+  if (zoom.hidden) return;
+  if (event.key === "Escape") closeZoom();
+  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+    event.preventDefault();
+    if (!reel.length) return;
+    follow = false;
+    showAt(reelAt + (event.key === "ArrowRight" ? 1 : -1));
+    zoomImg.src = document.getElementById("shot").src;
+    view.scale = 1;
+    view.x = 0;
+    view.y = 0;
+    view.drag = null;
+    paintZoom();
+  }
+});
+zoom.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  const next = view.scale * (event.deltaY < 0 ? 1.12 : 1 / 1.12);
+  view.scale = Math.min(8, Math.max(1, next));
+  if (view.scale === 1) {
+    view.x = 0;
+    view.y = 0;
+  }
+  paintZoom();
+}, { passive: false });
+zoomImg.addEventListener("mousedown", (event) => {
+  if (event.button !== 0 || view.scale <= 1) return;
+  view.drag = { x: event.clientX, y: event.clientY, ox: view.x, oy: view.y };
+  event.preventDefault();
+});
+window.addEventListener("mousemove", (event) => {
+  if (!view.drag) return;
+  view.x = view.drag.ox + event.clientX - view.drag.x;
+  view.y = view.drag.oy + event.clientY - view.drag.y;
+  paintZoom();
+});
+window.addEventListener("mouseup", () => { view.drag = null; });
+loadFolders();
+renderFolders();
+tick();
+setInterval(tick, 1000);
+setInterval(loadFolders, 8000);
+</script>
+</body>
+</html>
