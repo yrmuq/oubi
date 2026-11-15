@@ -29,6 +29,8 @@
   --danger: #8d3a3a;
   --pick: #c98400;
   --log: 200px;
+  --search-bg: #fff;
+  --search-edge: #c8c8c8;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -54,6 +56,8 @@
     --btn-2-text: #fff;
     --danger: #6e2e2e;
     --pick: #e7b341;
+    --search-bg: #0c0c0c;
+    --search-edge: #4a4a4a;
   }
 }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
@@ -129,7 +133,9 @@ body.arrange .block * { pointer-events: none; }
 .genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
 #genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
 .tag-hit { cursor: pointer; border-radius: 4px; padding: 0 3px; }
-.filter-find { margin: 0 0 8px; }
+.filter-find { margin: 0 0 8px; background: var(--search-bg); border: 1px solid var(--search-edge); border-radius: 6px; }
+.filter-find input, .filter-find .genre-ghost { border: 0; background: transparent; padding-right: 30px; }
+.search-icon { position: absolute; right: 8px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 .filter-tag { color: #111; border-radius: 6px; }
 .genre { border-radius: 4px; padding: 0 3px; color: #111; }
 .genre-1, .genre-handle.genre-1 { background: #ffb4b4; }
@@ -166,6 +172,7 @@ html[data-theme="light"] {
   --bg: #f2f2f2; --text: #1c1c1c; --muted: #5e5e5e; --pane: #fff; --line: #c6c6c6;
   --folder-tab: #d7a441; --folder: #e7b84a; --folder-front: #f6d78a; --folder-edge: #8a5a12;
   --bar: #e4e4e4; --btn-2: #dedede; --btn-2-text: #1c1c1c; --danger: #8d3a3a; --pick: #c98400;
+  --search-bg: #fff; --search-edge: #c8c8c8;
 }
 html[data-theme="dark"] {
   color-scheme: dark;
@@ -173,6 +180,7 @@ html[data-theme="dark"] {
   --folder-tab: #e0b44a; --folder: #f0c85a; --folder-front: #ffe39a; --folder-edge: #6a4310;
   --yellow: #f5c400; --blue: #4c86ff; --iron-a: #f4f6f8; --iron-b: #7e8b97; --iron-c: #c5ced6;
   --bar: #2a2a2a; --btn-2: #333; --btn-2-text: #fff; --danger: #6e2e2e; --pick: #e7b341;
+  --search-bg: #0c0c0c; --search-edge: #4a4a4a;
 }
 </style>
 <script>
@@ -241,6 +249,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <div class="genre-field filter-find">
         <span id="filter-ghost" class="genre-ghost"></span>
         <input id="filter-query" spellcheck="false" autocomplete="off">
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.2 15.2 L21 21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </div>
       <div id="filter"></div>
     </div>
@@ -733,14 +742,22 @@ if (!Array.isArray(genres) || !genres.length) genres = [""];
 let genreTimer = 0;
 let genreDrag = -1;
 
-function suggestGenre(prefix) {
-  const typed = String(prefix || "").trim().toLowerCase();
-  if (!typed) return "";
+function matchTag(prefix) {
+  const typed = String(prefix || "");
+  const folded = typed.toLowerCase();
+  if (!folded.trim()) return "";
   const tags = String(tagText || "").split(",").map((part) => part.trim()).filter(Boolean);
   return tags.find((tag) => {
-    const folded = tag.toLowerCase();
-    return folded.startsWith(typed) && folded !== typed;
+    const key = tag.toLowerCase();
+    return key.startsWith(folded) && key !== folded;
   }) || "";
+}
+
+function ghostFor(prefix) {
+  const typed = String(prefix || "");
+  const match = matchTag(typed);
+  if (!match) return "";
+  return typed + match.slice(typed.length);
 }
 
 function saveGenres() {
@@ -758,12 +775,12 @@ function refreshGenreGhosts() {
   for (const input of document.querySelectorAll(".genre-field input")) {
     if (input.id === "filter-query") continue;
     const ghost = input.parentElement.querySelector(".genre-ghost");
-    const hint = suggestGenre(input.value);
+    const hint = ghostFor(input.value);
     ghost.textContent = hint || "";
   }
   const filterQuery = document.getElementById("filter-query");
   const filterGhost = document.getElementById("filter-ghost");
-  if (filterQuery && filterGhost) filterGhost.textContent = suggestGenre(filterQuery.value) || "";
+  if (filterQuery && filterGhost) filterGhost.textContent = ghostFor(filterQuery.value);
 }
 
 async function toggleGenre(index) {
@@ -819,18 +836,17 @@ function renderGenreRow(focusAt) {
     const input = document.createElement("input");
     input.spellcheck = false;
     input.value = value || "";
-    const hint = suggestGenre(input.value);
+    const hint = ghostFor(input.value);
     ghost.textContent = hint || "";
     input.oninput = () => {
       genres[index] = input.value.trim();
-      const next = suggestGenre(input.value);
-      ghost.textContent = next || "";
+      ghost.textContent = ghostFor(input.value);
       paintTags(tagText);
       saveGenres();
     };
     input.onkeydown = (event) => {
       if (event.key !== " " || event.ctrlKey || event.altKey || event.metaKey) return;
-      const next = suggestGenre(input.value);
+      const next = matchTag(input.value);
       if (!next) return;
       event.preventDefault();
       input.value = next;
@@ -936,12 +952,12 @@ document.getElementById("lang").onclick = () => {
   });
 };
 document.getElementById("filter-query").oninput = () => {
-  document.getElementById("filter-ghost").textContent = suggestGenre(document.getElementById("filter-query").value) || "";
+  document.getElementById("filter-ghost").textContent = ghostFor(document.getElementById("filter-query").value);
 };
 document.getElementById("filter-query").onkeydown = (event) => {
   const input = event.currentTarget;
   if (event.key === " " && !event.ctrlKey && !event.altKey && !event.metaKey) {
-    const next = suggestGenre(input.value);
+    const next = matchTag(input.value);
     if (!next) return;
     event.preventDefault();
     input.value = next;
