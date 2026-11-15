@@ -190,19 +190,31 @@ promote() {
 }
 
 write_dev_draft() {
-    local source=$1 notes=$2 drafts id draft
-    drafts=$(gh api --paginate "repos/$repository/releases" --jq '.[] | select(.tag_name == "dev") | [.id, .draft] | @tsv')
+    local source=$1 notes=$2 releases="repos/$repository/releases"
+    local drafts id draft response attempt
+    drafts=$(gh api --paginate "$releases" --jq '.[] | select(.tag_name == "dev") | [.id, .draft] | @tsv')
     if [[ -z $drafts ]]; then
-        gh release create dev --draft --latest=false --target "$source" \
-            --title 'Development build' --notes "$notes" -R "$repository"
+        response=$(gh api --method POST "$releases" -f tag_name=dev -F draft=true \
+            -f make_latest=false -f target_commitish="$source" -f name='Development build' -f body="$notes")
     else
         IFS=$'\t' read -r id draft <<<"$drafts"
         [[ $draft == true && $drafts != *$'\n'* ]]
-        gh api --method PATCH "repos/$repository/releases/$id" \
-            -f target_commitish="$source" -f name='Development build' -f body="$notes" >/dev/null
+        response=$(gh api --method PATCH "$releases/$id" \
+            -f target_commitish="$source" -f name='Development build' -f body="$notes")
     fi
-    gh api --paginate "repos/$repository/releases" --jq '.[] | select(.tag_name == "dev")' | \
-        jq -e --arg source "$source" --arg notes "$notes" '.draft and (.target_commitish == $source) and (.body == $notes)' >/dev/null
+    id=$(jq -er '.id | numbers' <<<"$response")
+    for attempt in {1..5}; do
+        if gh api "$releases/$id" | jq -e --arg source "$source" --arg notes "$notes" \
+            '.tag_name == "dev" and .draft and (.prerelease | not) and
+             .target_commitish == $source and .body == $notes' >/dev/null; then
+            return
+        fi
+        if ((attempt < 5)); then
+            sleep 2
+        fi
+    done
+    printf 'Dev draft %s does not match commit %s.\n' "$id" "$source" >&2
+    return 1
 }
 
 finish() {
