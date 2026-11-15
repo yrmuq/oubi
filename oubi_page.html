@@ -106,13 +106,14 @@ body.arrange .block * { pointer-events: none; }
 .head-tools { display: flex; align-items: center; gap: 8px; }
 #arrange { width: 32px; height: 32px; padding: 0; background: var(--btn-2); color: var(--text); }
 #arrange.on { background: var(--pick); color: #111; }
+#lang { height: 32px; padding: 0 8px; background: var(--btn-2); color: var(--text); }
 #preview { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 #shot { width: 100%; flex: 1 1 auto; min-height: 80px; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
-#switch { position: relative; width: 100%; height: 32px; flex: 0 0 32px; }
-#prev, #next { position: absolute; top: 0; z-index: 2; background: transparent; color: var(--text); font-size: 22px; }
+#switch { position: relative; width: 100%; height: 44px; flex: 0 0 44px; margin-bottom: 8px; }
+#prev, #next { position: absolute; top: 0; z-index: 2; height: 44px; margin: 0; padding: 0 10px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; line-height: 1; background: transparent; color: var(--text); font-size: 22px; }
 #prev { left: 0; }
 #next { right: 0; }
-#name { position: absolute; left: 44px; right: 44px; top: 4px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#name { position: absolute; left: 48px; right: 48px; top: 0; height: 44px; margin: 0; display: flex; align-items: center; justify-content: center; line-height: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #who { margin: 0; min-height: 1.2em; font-size: 22px; font-weight: 700; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
 #genre-row { display: flex; flex-wrap: wrap; gap: 8px 16px; width: 100%; flex: 1; min-height: 0; overflow: auto; align-items: flex-start; align-content: flex-start; }
@@ -179,7 +180,8 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
 <header class="topbar">
   <span class="brand">oubi</span>
   <div class="head-tools">
-    <button id="arrange" type="button" title="Перетащить блоки">✎</button>
+    <button id="arrange" type="button" title="Move blocks">✎</button>
+    <button id="lang" type="button" title="Language">EN</button>
     <div class="themes">
     <button type="button" data-theme="light">светлая</button>
     <button type="button" data-theme="dark">тёмная</button>
@@ -214,7 +216,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <img id="shot" alt="">
         <div id="switch">
           <button id="prev" type="button">❮</button>
-          <span id="name"></span>
+          <span id="name">filename</span>
           <button id="next" type="button">❯</button>
         </div>
       </div>
@@ -228,7 +230,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     <div class="block grow" data-block="info">
       <div id="info">
         <p id="who"></p>
-        <p id="tags"></p>
+        <p id="tags">Select a file to show tags</p>
       </div>
     </div>
     <div class="block grow" data-block="log">
@@ -249,7 +251,10 @@ let follow = true;
 let shown = "";
 let genres = __OUBI_GENRES__;
 let layout = __OUBI_LAYOUT__;
+let lang = "__OUBI_LANG__";
+const catalogs = __OUBI_LANGS__;
 let tagText = "";
+let hasFile = false;
 let genreFilter = -1;
 let theme = savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto" ? savedTheme : "auto";
 let wasBusy = false;
@@ -260,10 +265,44 @@ function fileName(path) {
   return parts[parts.length - 1] || "";
 }
 
+function t(id) {
+  const pack = catalogs[lang] || catalogs.en || {};
+  const english = catalogs.en || {};
+  return pack[String(id)] || english[String(id)] || "";
+}
+
+function showEmpty() {
+  hasFile = false;
+  shown = "";
+  const shot = document.getElementById("shot");
+  shot.removeAttribute("src");
+  document.getElementById("name").textContent = t(11);
+  document.getElementById("who").textContent = "";
+  tagText = "";
+  document.getElementById("tags").textContent = t(12);
+}
+
+function applyI18n() {
+  document.getElementById("tag").textContent = t(1);
+  document.getElementById("sort").textContent = t(2);
+  document.getElementById("plan").textContent = t(3);
+  document.getElementById("stop").textContent = t(4);
+  document.getElementById("retry").textContent = t(5);
+  document.querySelector('[data-theme="light"]').textContent = t(8);
+  document.querySelector('[data-theme="dark"]').textContent = t(9);
+  document.querySelector('[data-theme="auto"]').textContent = t(10);
+  document.getElementById("arrange").title = t(20);
+  document.getElementById("lang").title = t(21);
+  document.getElementById("lang").textContent = lang === "ru" ? "RU" : "EN";
+  if (!hasFile) showEmpty();
+  renderFolders();
+  if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
+}
+
 function badge(kind, state) {
   const title = {
-    scan: { none: "не опознавалась", part: "опознана не до конца", done: "опознана полностью" },
-    sort: { none: "не сортировалась", part: "отсортирована не до конца", done: "отсортирована полностью" },
+    scan: { none: t(13), part: t(14), done: t(15) },
+    sort: { none: t(16), part: t(17), done: t(18) },
   }[kind][state] || "";
   if (!title) return "";
   return `<span class="badge ${kind} ${state}" title="${title}"></span>`;
@@ -327,12 +366,14 @@ async function loadRecent() {
   if (genreFilter >= 0) return;
   if (!selected.size) {
     reel = [];
+    showEmpty();
     return;
   }
   const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
   const data = await (await fetch("/api/recent?" + query)).json();
   reel = data.files || [];
-  if (follow && reel.length) showAt(reel.length - 1);
+  if (!reel.length) showEmpty();
+  else if (follow && reel.length) showAt(reel.length - 1);
 }
 
 function paintTags(text) {
@@ -361,6 +402,7 @@ async function showImage(root, path) {
   shown = root + ":" + path;
   document.getElementById("shot").src = "/api/file?root=" + root + "&path=" + encodeURIComponent(path);
   document.getElementById("name").textContent = fileName(path);
+  hasFile = true;
   document.getElementById("who").textContent = "";
   document.getElementById("tags").replaceChildren();
   tagText = "";
@@ -374,7 +416,7 @@ async function showImage(root, path) {
 
 async function tick() {
   const data = await (await fetch("/api/status")).json();
-  let step = data.step || "Жду.";
+  let step = data.step || t(7);
   const named = step.match(/Сейчас: размечаю (.+) \((\d+ из \d+)\)/);
   if (named) step = "Сейчас: размечаю " + fileName(named[1]) + " (" + named[2] + ").";
   document.getElementById("step").textContent = step;
@@ -654,7 +696,7 @@ function renderGenreRow(focusAt) {
     const pin = document.createElement("button");
     pin.type = "button";
     pin.className = "genre-pin" + (genreFilter === index ? " on" : "");
-    pin.title = "Только картинки с этим тегом";
+    pin.title = t(19);
     pin.onclick = () => toggleGenre(index);
     slot.ondragover = (event) => event.preventDefault();
     slot.ondrop = (event) => {
@@ -784,6 +826,16 @@ document.getElementById("arrange").onclick = () => {
   document.getElementById("arrange").classList.toggle("on", arranging);
   if (!arranging) saveLayout();
 };
+document.getElementById("lang").onclick = () => {
+  lang = lang === "ru" ? "en" : "ru";
+  applyI18n();
+  fetch("/api/language", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language: lang }),
+  });
+};
+applyI18n();
 document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };

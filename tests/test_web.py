@@ -26,6 +26,12 @@ from oubi_web import (
     read_layout,
     write_layout,
     images_with_tag,
+    detect_lang,
+    read_lang,
+    write_lang,
+    load_catalogs,
+    text,
+    placeholder_names,
 )
 from sort_images import under_roots
 
@@ -191,6 +197,25 @@ class LayoutTests(unittest.TestCase):
             )
             self.assertEqual(images_with_tag("comic", csv_path, root), ["a.jpg"])
             self.assertEqual(images_with_tag("missing", csv_path, root), [])
+
+    def test_language_detects_browser_and_keeps_a_choice(self):
+        import tempfile
+        self.assertEqual(detect_lang("ru-RU,ru;q=0.9,en;q=0.8"), "ru")
+        self.assertEqual(detect_lang("fr-FR,fr;q=0.9"), "en")
+        self.assertEqual(detect_lang("", {"LANG": "ru_RU.UTF-8"}), "ru")
+        packs = load_catalogs()
+        self.assertEqual(packs["ru"]["1"], "Опознать")
+        self.assertEqual(packs["en"]["11"], "filename")
+        self.assertEqual(packs["ru"]["11"], "filename")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "language"
+            self.assertEqual(read_lang(path, "fr"), "en")
+            self.assertTrue(write_lang("ru", path))
+            self.assertEqual(read_lang(path, "en-US"), "ru")
+            self.assertFalse(write_lang("de", path))
+        self.assertNotEqual(placeholder_names("Опознать {missing}"), placeholder_names("Identify"))
+        self.assertIn("1", packs["en"])
+        self.assertTrue(text(1))
 
 
 if __name__ == "__main__":

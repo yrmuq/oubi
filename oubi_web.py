@@ -27,17 +27,124 @@ MODES = {"all", "tag", "sort", "plan"}
 PAGE_PATH = HERE / "oubi_page.html"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 SORTED_LIST = "/data/sorted.txt"
+LANG_PATH = "/data/language"
+LANG_CODES = {"en", "ru"}
+PLACEHOLDERS = re.compile(r"\{[a-zA-Z0-9_]+\}")
 
-def page_bytes(items, theme="auto", genres=None, layout=None):
+def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalogs=None):
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
     chosen = theme if theme in THEMES else "auto"
     genre_payload = json.dumps(list(genres or [])[:MAX_GENRES], ensure_ascii=False).replace("<", "\\u003c")
     layout_payload = json.dumps(layout or {}, ensure_ascii=False).replace("<", "\\u003c")
+    lang_code = lang if lang in LANG_CODES else "en"
+    lang_payload = json.dumps(catalogs or {}, ensure_ascii=False).replace("<", "\\u003c")
     html = PAGE_PATH.read_text(encoding="utf-8")
     html = html.replace("FOLDERS_JSON", payload, 1).replace("__OUBI_THEME__", chosen, 1)
     html = html.replace("__OUBI_GENRES__", genre_payload, 1)
     html = html.replace("__OUBI_LAYOUT__", layout_payload, 1)
+    html = html.replace("__OUBI_LANG__", lang_code, 1)
+    html = html.replace("__OUBI_LANGS__", lang_payload, 1)
     return html.encode()
+
+
+def parse_catalog(text):
+    code = "en"
+    rows = {}
+    for raw in text.lstrip("\ufeff").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(";"):
+            meta = line[1:].strip()
+            if meta.lower().startswith("code") and "=" in meta:
+                code = meta.split("=", 1)[1].strip().lower()
+            continue
+        parts = [part.strip() for part in line.split(" = ", 2)]
+        if len(parts) < 3 or not parts[0].isdigit():
+            continue
+        rows[int(parts[0])] = (parts[1], parts[2])
+    return code, rows
+
+
+def placeholder_names(text):
+    return tuple(sorted(PLACEHOLDERS.findall(text or "")))
+
+
+def load_catalogs(root=None):
+    base = Path(root) if root else HERE / "languages"
+    english = parse_catalog((base / "English.ini").read_text(encoding="utf-8-sig"))[1]
+    catalogs = {}
+    for file in sorted(base.glob("*.ini")):
+        code, rows = parse_catalog(file.read_text(encoding="utf-8-sig"))
+        if code not in LANG_CODES:
+            continue
+        packed = {}
+        for number, (original, _) in english.items():
+            translated = rows.get(number, ("", ""))[1]
+            if not translated.strip() or placeholder_names(translated) != placeholder_names(original):
+                translated = original
+            packed[str(number)] = translated
+        catalogs[code] = packed
+    catalogs.setdefault("en", {str(number): original for number, (original, _) in english.items()})
+    return catalogs
+
+
+def language_code(value):
+    token = (value or "").strip().lower().replace("-", "_").split(".")[0]
+    if token.startswith("ru"):
+        return "ru"
+    if token.startswith("en"):
+        return "en"
+    return ""
+
+
+def detect_lang(header="", environ=None):
+    for part in (header or "").split(","):
+        found = language_code(part.split(";", 1)[0])
+        if found:
+            return found
+    env = environ if environ is not None else os.environ
+    for key in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        raw = env.get(key, "")
+        if not raw or raw.lower() == "c":
+            continue
+        found = language_code(raw.split(":", 1)[0])
+        if found:
+            return found
+    return "en"
+
+
+def read_lang(path=LANG_PATH, header=""):
+    try:
+        saved = Path(path).read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        saved = ""
+    if saved in LANG_CODES:
+        return saved
+    return detect_lang(header)
+
+
+def write_lang(value, path=LANG_PATH):
+    if value not in LANG_CODES:
+        return False
+    file = Path(path)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(value, encoding="utf-8")
+    return True
+
+
+def text(number, **values):
+    packs = load_catalogs()
+    pack = packs.get(read_lang()) or packs.get("en") or {}
+    template = pack.get(str(number)) or (packs.get("en") or {}).get(str(number)) or ""
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError, ValueError):
+        english = (packs.get("en") or {}).get(str(number)) or ""
+        try:
+            return english.format(**values)
+        except (KeyError, IndexError, ValueError):
+            return english
 
 
 def read_genres(path=GENRES_PATH):
@@ -286,7 +393,7 @@ def folder_names(root=IMAGES):
     try:
         children = [path for path in base.iterdir() if path.is_dir() and not path.name.startswith(".")]
     except OSError as error:
-        print(f"Сейчас: не читается {root}: {error}", flush=True)
+        print(text(26, path=root, error=error), flush=True)
         return []
     children.sort(key=lambda path: path.name.lower())
     if children:
@@ -625,7 +732,7 @@ class App:
         self.job_running = False
         self.job_mode = None
         self.phase = "download"
-        self.step = "Сейчас: скачиваю модель."
+        self.step = text(22)
         self.detail = ""
         self.percent = None
         self.proc = None
@@ -704,7 +811,7 @@ class App:
         try:
             found = source_folders()
         except Exception as error:
-            print(f"Сейчас: не удалось посчитать папки: {error}", flush=True)
+            print(text(27, error=error), flush=True)
             found = None
         with self.lock:
             if found is not None:
@@ -738,7 +845,7 @@ class App:
             self.model_state = "downloading"
             self.phase = "download"
             self.percent = None
-            self.step = "Сейчас: скачиваю модель."
+            self.step = text(22)
         model = os.environ.get("OUBI_MODEL", "pixai-labs/pixai-tagger-v1.0")
         try:
             if os.path.isdir(model):
@@ -754,10 +861,10 @@ class App:
                     sys.stdout = previous
             with self.lock:
                 self.model_state = "ready"
-                self.step = "Модель скачана. Разметку и раскладку запускают кнопки."
+                self.step = text(23)
                 self.percent = 100
         except Exception as error:
-            self.note(f"Сейчас: не удалось скачать модель. {error}")
+            self.note(text(24, error=error))
             with self.lock:
                 self.model_state = "error"
 
@@ -783,7 +890,7 @@ class App:
             self.percent = None
             self.detail = ""
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
-            self.step = "Сейчас: запускаю."
+            self.step = text(25)
             self.folder_cache = None
         threading.Thread(target=self._run, args=(mode, paths), daemon=True).start()
         return True
@@ -862,7 +969,8 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         path = parsed.path
         if path == "/":
-            self._send(200, page_bytes(self.app.folders(), read_theme(), read_genres(), read_layout()), "text/html; charset=utf-8")
+            chosen = read_lang(header=self.headers.get("Accept-Language", ""))
+            self._send(200, page_bytes(self.app.folders(), read_theme(), read_genres(), read_layout(), chosen, load_catalogs()), "text/html; charset=utf-8")
             return
         if path == "/api/status":
             self._send(200, self.app.status())
@@ -920,6 +1028,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "нет такой темы"})
                 return
             self._send(200, {"theme": read_theme()})
+            return
+        if parsed.path == "/api/language":
+            if not write_lang(str(payload.get("language") or "")):
+                self._send(400, {"error": "нет такого языка"})
+                return
+            self._send(200, {"language": read_lang()})
             return
         if parsed.path == "/api/layout":
             if not write_layout(payload if isinstance(payload, dict) else {}):
