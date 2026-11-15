@@ -70,7 +70,10 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
 .pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
-.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#all-folders { margin-left: auto; width: 32px; height: 32px; padding: 0; }
+#all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; }
+#all-folders.on .box { background: currentColor; }
 button { font: inherit; color: #fff; background: var(--btn); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
 button.secondary { background: var(--btn-2); color: var(--btn-2-text); }
 button.danger { background: var(--danger); color: #fff; }
@@ -210,6 +213,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <button id="plan" class="secondary">План сортировки</button>
         <button id="stop" class="danger" disabled>Остановить</button>
         <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
+        <button id="all-folders" class="secondary" type="button" title="Select all folders"><span class="box"></span></button>
       </div>
     </div>
     <div class="block grow" data-block="folders">
@@ -312,6 +316,7 @@ function applyI18n() {
   document.querySelector('.themes [data-theme="dark"]').textContent = t(9);
   document.querySelector('.themes [data-theme="auto"]').textContent = t(10);
   document.getElementById("arrange").title = t(20);
+  document.getElementById("all-folders").title = t(83);
   document.getElementById("lang").title = t(21);
   document.getElementById("lang").textContent = lang === "ru" ? "RU" : "EN";
   if (!hasFile) showEmpty();
@@ -358,6 +363,8 @@ function renderFolders() {
     };
     box.appendChild(button);
   }
+  const all = document.getElementById("all-folders");
+  if (all) all.classList.toggle("on", folders.length > 0 && folders.every((folder) => selected.has(folder.path)));
 }
 
 function takeFolders(data) {
@@ -746,27 +753,33 @@ function tagList() {
   return String(tagText || "").split(",").map((part) => part.trim()).filter(Boolean);
 }
 
+function matchFrom(folded, tags, start) {
+  for (let i = start; i < tags.length; i += 1) {
+    const key = tags[i].toLowerCase();
+    if (key.startsWith(folded) && key !== folded) return { tag: tags[i], used: folded.length };
+    if (key && folded.startsWith(key)) {
+      const rest = folded.slice(key.length);
+      if (rest) {
+        const found = matchFrom(rest, tags, i + 1);
+        if (found) return found;
+      }
+      continue;
+    }
+    let shared = 0;
+    while (shared < folded.length && shared < key.length && folded[shared] === key[shared]) shared += 1;
+    if (shared > 0 && shared < folded.length) {
+      const found = matchFrom(folded.slice(shared), tags, i + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 function matchTag(prefix) {
   const typed = String(prefix || "");
   const folded = typed.toLowerCase();
   if (!folded.trim()) return null;
-  const tags = tagList();
-  for (let i = 0; i < tags.length; i += 1) {
-    const key = tags[i].toLowerCase();
-    if (key.startsWith(folded) && key !== folded) return { tag: tags[i], used: typed.length };
-  }
-  for (let i = 0; i < tags.length; i += 1) {
-    const key = tags[i].toLowerCase();
-    let shared = 0;
-    while (shared < folded.length && shared < key.length && folded[shared] === key[shared]) shared += 1;
-    if (!shared || shared === folded.length) continue;
-    const rest = folded.slice(shared);
-    for (let next = i + 1; next < tags.length; next += 1) {
-      const nextKey = tags[next].toLowerCase();
-      if (nextKey.startsWith(rest) && nextKey !== rest) return { tag: tags[next], used: rest.length };
-    }
-  }
-  return null;
+  return matchFrom(folded, tagList(), 0);
 }
 
 function applyGhost(input, ghost) {
@@ -1000,6 +1013,13 @@ document.getElementById("filter-query").onkeydown = (event) => {
 };
 applyI18n();
 document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
+document.getElementById("all-folders").onclick = () => {
+  const every = folders.length > 0 && folders.every((folder) => selected.has(folder.path));
+  if (every) selected.clear();
+  else for (const folder of folders) selected.add(folder.path);
+  renderFolders();
+  loadRecent();
+};
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };
 document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
