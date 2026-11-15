@@ -71,8 +71,8 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-#all-folders { margin-left: auto; width: 32px; height: 32px; padding: 0; }
-#all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; }
+#all-folders { margin-left: auto; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
+#all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
 #all-folders.on .box { background: currentColor; }
 button { font: inherit; color: #fff; background: var(--btn); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
 button.secondary { background: var(--btn-2); color: var(--btn-2-text); }
@@ -132,7 +132,9 @@ body.arrange .block * { pointer-events: none; }
 .genre-pin.on { background: var(--pick); border-color: var(--pick); color: #111; }
 .genre-field { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .genre-field input, .genre-ghost { font: inherit; padding: 4px 6px; box-sizing: border-box; }
-.genre-ghost { position: absolute; inset: 0; z-index: 2; color: var(--muted); pointer-events: none; white-space: pre; overflow: hidden; border: 1px solid transparent; }
+.genre-ghost { position: absolute; inset: 0; z-index: 2; color: var(--muted); pointer-events: none; white-space: pre; overflow: visible; border: 1px solid transparent; }
+.ghost-typed { color: transparent; }
+.ghost-tail { color: var(--muted); }
 .genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
 #genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
 .tag-hit { cursor: pointer; border-radius: 4px; padding: 0 3px; }
@@ -784,20 +786,18 @@ function matchTag(prefix) {
 
 function applyGhost(input, ghost) {
   if (!ghost) return;
+  ghost.style.paddingLeft = "";
+  ghost.replaceChildren();
   const found = matchTag(input.value);
-  if (!found) {
-    ghost.textContent = "";
-    ghost.style.paddingLeft = "";
-    return;
-  }
-  ghost.textContent = found.tag.slice(found.used);
-  const style = getComputedStyle(input);
-  const canvas = applyGhost.canvas || (applyGhost.canvas = document.createElement("canvas"));
-  const ctx = canvas.getContext("2d");
-  ctx.font = style.font;
-  ghost.style.font = style.font;
-  ghost.style.paddingTop = style.paddingTop;
-  ghost.style.paddingLeft = ((parseFloat(style.paddingLeft) || 0) + ctx.measureText(input.value).width) + "px";
+  if (!found) return;
+  const typed = document.createElement("span");
+  typed.className = "ghost-typed";
+  typed.textContent = input.value;
+  const tail = document.createElement("span");
+  tail.className = "ghost-tail";
+  tail.textContent = found.tag.slice(found.used);
+  ghost.style.font = getComputedStyle(input).font;
+  ghost.append(typed, tail);
 }
 
 function saveGenres() {
