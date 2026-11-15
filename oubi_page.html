@@ -755,33 +755,15 @@ function tagList() {
   return String(tagText || "").split(",").map((part) => part.trim()).filter(Boolean);
 }
 
-function matchFrom(folded, tags, start) {
-  for (let i = start; i < tags.length; i += 1) {
-    const key = tags[i].toLowerCase();
-    if (key.startsWith(folded) && key !== folded) return { tag: tags[i], used: folded.length };
-    if (key && folded.startsWith(key)) {
-      const rest = folded.slice(key.length);
-      if (rest) {
-        const found = matchFrom(rest, tags, i + 1);
-        if (found) return found;
-      }
-      continue;
-    }
-    let shared = 0;
-    while (shared < folded.length && shared < key.length && folded[shared] === key[shared]) shared += 1;
-    if (shared > 0 && shared < folded.length) {
-      const found = matchFrom(folded.slice(shared), tags, i + 1);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
 function matchTag(prefix) {
   const typed = String(prefix || "");
   const folded = typed.toLowerCase();
   if (!folded.trim()) return null;
-  return matchFrom(folded, tagList(), 0);
+  const tag = tagList().find((item) => {
+    const key = item.toLowerCase();
+    return key.startsWith(folded) && key.length > folded.length;
+  });
+  return tag ? { tag, used: typed.length } : null;
 }
 
 function applyGhost(input, ghost) {
