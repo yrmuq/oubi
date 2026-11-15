@@ -190,22 +190,26 @@ promote() {
 }
 
 write_dev_draft() {
-    local source=$1 notes=$2 releases="repos/$repository/releases"
+    local source=$1 notes=$2 releases="repos/$repository/releases" title='Development build'
     local drafts id draft response attempt
-    drafts=$(gh api --paginate "$releases" --jq '.[] | select(.tag_name == "dev") | [.id, .draft] | @tsv')
+    # GitHub can replace a draft's requested tag name with an untagged-* placeholder.
+    drafts=$(gh api --paginate "$releases" | jq -r --arg title "$title" '
+        .[] | select(.tag_name == "dev" or
+            (.draft and .name == $title and ((.tag_name // "") | startswith("untagged-"))))
+        | [.id, .draft] | @tsv')
     if [[ -z $drafts ]]; then
         response=$(gh api --method POST "$releases" -f tag_name=dev -F draft=true \
-            -f make_latest=false -f target_commitish="$source" -f name='Development build' -f body="$notes")
+            -f make_latest=false -f target_commitish="$source" -f name="$title" -f body="$notes")
     else
         IFS=$'\t' read -r id draft <<<"$drafts"
         [[ $draft == true && $drafts != *$'\n'* ]]
         response=$(gh api --method PATCH "$releases/$id" \
-            -f target_commitish="$source" -f name='Development build' -f body="$notes")
+            -f target_commitish="$source" -f name="$title" -f body="$notes")
     fi
     id=$(jq -er '.id | numbers' <<<"$response")
     for attempt in {1..5}; do
-        if gh api "$releases/$id" | jq -e --arg source "$source" --arg notes "$notes" \
-            '.tag_name == "dev" and .draft and (.prerelease | not) and
+        if gh api "$releases/$id" | jq -e --arg source "$source" --arg notes "$notes" --arg title "$title" \
+            '.name == $title and .draft and (.prerelease | not) and
              .target_commitish == $source and .body == $notes' >/dev/null; then
             return
         fi
