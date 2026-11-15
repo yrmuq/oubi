@@ -35,7 +35,7 @@
 | Input | Action |
 | :--- | :--- |
 | `Identify` | Tag images in the selected folders when the model is ready. |
-| `Tagging device` | Choose CPU, AMD GPU, or NVIDIA GPU for the next tagging job. |
+| `Tagging device` | In the header, choose CPU, AMD, or NVIDIA for the next tagging job. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
 | `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
@@ -63,6 +63,8 @@ Put optional gender overrides in `genders.csv` under the data directory as heade
 | `arm64` | ❌ |
 
 The published container supports `linux/amd64` and uses CPU inference by default. The development build can download optional ROCm and CUDA environments from the web interface for compatible GPUs.
+
+Select a GPU in the header and click its `Install` button. The terminal shows the selected bundle and estimated download size. Enter `y` to start or `n` to cancel. The shared progress bar and terminal show the installation steps, download speed, and estimated time remaining. After the GPU test passes, choose `AMD` or `NVIDIA` in the tagging device selector and click `Identify`.
 
 ### Release Scheme
 
@@ -99,7 +101,7 @@ docker compose -f docker-compose.yml -f docker-compose.amd.yml pull
 docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
 ```
 
-Choose `Auto` or an architecture such as `gfx1102` for the Radeon RX 7600. `OUBI_ROCM_ARCH` in `.env` sets the initial selection. Click `Install AMD support` to download the corresponding ROCm packages into `/data/rocm`. After the GPU test finishes, select `AMD GPU` before starting `Identify`. The model cache is shared between the CPU and GPU tagging environments.
+Choose `Auto` or an architecture such as `gfx1102` for the Radeon RX 7600. `OUBI_ROCM_ARCH` in `.env` sets the initial selection. Oubi stores the corresponding ROCm packages in `/data/rocm`. The model cache is shared between the CPU and GPU tagging environments.
 
 #### NVIDIA GPU tagging
 
@@ -110,7 +112,7 @@ docker compose -f docker-compose.yml -f docker-compose.nvidia.yml pull
 docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
 ```
 
-Choose `Auto` or a specific detected card, then click `Install NVIDIA support`. Oubi picks a PyTorch CUDA build using the card's compute capability and driver version. A downloaded build in `/data/nvidia` is shared by cards that use the same CUDA packages. After the selected card passes the GPU test, select `NVIDIA GPU` before starting `Identify`.
+Choose `Auto` or a specific detected card. Oubi picks a PyTorch CUDA build using the card's compute capability and driver version. A downloaded build in `/data/nvidia` is shared by cards that use the same CUDA packages. Each selected card still runs its own GPU test.
 
 ---
 

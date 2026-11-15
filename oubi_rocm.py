@@ -20,8 +20,13 @@ ARCHITECTURES = (
     "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1101",
     "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1200", "gfx1201",
 )
-# Compressed AMD artifacts for the pinned release, excluding regular Python dependencies.
-DOWNLOAD_BYTES = {"gfx1102": 1_901_695_635}
+# Published compressed wheel sizes for these pins, plus estimated PyPI dependencies.
+DOWNLOAD_BYTES = {
+    "gfx90a": 2_010_000_000, "gfx942": 3_400_000_000, "gfx950": 2_260_000_000,
+    "gfx1100": 1_980_000_000, "gfx1101": 1_970_000_000, "gfx1102": 1_970_000_000,
+    "gfx1103": 1_800_000_000, "gfx1150": 1_820_000_000, "gfx1151": 1_840_000_000,
+    "gfx1152": 1_820_000_000, "gfx1200": 1_840_000_000, "gfx1201": 1_780_000_000,
+}
 TOPOLOGY = Path("/sys/class/kfd/kfd/topology/nodes")
 DEVICES = Path("/dev")
 
@@ -68,6 +73,7 @@ class RocmRuntime(GpuRuntime):
     install_error = 121
     probe_error = 117
     probe_script = str(Path(__file__).resolve())
+    download_bytes = DOWNLOAD_BYTES
 
     def __init__(self, root="/data/rocm", topology=TOPOLOGY, devices=DEVICES):
         super().__init__(root)
@@ -114,9 +120,6 @@ class RocmRuntime(GpuRuntime):
             "installed": installed,
             "install": self.installation_status(),
         }
-
-    def start(self, choice):
-        self.launch_install(self.resolve(choice))
 
     def requirements(self, arch):
         return (

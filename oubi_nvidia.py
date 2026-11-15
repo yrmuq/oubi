@@ -62,6 +62,8 @@ class NvidiaRuntime(GpuRuntime):
     install_error = 133
     probe_error = 131
     probe_script = str(Path(__file__).resolve())
+    # Approximate compressed wheels from the CUDA and PyPI indexes for these pins.
+    download_bytes = {"cu126": 3_720_000_000, "cu130": 3_080_000_000}
 
     def __init__(self, root="/data/nvidia"):
         super().__init__(root)
@@ -115,9 +117,6 @@ class NvidiaRuntime(GpuRuntime):
             "installed": installed,
             "install": self.installation_status(),
         }
-
-    def start(self, choice):
-        self.launch_install(*self.resolve(choice))
 
 
 if __name__ == "__main__":

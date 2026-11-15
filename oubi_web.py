@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Formatter
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 from oubi_gpu import GpuError
 from oubi_nvidia import NvidiaRuntime
@@ -182,6 +183,26 @@ def text(number, *, language=None, **values):
             return english.format(**values)
         except (KeyError, IndexError, ValueError):
             return english
+
+
+def gpu_transfer_text(transfer, downloaded, expected, language):
+    def mib(size):
+        return f"{size / 1048576:.1f}"
+
+    def eta(remaining):
+        seconds = int(remaining / max(transfer["speed"], 1))
+        minutes, seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+    remaining = max(0, transfer["total"] - transfer["received"])
+    progress = text(155, language=language, file=transfer["file"], received=mib(transfer["received"]),
+                    total=mib(transfer["total"]), speed=mib(transfer["speed"]),
+                    remaining=mib(remaining), eta=eta(remaining))
+    if expected > downloaded + remaining:
+        progress += " " + text(156, language=language, remaining=mib(expected - downloaded),
+                               eta=eta(expected - downloaded))
+    return progress
 
 
 def read_genres(path=GENRES_PATH):
@@ -883,8 +904,10 @@ class LineTee:
 class App:
     def __init__(self):
         self.lock = threading.Lock()
+        self.gpu_lock = threading.Lock()
         self.rocm = RocmRuntime()
         self.nvidia = NvidiaRuntime()
+        self.gpu_prompt = None
         self.lines = []
         self.model_state = "downloading"
         self.job_running = False
@@ -900,13 +923,16 @@ class App:
         self.folder_cached_at = 0.0
         self.folder_counting = False
 
+    def _append_line(self, line):
+        self.lines.append(line)
+        del self.lines[:-300]
+
     def note(self, line, echo=True):
         text = line.strip()
         if not text:
             return
         with self.lock:
-            self.lines.append(text)
-            del self.lines[:-300]
+            self._append_line(text)
             parsed = parse_progress(text)
             if "percent" in parsed:
                 self.percent = parsed["percent"]
@@ -928,6 +954,99 @@ class App:
                 self.preview_file = self.current_file
         if echo:
             print(text, flush=True)
+
+    def gpu_note(self, message_id, language, **values):
+        line = text(message_id, language=language, **values)
+        with self.lock:
+            self._append_line(line)
+
+    def request_gpu_install(self, vendor, choice, language):
+        with self.gpu_lock:
+            if self.gpu_prompt:
+                raise GpuError(152)
+            if self.gpu_busy():
+                raise GpuError(120)
+            runtime = self.rocm if vendor == "amd" else self.nvidia
+            runtime.check_platform()
+            if vendor == "amd":
+                target, gpu = runtime.resolve(choice), None
+                package = f"AMD ROCm {target}"
+            else:
+                target, gpu = runtime.resolve(choice)
+                name = next((card["name"] for card in runtime.gpus() if card["uuid"] == gpu), gpu)
+                package = f"{name} (CUDA {target})"
+            if runtime.installed(target, gpu):
+                raise GpuError(153)
+            expected = runtime.download_size(target)
+            size = f"{expected / 1e9:.2f}".rstrip("0").rstrip(".")
+            message = text(141 if expected else 142, language=language, package=package, size=size)
+            self.gpu_prompt = {"id": uuid4().hex, "vendor": vendor, "target": target, "gpu": gpu,
+                               "message": message}
+            with self.lock:
+                self._append_line(message)
+
+    def gpu_busy(self):
+        return any(runtime.installation_status()["state"] in {"installing", "checking"}
+                   for runtime in (self.rocm, self.nvidia))
+
+    def answer_gpu_install(self, prompt_id, answer, language):
+        if not isinstance(answer, str) or (answer := answer.strip().lower()) not in {"y", "n"}:
+            raise GpuError(144)
+        with self.gpu_lock:
+            prompt = self.gpu_prompt
+            if not prompt or prompt["id"] != prompt_id:
+                raise GpuError(145)
+            self.gpu_prompt = None
+            with self.lock:
+                self._append_line(f"> {answer}")
+            if answer == "n":
+                self.gpu_note(143, language)
+                return
+            vendor, target, gpu = prompt["vendor"], prompt["target"], prompt["gpu"]
+            runtime = self.rocm if vendor == "amd" else self.nvidia
+            expected = runtime.download_size(target)
+            device = "AMD" if vendor == "amd" else "NVIDIA"
+
+            def notify(message_id, transfer=None, downloaded=0, **values):
+                if transfer:
+                    values = {"progress": gpu_transfer_text(transfer, downloaded, expected, language)}
+                self.gpu_note(message_id, language, device=device, **values)
+
+            try:
+                if vendor == "amd":
+                    runtime.resolve(target)
+                elif runtime.resolve(gpu) != (target, gpu):
+                    raise GpuError(154)
+                if runtime.installed(target, gpu):
+                    notify(151)
+                else:
+                    runtime.launch_install(target, gpu, notify=notify)
+            except GpuError as error:
+                notify(error.message_id)
+                raise
+
+    def gpu_status(self, language):
+        with self.gpu_lock:
+            prompt = self.gpu_prompt
+            rocm, nvidia = self.rocm.status(), self.nvidia.status()
+        status = None
+        for vendor, runtime in (("amd", rocm), ("nvidia", nvidia)):
+            install = runtime["install"]
+            if install["state"] not in {"installing", "checking"}:
+                continue
+            expected, downloaded = install.get("expected", 0), install.get("downloaded", 0)
+            transfer = install.get("transfer")
+            status = {
+                "step": text(110 if vendor == "amd" else 136, language=language),
+                "detail": (gpu_transfer_text(transfer, downloaded, expected, language) if transfer
+                           else text(install.get("stage", 146), language=language)),
+                "percent": min(99, 100 * downloaded / expected) if expected else 0,
+            }
+            if install["state"] == "checking":
+                status["percent"] = 100
+        public_prompt = {"id": prompt["id"], "message": prompt["message"]} if prompt else None
+        return {"gpu_prompt": public_prompt, "gpu_progress": status,
+                "rocm": rocm, "nvidia": nvidia}
 
     def folders(self):
         self._ensure_count()
@@ -1158,7 +1277,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, page, "text/html; charset=utf-8")
             return
         if path == "/api/status":
-            self._send(200, {**self.app.status(), "rocm": self.app.rocm.status(), "nvidia": self.app.nvidia.status()})
+            gpu = self.app.gpu_status(self._language())
+            self._send(200, {**self.app.status(), **gpu})
             return
         if path == "/api/folders":
             self._send(200, self.app.folders())
@@ -1252,17 +1372,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, {"ok": True})
             return
-        if parsed.path in {"/api/rocm", "/api/nvidia"}:
+        if parsed.path in {"/api/rocm", "/api/nvidia", "/api/terminal"}:
             if self.headers.get_content_type() != "application/json":
                 self._error(400, 89)
                 return
-            runtime, field = (self.app.rocm, "architecture") if parsed.path == "/api/rocm" else (self.app.nvidia, "gpu")
+            language = self._language()
             try:
-                runtime.start(payload.get(field, "auto"))
+                if parsed.path == "/api/terminal":
+                    self.app.answer_gpu_install(payload.get("id"), payload.get("answer"), language)
+                else:
+                    vendor, field = ("amd", "architecture") if parsed.path == "/api/rocm" else ("nvidia", "gpu")
+                    self.app.request_gpu_install(vendor, payload.get(field, "auto"), language)
             except GpuError as error:
+                if parsed.path != "/api/terminal":
+                    self.app.gpu_note(error.message_id, language)
                 self._error(409, error.message_id)
                 return
-            self._send(202, runtime.status())
+            self._send(202, {"ok": True})
             return
         if parsed.path != "/api/job":
             self._error(404, 88)

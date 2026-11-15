@@ -62,18 +62,18 @@
 }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
 body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
-.topbar { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--pane); }
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; box-sizing: border-box; min-height: 48px; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--pane); }
 .brand { font-size: 18px; font-weight: 650; }
 #theme { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
 .top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
 .pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.compute { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
-.compute select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 6px; padding: 4px; }
+.compute { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding-inline-start: 12px; border-inline-start: 1px solid var(--line); box-sizing: border-box; }
+.compute[hidden] { display: none; }
+.compute select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 6px; padding: 4px; min-width: 0; }
+#nvidia-card { max-width: 200px; }
 .compute button { padding: 5px 8px; }
-.compute-status { width: 100%; margin: 0; color: var(--muted); font-size: .9em; overflow-wrap: anywhere; }
-.compute progress { width: 100%; accent-color: var(--fill); }
 #all-folders { margin-left: auto; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
 #all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
 #all-folders.on .box { background: currentColor; }
@@ -103,7 +103,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .step { margin: 0; }
 .bar { height: 10px; background: var(--bar); border-radius: 99px; overflow: hidden; }
 .bar > div { height: 100%; width: 0; background: var(--fill); }
-.detail { color: var(--muted); min-height: 1.2em; }
+.detail { color: var(--muted); min-height: 1.2em; overflow-wrap: anywhere; }
 .mid { position: relative; text-align: center; gap: 0; display: flex; flex-direction: column; }
 .block { min-width: 0; min-height: 0; position: relative; }
 .block.grow { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -114,7 +114,7 @@ body.arrange .block * { pointer-events: none; }
 .block.dragging { opacity: 0.4; }
 .block.drop-before { box-shadow: inset 0 3px 0 var(--pick); }
 .block.drop-after { box-shadow: inset 0 -3px 0 var(--pick); }
-.head-tools { display: flex; align-items: center; gap: 8px; }
+.head-tools { display: flex; align-items: center; gap: 8px; margin-inline-start: auto; }
 .head-tools select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
 #arrange { width: 32px; height: 32px; padding: 0; background: var(--btn-2); color: var(--text); }
 #arrange.on { background: var(--pick); color: #111; }
@@ -176,6 +176,9 @@ body.arrange .block * { pointer-events: none; }
 .genre-19, .genre-handle.genre-19 { background: #ead9a4; }
 .genre-20, .genre-handle.genre-20 { background: #c8d5dc; }
 .log { margin: 0; border: 0; flex: 1; min-height: 0; background: #000; color: #e6e6e6; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
+.terminal-entry { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid #333; background: #000; color: #e6e6e6; font: 13px/1.35 ui-monospace, monospace; }
+.terminal-entry input { font: inherit; flex: 1; min-width: 0; padding: 3px 5px; border: 1px solid #555; border-radius: 4px; background: #151515; color: inherit; }
+.terminal-entry input:disabled { opacity: .65; }
 #zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
 #zoom[hidden] { display: none; }
 #zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; color: #fff; }
@@ -205,6 +208,23 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
 <body>
 <header class="topbar">
   <span class="brand">oubi</span>
+  <div class="compute">
+    <select id="compute-device" aria-label="Tagging device">
+      <option value="cpu">CPU</option>
+      <option value="amd" disabled>AMD</option>
+      <option value="nvidia" disabled>NVIDIA</option>
+    </select>
+  </div>
+  <div class="compute" id="amd-controls" hidden>
+    <span>AMD</span>
+    <select id="rocm-arch"></select>
+    <button type="button" class="secondary" id="rocm-install">Install</button>
+  </div>
+  <div class="compute" id="nvidia-controls" hidden>
+    <span>NVIDIA</span>
+    <select id="nvidia-card"><option value="auto">Auto</option></select>
+    <button type="button" class="secondary" id="nvidia-install">Install</button>
+  </div>
   <div class="head-tools">
     <button id="arrange" type="button" title="Move blocks">✎</button>
     <select id="lang" aria-label="Language">
@@ -226,22 +246,6 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
         <button id="all-folders" class="secondary" type="button" title="Select all folders"><span class="box"></span></button>
       </div>
-      <div class="compute">
-        <label for="compute-device" id="compute-device-label">Tagging device</label>
-        <select id="compute-device">
-          <option value="cpu">CPU</option>
-          <option value="amd" disabled>AMD GPU</option>
-          <option value="nvidia" disabled>NVIDIA GPU</option>
-        </select>
-        <select id="rocm-arch" hidden></select>
-        <button type="button" class="secondary" id="rocm-install" hidden>Install AMD support</button>
-        <progress id="rocm-progress" max="1" hidden></progress>
-        <p id="rocm-status" class="compute-status" aria-live="polite" hidden></p>
-        <select id="nvidia-card" hidden><option value="auto">Auto</option></select>
-        <button type="button" class="secondary" id="nvidia-install" hidden>Install NVIDIA support</button>
-        <progress id="nvidia-progress" max="1" hidden></progress>
-        <p id="nvidia-status" class="compute-status" aria-live="polite" hidden></p>
-      </div>
     </div>
     <div class="block grow" data-block="folders">
       <div id="folders"></div>
@@ -254,6 +258,10 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     </div>
     <div class="block grow" data-block="log">
       <pre id="log" class="log"></pre>
+      <form id="terminal-entry" class="terminal-entry">
+        <span aria-hidden="true">&gt;</span>
+        <input id="terminal-input" type="text" aria-label="Terminal input" enterkeyhint="send" autocomplete="off" autocapitalize="off" spellcheck="false" disabled>
+      </form>
     </div>
   </section>
   <div class="split split-v" id="split-left"></div>
@@ -320,10 +328,14 @@ const rocmArch = document.getElementById("rocm-arch");
 const rocmInstall = document.getElementById("rocm-install");
 const nvidiaCard = document.getElementById("nvidia-card");
 const nvidiaInstall = document.getElementById("nvidia-install");
+const terminalInput = document.getElementById("terminal-input");
 let rocmState = null;
 let nvidiaState = null;
-let requestingRocm = false;
-let requestingNvidia = false;
+let gpuPrompt = null;
+let gpuProgress = null;
+let sendingGpuRequest = false;
+let statusRequest = 0;
+let statusShown = 0;
 
 function fileName(path) {
   const parts = String(path || "").split("/");
@@ -354,16 +366,15 @@ function applyI18n() {
   document.getElementById("plan").textContent = t(3);
   document.getElementById("stop").textContent = t(4);
   document.getElementById("retry").textContent = t(5);
-  document.getElementById("compute-device-label").textContent = t(104);
-  deviceInput.options[0].textContent = t(105);
-  deviceInput.options[1].textContent = t(106);
-  deviceInput.options[2].textContent = t(127);
+  deviceInput.setAttribute("aria-label", t(104));
   rocmArch.setAttribute("aria-label", t(107));
-  rocmInstall.textContent = t(108);
-  document.getElementById("rocm-progress").setAttribute("aria-label", t(109));
+  rocmInstall.setAttribute("aria-label", t(108));
+  rocmInstall.textContent = t(157);
   nvidiaCard.setAttribute("aria-label", t(128));
-  nvidiaInstall.textContent = t(135);
-  document.getElementById("nvidia-progress").setAttribute("aria-label", t(140));
+  nvidiaInstall.setAttribute("aria-label", t(135));
+  nvidiaInstall.textContent = t(157);
+  terminalInput.setAttribute("aria-label", t(158));
+  showTerminalInput();
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("all-folders").title = t(83);
@@ -584,9 +595,19 @@ async function showImage(root, path) {
 }
 
 async function tick() {
+  const request = ++statusRequest;
   const data = await (await fetch("/api/status")).json();
+  if (request < statusShown) return;
+  statusShown = request;
   rocmState = data.rocm;
   nvidiaState = data.nvidia;
+  if (gpuPrompt?.id !== data.gpu_prompt?.id) {
+    terminalInput.value = "";
+    terminalInput.setCustomValidity("");
+  }
+  gpuPrompt = data.gpu_prompt;
+  gpuProgress = data.gpu_progress;
+  showTerminalInput();
   const readyDevices = { cpu: true, amd: showRocm(), nvidia: showNvidia() };
   let step = data.step || t(7);
   if (data.phase === "download" && !data.job_running) {
@@ -595,12 +616,17 @@ async function tick() {
   }
   const named = step.match(/Сейчас: размечаю (.+) \((\d+ из \d+)\)/);
   if (named) step = "Сейчас: размечаю " + fileName(named[1]) + " (" + named[2] + ").";
-  document.getElementById("step").textContent = step;
-  document.getElementById("detail").textContent = data.detail || "";
-  document.getElementById("fill").style.width = (data.percent || 0) + "%";
+  document.getElementById("step").textContent = gpuProgress?.step || step;
+  document.getElementById("detail").textContent = (gpuProgress?.detail ?? data.detail) || "";
+  document.getElementById("fill").style.width = (gpuProgress?.percent ?? data.percent ?? 0) + "%";
   const log = document.getElementById("log");
-  log.textContent = (data.log || []).join(String.fromCharCode(10));
-  log.scrollTop = log.scrollHeight;
+  const lines = data.log || [];
+  if (gpuPrompt && !lines.includes(gpuPrompt.message)) lines.push(gpuPrompt.message);
+  const contents = lines.join("\n");
+  if (log.textContent !== contents) {
+    log.textContent = contents;
+    log.scrollTop = log.scrollHeight;
+  }
   const busy = data.job_running;
   const ready = data.model === "ready";
   const picked = selected.size > 0;
@@ -618,23 +644,14 @@ async function tick() {
   }
 }
 
-function gpuInstallProgress(id, install, working, messageId) {
-  const progress = document.getElementById(id);
-  progress.hidden = !working;
-  if (working && install.total) {
-    progress.max = install.total;
-    progress.value = install.received || 0;
-    const size = new Intl.NumberFormat(lang, { maximumFractionDigits: 1 });
-    const mib = value => size.format(value / (1024 * 1024));
-    return t(messageId) + " " + t(123).replace("{received}", mib(install.received || 0)).replace("{total}", mib(install.total));
-  }
-  progress.removeAttribute("value");
-  return t(messageId);
+function showTerminalInput() {
+  terminalInput.disabled = !gpuPrompt || sendingGpuRequest;
+  terminalInput.placeholder = t(gpuPrompt ? 159 : gpuProgress ? 162 : 160);
 }
 
 function showRocm() {
   if (!rocmState) return false;
-  const { architectures, download_bytes, gpus, installed, visible, install } = rocmState;
+  const { architectures, gpus, installed, visible, install } = rocmState;
   if (!rocmArch.options.length) {
     for (const value of ["auto", ...architectures]) {
       rocmArch.add(new Option(value, value));
@@ -647,30 +664,20 @@ function showRocm() {
   const arch = choice === "auto" ? detected.find(value => architectures.includes(value)) : choice;
   const matches = !detected.length || detected.includes(arch);
   const name = visible && matches && installed[arch];
-  const working = ["installing", "checking"].includes(install.state);
-  rocmArch.hidden = !visible;
-  rocmArch.disabled = working || requestingRocm;
-  rocmInstall.hidden = !visible;
-  rocmInstall.disabled = working || requestingRocm || !arch || !matches || Boolean(name);
-  const progress = gpuInstallProgress("rocm-progress", install, working, install.state === "checking" ? 111 : 110);
+  const installing = Boolean(gpuPrompt || gpuProgress || sendingGpuRequest);
+  document.getElementById("amd-controls").hidden = !visible;
+  rocmArch.disabled = installing;
+  rocmInstall.disabled = installing || !arch || !matches || Boolean(name);
   deviceInput.options[1].disabled = !name;
-  const status = document.getElementById("rocm-status");
-  status.hidden = !visible && Boolean(nvidiaState?.gpus.length);
+  deviceInput.options[1].title = t(visible ? 118 : 113);
   let message;
-  if (!visible) message = t(139);
-  else if (working) message = progress;
-  else if (!arch) message = t(detected.length ? 115 : 114);
+  if (!arch) message = t(detected.length ? 115 : 114);
   else if (!matches) message = t(116);
   else if (name) message = t(124).replace("{gpu}", name).replace("{arch}", arch);
   else if (install.arch === arch && install.state === "error") message = t(install.error);
-  else {
-    message = t(125).replace("{gpu}", gpus[arch] || arch);
-    if (download_bytes[arch]) {
-      const size = new Intl.NumberFormat(lang, { maximumFractionDigits: 1 });
-      message += " " + t(126).replace("{size}", size.format(download_bytes[arch] / 1_000_000_000));
-    }
-  }
-  if (status.textContent !== message) status.textContent = message;
+  else message = t(125).replace("{gpu}", gpus[arch] || arch);
+  rocmArch.title = rocmInstall.title = message;
+  if (name) deviceInput.options[1].title = message;
   return Boolean(name);
 }
 
@@ -682,34 +689,35 @@ function showNvidia() {
     const selected = nvidiaCard.value;
     nvidiaCard.replaceChildren(new Option(t(10), "auto"));
     for (const { uuid, name } of gpus) nvidiaCard.add(new Option(name, uuid));
-    nvidiaCard.value = selected;
+    nvidiaCard.value = gpus.some(({ uuid }) => uuid === selected) ? selected : "auto";
     nvidiaCard.dataset.options = options;
   }
   nvidiaCard.options[0].textContent = t(10);
   const uuid = nvidiaCard.value === "auto" ? nvidiaState.default : nvidiaCard.value;
   const gpu = gpus.find(item => item.uuid === uuid);
   const name = installed[uuid];
-  const working = ["installing", "checking"].includes(install.state);
-  const progress = gpuInstallProgress("nvidia-progress", install, working, install.state === "checking" ? 111 : 136);
-  nvidiaCard.hidden = !gpus.length;
-  nvidiaCard.disabled = working || requestingNvidia;
-  nvidiaInstall.hidden = !gpus.length;
-  nvidiaInstall.disabled = working || requestingNvidia || !gpu?.build || Boolean(name);
+  const installing = Boolean(gpuPrompt || gpuProgress || sendingGpuRequest);
+  document.getElementById("nvidia-controls").hidden = !gpus.length;
+  nvidiaCard.disabled = installing;
+  nvidiaInstall.disabled = installing || !gpu?.build || Boolean(name);
   deviceInput.options[2].disabled = !name;
-  const status = document.getElementById("nvidia-status");
-  status.hidden = !gpus.length && !working;
   let message;
-  if (working) message = progress;
-  else if (!gpu) message = t(130);
+  if (!gpu) message = t(130);
   else if (!gpu.build) message = t(134);
   else if (name) message = t(138).replace("{gpu}", name).replace("{build}", gpu.build);
   else if (install.gpu === uuid && install.state === "error") message = t(install.error);
   else message = t(137).replace("{gpu}", gpu.name).replace("{build}", gpu.build);
-  if (status.textContent !== message) status.textContent = message;
+  nvidiaCard.title = nvidiaInstall.title = message;
+  deviceInput.options[2].title = name ? message : t(gpu?.build ? 132 : gpu ? 134 : 130);
   return Boolean(name);
 }
 
-async function installGpu(endpoint, payload, errorId) {
+async function sendGpuRequest(endpoint, payload, errorId) {
+  if (sendingGpuRequest) return false;
+  sendingGpuRequest = true;
+  showRocm();
+  showNvidia();
+  showTerminalInput();
   showNotice();
   try {
     const response = await fetch(endpoint, {
@@ -717,31 +725,38 @@ async function installGpu(endpoint, payload, errorId) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await response.json();
-    if (response.ok) return data;
-    showNotice(data.error || t(errorId));
+    if (response.ok) return true;
+    showNotice((await response.json()).error || t(errorId));
   } catch {
     showNotice(t(errorId));
+  } finally {
+    sendingGpuRequest = false;
+    await tick();
   }
-  return null;
+  return false;
 }
 
 rocmArch.onchange = () => { showRocm(); tick(); };
 nvidiaCard.onchange = () => { showNvidia(); tick(); };
 deviceInput.onchange = () => tick();
 rocmInstall.onclick = async () => {
-  requestingRocm = true;
-  showRocm();
-  rocmState = await installGpu("/api/rocm", { architecture: rocmArch.value }, 121) || rocmState;
-  requestingRocm = false;
-  showRocm();
+  if (await sendGpuRequest("/api/rocm", { architecture: rocmArch.value }, 121)) terminalInput.focus();
 };
 nvidiaInstall.onclick = async () => {
-  requestingNvidia = true;
-  showNvidia();
-  nvidiaState = await installGpu("/api/nvidia", { gpu: nvidiaCard.value }, 133) || nvidiaState;
-  requestingNvidia = false;
-  showNvidia();
+  if (await sendGpuRequest("/api/nvidia", { gpu: nvidiaCard.value }, 133)) terminalInput.focus();
+};
+terminalInput.oninput = () => terminalInput.setCustomValidity("");
+document.getElementById("terminal-entry").onsubmit = async event => {
+  event.preventDefault();
+  if (!gpuPrompt || sendingGpuRequest) return;
+  const answer = terminalInput.value.trim().toLowerCase();
+  if (answer !== "y" && answer !== "n") {
+    terminalInput.setCustomValidity(t(144));
+    terminalInput.reportValidity();
+    return;
+  }
+  terminalInput.value = "";
+  if (!await sendGpuRequest("/api/terminal", { id: gpuPrompt.id, answer }, 161)) terminalInput.focus();
 };
 
 function showNotice(message = "") {

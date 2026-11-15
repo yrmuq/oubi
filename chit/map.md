@@ -2,7 +2,7 @@
 
 ## Application
 
-- [oubi_web.py](../oubi_web.py) serves the browser page and JSON API using Python `http.server`. `Handler` routes requests and `App` manages model download, folder counts, job subprocesses, and progress. `tag_command` and `sort_command` connect the API to the CLI scripts.
+- [oubi_web.py](../oubi_web.py) serves the browser page and JSON API using Python `http.server`. `Handler` routes requests and `App` manages model download, folder counts, job subprocesses, GPU installation confirmation, and progress. `tag_command` and `sort_command` connect the API to the CLI scripts.
 - [oubi_page.html](../oubi_page.html) contains the HTML, CSS, and JavaScript for folder selection, image preview, tag filters, job controls, and the draggable layout. It receives startup state from `page_bytes` and uses the `/api/*` routes to refresh or save it.
 - [oubi_gpu.py](../oubi_gpu.py) manages optional Python environments, installation progress, and GPU smoke tests. [oubi_rocm.py](../oubi_rocm.py) detects AMD architectures through Linux KFD and selects ROCm packages. [oubi_nvidia.py](../oubi_nvidia.py) lists NVIDIA cards through `nvidia-smi` and selects CUDA packages by compute capability and driver.
 - [tag_folder.py](../tag_folder.py) downloads and caches PixAI Tagger through Hugging Face Hub, runs inference through Transformers and PyTorch, and writes `tags.csv` and optional `.txt` sidecars.
