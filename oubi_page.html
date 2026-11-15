@@ -69,6 +69,11 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.compute { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
+.compute select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 6px; padding: 4px; }
+.compute button { padding: 5px 8px; }
+#rocm-status { width: 100%; margin: 0; color: var(--muted); font-size: .9em; overflow-wrap: anywhere; }
+#rocm-progress { width: 100%; accent-color: var(--fill); }
 #all-folders { margin-left: auto; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
 #all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
 #all-folders.on .box { background: currentColor; }
@@ -221,6 +226,17 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
         <button id="all-folders" class="secondary" type="button" title="Select all folders"><span class="box"></span></button>
       </div>
+      <div class="compute">
+        <label for="compute-device" id="compute-device-label">Tagging device</label>
+        <select id="compute-device">
+          <option value="cpu">CPU</option>
+          <option value="amd" disabled>AMD GPU</option>
+        </select>
+        <select id="rocm-arch" hidden></select>
+        <button type="button" class="secondary" id="rocm-install" hidden>Install AMD support</button>
+        <progress id="rocm-progress" max="1" hidden></progress>
+        <p id="rocm-status" aria-live="polite" hidden></p>
+      </div>
     </div>
     <div class="block grow" data-block="folders">
       <div id="folders"></div>
@@ -294,6 +310,11 @@ let vocab = [];
 let theme = savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto" ? savedTheme : "auto";
 let wasBusy = false;
 const panes = { left: null, mid: null, right: null };
+const deviceInput = document.getElementById("compute-device");
+const rocmArch = document.getElementById("rocm-arch");
+const rocmInstall = document.getElementById("rocm-install");
+let rocmState = null;
+let requestingRocm = false;
 
 function fileName(path) {
   const parts = String(path || "").split("/");
@@ -324,6 +345,12 @@ function applyI18n() {
   document.getElementById("plan").textContent = t(3);
   document.getElementById("stop").textContent = t(4);
   document.getElementById("retry").textContent = t(5);
+  document.getElementById("compute-device-label").textContent = t(104);
+  deviceInput.options[0].textContent = t(105);
+  deviceInput.options[1].textContent = t(106);
+  rocmArch.setAttribute("aria-label", t(107));
+  rocmInstall.textContent = t(108);
+  document.getElementById("rocm-progress").setAttribute("aria-label", t(109));
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("all-folders").title = t(83);
@@ -334,6 +361,7 @@ function applyI18n() {
   for (const [id, key] of [["prev", 94], ["next", 95], ["filter-query", 96], ["zoom-close", 97]]) {
     document.getElementById(id).setAttribute("aria-label", t(key));
   }
+  showRocm();
   if (!hasFile) showEmpty();
   renderFolders();
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
@@ -543,6 +571,8 @@ async function showImage(root, path) {
 
 async function tick() {
   const data = await (await fetch("/api/status")).json();
+  rocmState = data.rocm;
+  const gpuReady = showRocm();
   let step = data.step || t(7);
   if (data.phase === "download" && !data.job_running) {
     if (data.model === "ready") step = t(23);
@@ -560,7 +590,8 @@ async function tick() {
   const ready = data.model === "ready";
   const picked = selected.size > 0;
   for (const id of ["tag", "sort", "plan"]) {
-    document.getElementById(id).disabled = busy || !picked || (id === "tag" && !ready);
+    document.getElementById(id).disabled = busy || !picked ||
+      (id === "tag" && (!ready || (deviceInput.value === "amd" && !gpuReady)));
   }
   document.getElementById("stop").disabled = !busy;
   document.getElementById("retry").hidden = data.model !== "error";
@@ -571,6 +602,84 @@ async function tick() {
     showAt(reel.indexOf(data.preview_file));
   }
 }
+
+function showRocm() {
+  if (!rocmState) return false;
+  const { architectures, download_bytes, gpus, installed, visible, install } = rocmState;
+  if (!rocmArch.options.length) {
+    for (const value of ["auto", ...architectures]) {
+      rocmArch.add(new Option(value, value));
+    }
+    rocmArch.value = rocmState.default;
+  }
+  rocmArch.options[0].textContent = t(10);
+  const choice = rocmArch.value;
+  const detected = Object.keys(gpus);
+  const arch = choice === "auto" ? detected.find(value => architectures.includes(value)) : choice;
+  const matches = !detected.length || detected.includes(arch);
+  const name = visible && matches && installed[arch];
+  const working = ["installing", "checking"].includes(install.state);
+  const progress = document.getElementById("rocm-progress");
+  rocmArch.hidden = !visible;
+  rocmArch.disabled = working || requestingRocm;
+  rocmInstall.hidden = !visible;
+  rocmInstall.disabled = working || requestingRocm || !arch || !matches || Boolean(name);
+  progress.hidden = !working;
+  if (working && install.total) {
+    progress.max = install.total;
+    progress.value = install.received || 0;
+  } else {
+    progress.removeAttribute("value");
+  }
+  deviceInput.options[1].disabled = !name;
+  const status = document.getElementById("rocm-status");
+  status.hidden = false;
+  let message;
+  if (!visible) message = t(113);
+  else if (working) {
+    message = t(install.state === "checking" ? 111 : 110);
+    if (install.total) {
+      const size = new Intl.NumberFormat(lang, { maximumFractionDigits: 1 });
+      const mib = value => size.format(value / (1024 * 1024));
+      message += " " + t(123).replace("{received}", mib(install.received || 0)).replace("{total}", mib(install.total));
+    }
+  } else if (!arch) message = t(detected.length ? 115 : 114);
+  else if (!matches) message = t(116);
+  else if (name) message = t(124).replace("{gpu}", name).replace("{arch}", arch);
+  else if (install.arch === arch && install.state === "error") message = t(install.error);
+  else {
+    message = t(125).replace("{gpu}", gpus[arch] || arch);
+    if (download_bytes[arch]) {
+      const size = new Intl.NumberFormat(lang, { maximumFractionDigits: 1 });
+      message += " " + t(126).replace("{size}", size.format(download_bytes[arch] / 1_000_000_000));
+    }
+  }
+  if (status.textContent !== message) status.textContent = message;
+  return Boolean(name);
+}
+
+rocmArch.onchange = () => { showRocm(); tick(); };
+deviceInput.onchange = () => tick();
+rocmInstall.onclick = async () => {
+  requestingRocm = true;
+  showRocm();
+  showNotice();
+  try {
+    const response = await fetch("/api/rocm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ architecture: rocmArch.value }),
+    });
+    const data = await response.json();
+    if (response.ok) rocmState = data;
+    else showNotice(data.error || t(121));
+  } catch {
+    showNotice(t(121));
+  } finally {
+    requestingRocm = false;
+    showRocm();
+  }
+};
 
 function showNotice(message = "") {
   const notice = document.getElementById("notice");
@@ -584,7 +693,9 @@ async function start(mode) {
     const response = await fetch("/api/job", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode, folders: [...selected] }),
+      body: JSON.stringify({
+        mode, folders: [...selected], device: deviceInput.value, architecture: rocmArch.value || "auto",
+      }),
     });
     if (!response.ok) {
       showNotice((await response.json()).error || t(100));

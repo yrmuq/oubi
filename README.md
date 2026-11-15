@@ -35,6 +35,7 @@
 | Input | Action |
 | :--- | :--- |
 | `Identify` | Tag images in the selected folders when the model is ready. |
+| `Tagging device` | Choose CPU or AMD GPU for the next tagging job. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
 | `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
@@ -61,7 +62,7 @@ Put optional gender overrides in `genders.csv` under the data directory as heade
 | `x86_64` | ✅ |
 | `arm64` | ❌ |
 
-The published container supports `linux/amd64` and uses CPU inference.
+The published container supports `linux/amd64` and uses CPU inference by default. The development build supports an optional ROCm environment that can be downloaded from the web interface for a compatible AMD GPU.
 
 ### Release Scheme
 
@@ -86,8 +87,19 @@ Open the server address on `OUBI_PORT` (default `8080`), choose source folders, 
 | :--- | :--- |
 | `/images` | Source images and optional tag sidecars. Keep this mount path because saved indexes use it. |
 | `/output` | Sorted images. |
-| `/data` | Saved tags, sorting history, gender overrides, and web settings. |
+| `/data` | Saved tags, sorting history, gender overrides, web settings, and downloaded ROCm environments. |
 | `/cache` | Downloaded model weights, kept across image updates. |
+
+#### AMD GPU tagging
+
+Use the `dev` image with the [AMD Compose override](docker-compose.amd.yml). The Linux Docker host needs a working AMD driver and a compatible GPU. Set `OUBI_AMD_RENDER_DEVICE` in `.env` to that GPU's render node, such as `/dev/dri/renderD128`. Set `OUBI_KFD_GID` and `OUBI_RENDER_GID` to the numeric group owners of the two devices on the host. Use `stat -c %g /dev/kfd` and `stat -c %g /dev/dri/renderD128` with your render node.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.amd.yml pull
+docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
+```
+
+Choose `Auto` or an architecture such as `gfx1102` for the Radeon RX 7600. `OUBI_ROCM_ARCH` in `.env` sets the initial selection. Click `Install AMD support` to download the corresponding ROCm packages into `/data/rocm`. After the GPU test finishes, select `AMD GPU` before starting `Identify`. The model cache is shared between the CPU and GPU tagging environments.
 
 ---
 

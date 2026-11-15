@@ -42,6 +42,7 @@ services:
       - OUBI_GENRE_20=${OUBI_GENRE_20}
       - OUBI_COPY_TXT=${OUBI_COPY_TXT}
       - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION}
+      - OUBI_ROCM_ARCH=${OUBI_ROCM_ARCH:-auto}
       - HF_TOKEN=${HF_TOKEN}
     logging:
       driver: json-file

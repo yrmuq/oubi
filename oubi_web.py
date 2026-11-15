@@ -13,6 +13,8 @@ from pathlib import Path
 from string import Formatter
 from urllib.parse import parse_qs, urlparse
 
+from oubi_rocm import RocmError, RocmRuntime
+
 # ===== SETTINGS =====
 HERE = Path(__file__).resolve().parent
 IMAGES = "/images"
@@ -801,9 +803,9 @@ def preflight(mode, *, language=None):
 
 
 # ===== COMMANDS =====
-def tag_command(folders):
+def tag_command(folders, *, device="cpu", architecture=None, python=None):
     command = [
-        sys.executable,
+        python or sys.executable,
         str(HERE / "tag_folder.py"),
         *folders,
         "--model",
@@ -812,7 +814,11 @@ def tag_command(folders):
         CSV_PATH,
         "--batch-size",
         os.environ.get("OUBI_BATCH_SIZE", "1"),
+        "--device",
+        device,
     ]
+    if architecture:
+        command.extend(["--gpu-arch", architecture])
     if flag_on(os.environ.get("OUBI_NO_TXT")):
         command.append("--no-txt")
     if flag_on(os.environ.get("OUBI_FORCE")):
@@ -873,6 +879,7 @@ class LineTee:
 class App:
     def __init__(self):
         self.lock = threading.Lock()
+        self.rocm = RocmRuntime()
         self.lines = []
         self.model_state = "downloading"
         self.job_running = False
@@ -1022,12 +1029,22 @@ class App:
         threading.Thread(target=self.download, daemon=True).start()
         return True
 
-    def start(self, mode, folders, *, language=None):
+    def start(self, mode, folders, *, language=None, device="cpu", architecture="auto"):
         paths, error = absolute_folders(folders, language=language)
         reason = error or preflight(mode, language=language)
         if reason:
             self.note(text(79, reason=reason, language=language))
             return reason
+        tagging = None
+        if mode in {"tag", "all"}:
+            if device not in ("cpu", "amd"):
+                return text(122, language=language)
+            try:
+                arch = self.rocm.resolve(architecture) if device == "amd" else None
+                python = self.rocm.python_for(arch) if arch else None
+            except RocmError as error:
+                return text(error.message_id, language=language)
+            tagging = tag_command(paths, device=device, architecture=arch, python=python)
         with self.lock:
             if self.job_running:
                 return text(33, language=language)
@@ -1038,17 +1055,15 @@ class App:
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
             self.step = text(25, language=language)
             self.folder_cache = None
-        threading.Thread(target=self._run, args=(mode, paths, language), daemon=True).start()
+        threading.Thread(target=self._run, args=(mode, paths, language, tagging), daemon=True).start()
         return None
 
-    def _run(self, mode, folders, language=None):
-        commands = []
-        if mode in {"tag", "all"}:
-            commands.append(tag_command(folders))
+    def _run(self, mode, folders, language, tagging):
+        commands = [tagging] if tagging else []
         if mode in {"sort", "plan", "all"}:
             commands.append(sort_command(plan=mode == "plan", folders=folders))
         code = 0
-        env = dict(os.environ, OUBI_JOB_LANGUAGE=language or read_lang())
+        env = dict(os.environ, OUBI_JOB_LANGUAGE=language or read_lang(), PYTHONNOUSERSITE="1")
         try:
             for command in commands:
                 if not self.job_running:
@@ -1073,6 +1088,9 @@ class App:
                 self.proc = None
                 if code != 0:
                     break
+        except OSError as error:
+            code = 1
+            self.note(text(26, path=command[0], error=error, language=language))
         finally:
             with self.lock:
                 self.job_running = False
@@ -1130,7 +1148,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, page, "text/html; charset=utf-8")
             return
         if path == "/api/status":
-            self._send(200, self.app.status())
+            self._send(200, {**self.app.status(), "rocm": self.app.rocm.status()})
             return
         if path == "/api/folders":
             self._send(200, self.app.folders())
@@ -1224,6 +1242,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, {"ok": True})
             return
+        if parsed.path == "/api/rocm":
+            if self.headers.get_content_type() != "application/json":
+                self._error(400, 89)
+                return
+            try:
+                self.app.rocm.start(payload.get("architecture", "auto"))
+            except RocmError as error:
+                self._error(409, error.message_id)
+                return
+            self._send(202, self.app.rocm.status())
+            return
         if parsed.path != "/api/job":
             self._error(404, 88)
             return
@@ -1234,7 +1263,10 @@ class Handler(BaseHTTPRequestHandler):
         if reason:
             self._send(409, {"error": reason})
             return
-        if reason := self.app.start(mode, payload.get("folders") or [], language=language):
+        if reason := self.app.start(
+            mode, payload.get("folders") or [], language=language,
+            device=payload.get("device", "cpu"), architecture=payload.get("architecture", "auto"),
+        ):
             self._send(409, {"error": reason})
             return
         self._send(200, {"ok": True})

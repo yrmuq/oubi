@@ -1,0 +1,8 @@
+services:
+  oubi:
+    devices:
+      - /dev/kfd
+      - ${OUBI_AMD_RENDER_DEVICE:-/dev/dri/renderD128}
+    group_add:
+      - "${OUBI_KFD_GID:?Set OUBI_KFD_GID to the group ID of /dev/kfd}"
+      - "${OUBI_RENDER_GID:?Set OUBI_RENDER_GID to the group ID of the AMD render device}"

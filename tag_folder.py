@@ -11,6 +11,8 @@ import sys
 import time
 from pathlib import Path
 
+from oubi_rocm import RocmError, amd_device
+
 # ===== SETTINGS =====
 EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 ORDER = ["rating", "character", "copyright", "style", "general", "meta"]
@@ -283,7 +285,7 @@ def categories_of(result):
 
 
 # ===== LOAD THE MODEL =====
-def load_tagger(model):
+def load_tagger(model, device="auto", architecture=None):
     import torch
     from transformers import pipeline
 
@@ -294,17 +296,20 @@ def load_tagger(model):
         download_model(model)
         source = model
     print(say(57), flush=True)
-    device = 0 if torch.cuda.is_available() else -1
-    if device == 0:
-        print(say(58, name=torch.cuda.get_device_name(0)), flush=True)
+    if device == "amd":
+        index = amd_device(torch, architecture)
     else:
-        print(say(59), flush=True)
+        index = 0 if device == "auto" and torch.cuda.is_available() else -1
+    if index >= 0:
+        print(say(58, name=torch.cuda.get_device_name(index)), flush=True)
+    else:
+        print(say(58, name="CPU") if device == "cpu" else say(59), flush=True)
     tagger = pipeline(
         model=source,
         image_processor=source,
         trust_remote_code=True,
-        device=device,
-        dtype=torch.float16 if device == 0 else torch.float32,
+        device=index,
+        dtype=torch.float16 if index >= 0 else torch.float32,
     )
     print(say(60), flush=True)
     return tagger
@@ -319,18 +324,26 @@ def main():
     ap.add_argument("--no-txt", action="store_true", help="не писать .txt рядом с картинками")
     ap.add_argument("--force", action="store_true", help="переразметить уже размеченные")
     ap.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    ap.add_argument("--device", choices=("auto", "cpu", "amd"), default="auto")
+    ap.add_argument("--gpu-arch")
     args = ap.parse_args()
     if args.batch_size < 1:
         print(say(61), file=sys.stderr)
         return 1
 
+    if args.device == "amd":
+        os.environ.pop("HSA_OVERRIDE_GFX_VERSION", None)
     gfx = apply_gfx_override()
     if gfx:
         print("HSA_OVERRIDE_GFX_VERSION:", gfx)
     print(say(62, count=args.batch_size), flush=True)
     print(say(63), flush=True)
 
-    tagger = load_tagger(args.model)
+    try:
+        tagger = load_tagger(args.model, args.device, args.gpu_arch)
+    except RocmError as error:
+        print(say(error.message_id), file=sys.stderr, flush=True)
+        return 1
     from PIL import Image
 
     print(say(64), flush=True)

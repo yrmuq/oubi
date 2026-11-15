@@ -26,6 +26,10 @@ for attempt in range(30):
 else:
     raise SystemExit("Oubi did not start with a ready local model")
 
+assert not status["rocm"]["visible"]
+assert status["rocm"]["installed"] == {}
+assert status["rocm"]["install"]["state"] == "idle"
+
 with urlopen(Request(base, headers={"Accept-Language": "en"}), timeout=2) as response:
     page = response.read()
 assert b'<html lang="en">' in page
