@@ -129,7 +129,7 @@ body.arrange .block * { pointer-events: none; }
 .genre-pin.on { background: var(--pick); border-color: var(--pick); color: #111; }
 .genre-field { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .genre-field input, .genre-ghost { font: inherit; padding: 4px 6px; box-sizing: border-box; }
-.genre-ghost { position: absolute; inset: 0; color: var(--muted); pointer-events: none; white-space: pre; overflow: hidden; border: 1px solid transparent; }
+.genre-ghost { position: absolute; inset: 0; z-index: 2; color: var(--muted); pointer-events: none; white-space: pre; overflow: hidden; border: 1px solid transparent; }
 .genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
 #genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
 .tag-hit { cursor: pointer; border-radius: 4px; padding: 0 3px; }
@@ -742,22 +742,49 @@ if (!Array.isArray(genres) || !genres.length) genres = [""];
 let genreTimer = 0;
 let genreDrag = -1;
 
+function tagList() {
+  return String(tagText || "").split(",").map((part) => part.trim()).filter(Boolean);
+}
+
 function matchTag(prefix) {
   const typed = String(prefix || "");
   const folded = typed.toLowerCase();
-  if (!folded.trim()) return "";
-  const tags = String(tagText || "").split(",").map((part) => part.trim()).filter(Boolean);
-  return tags.find((tag) => {
-    const key = tag.toLowerCase();
-    return key.startsWith(folded) && key !== folded;
-  }) || "";
+  if (!folded.trim()) return null;
+  const tags = tagList();
+  for (let i = 0; i < tags.length; i += 1) {
+    const key = tags[i].toLowerCase();
+    if (key.startsWith(folded) && key !== folded) return { tag: tags[i], used: typed.length };
+  }
+  for (let i = 0; i < tags.length; i += 1) {
+    const key = tags[i].toLowerCase();
+    let shared = 0;
+    while (shared < folded.length && shared < key.length && folded[shared] === key[shared]) shared += 1;
+    if (!shared || shared === folded.length) continue;
+    const rest = folded.slice(shared);
+    for (let next = i + 1; next < tags.length; next += 1) {
+      const nextKey = tags[next].toLowerCase();
+      if (nextKey.startsWith(rest) && nextKey !== rest) return { tag: tags[next], used: rest.length };
+    }
+  }
+  return null;
 }
 
-function ghostFor(prefix) {
-  const typed = String(prefix || "");
-  const match = matchTag(typed);
-  if (!match) return "";
-  return typed + match.slice(typed.length);
+function applyGhost(input, ghost) {
+  if (!ghost) return;
+  const found = matchTag(input.value);
+  if (!found) {
+    ghost.textContent = "";
+    ghost.style.paddingLeft = "";
+    return;
+  }
+  ghost.textContent = found.tag.slice(found.used);
+  const style = getComputedStyle(input);
+  const canvas = applyGhost.canvas || (applyGhost.canvas = document.createElement("canvas"));
+  const ctx = canvas.getContext("2d");
+  ctx.font = style.font;
+  ghost.style.font = style.font;
+  ghost.style.paddingTop = style.paddingTop;
+  ghost.style.paddingLeft = ((parseFloat(style.paddingLeft) || 0) + ctx.measureText(input.value).width) + "px";
 }
 
 function saveGenres() {
@@ -775,12 +802,11 @@ function refreshGenreGhosts() {
   for (const input of document.querySelectorAll(".genre-field input")) {
     if (input.id === "filter-query") continue;
     const ghost = input.parentElement.querySelector(".genre-ghost");
-    const hint = ghostFor(input.value);
-    ghost.textContent = hint || "";
+    applyGhost(input, ghost);
   }
   const filterQuery = document.getElementById("filter-query");
   const filterGhost = document.getElementById("filter-ghost");
-  if (filterQuery && filterGhost) filterGhost.textContent = ghostFor(filterQuery.value);
+  if (filterQuery && filterGhost) applyGhost(filterQuery, filterGhost);
 }
 
 async function toggleGenre(index) {
@@ -836,11 +862,10 @@ function renderGenreRow(focusAt) {
     const input = document.createElement("input");
     input.spellcheck = false;
     input.value = value || "";
-    const hint = ghostFor(input.value);
-    ghost.textContent = hint || "";
+    applyGhost(input, ghost);
     input.oninput = () => {
       genres[index] = input.value.trim();
-      ghost.textContent = ghostFor(input.value);
+      applyGhost(input, ghost);
       paintTags(tagText);
       saveGenres();
     };
@@ -849,9 +874,10 @@ function renderGenreRow(focusAt) {
       const next = matchTag(input.value);
       if (!next) return;
       event.preventDefault();
-      input.value = next;
-      genres[index] = next;
+      input.value = next.tag;
+      genres[index] = next.tag;
       ghost.textContent = "";
+      ghost.style.paddingLeft = "";
       paintTags(tagText);
       saveGenres();
     };
@@ -952,16 +978,18 @@ document.getElementById("lang").onclick = () => {
   });
 };
 document.getElementById("filter-query").oninput = () => {
-  document.getElementById("filter-ghost").textContent = ghostFor(document.getElementById("filter-query").value);
+  applyGhost(document.getElementById("filter-query"), document.getElementById("filter-ghost"));
 };
 document.getElementById("filter-query").onkeydown = (event) => {
   const input = event.currentTarget;
+  const ghost = document.getElementById("filter-ghost");
   if (event.key === " " && !event.ctrlKey && !event.altKey && !event.metaKey) {
     const next = matchTag(input.value);
     if (!next) return;
     event.preventDefault();
-    input.value = next;
-    document.getElementById("filter-ghost").textContent = "";
+    input.value = next.tag;
+    ghost.textContent = "";
+    ghost.style.paddingLeft = "";
     return;
   }
   if (event.key !== "Enter") return;
