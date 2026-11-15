@@ -43,6 +43,7 @@ def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalog
     html = PAGE_PATH.read_text(encoding="utf-8")
     html = html.replace("FOLDERS_JSON", payload, 1).replace("__OUBI_THEME__", chosen, 1)
     html = html.replace("__OUBI_GENRES__", genre_payload, 1)
+    html = html.replace("__OUBI_MAX_GENRES__", str(MAX_GENRES), 1)
     html = html.replace("__OUBI_LAYOUT__", layout_payload, 1)
     html = html.replace("__OUBI_LANG__", lang_code)
     html = html.replace("__OUBI_LANGUAGE_CHOICE__", language_choice, 1)
@@ -188,8 +189,7 @@ def read_genres(path=GENRES_PATH):
         picked = [line.strip()[:80] for line in lines[:MAX_GENRES]]
         while picked and not picked[-1]:
             picked.pop()
-        if picked:
-            return picked
+        return picked
     picked = [os.environ.get(f"OUBI_GENRE_{number}", "").strip() for number in range(1, MAX_GENRES + 1)]
     while picked and not picked[-1]:
         picked.pop()

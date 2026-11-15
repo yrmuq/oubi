@@ -123,8 +123,12 @@ body.arrange .block * { pointer-events: none; }
 #name { position: absolute; left: 48px; right: 48px; top: 0; height: 44px; margin: 0; display: flex; align-items: center; justify-content: center; line-height: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #who { margin: 0; min-height: 1.2em; font-size: 22px; font-weight: 700; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
-#genre-row { display: flex; flex-wrap: wrap; gap: 8px 16px; width: 100%; flex: 1; min-height: 0; overflow: auto; align-items: flex-start; align-content: flex-start; }
-.genre-slot { display: flex; gap: 6px; align-items: center; flex: 1 1 180px; max-width: 280px; min-width: 0; overflow: hidden; }
+#genre-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 8px 16px; width: 100%; flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; align-content: start; }
+.genre-slot, .genre-actions { max-width: 280px; min-width: 0; }
+.genre-slot { display: flex; gap: 6px; align-items: center; overflow: hidden; }
+.genre-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-items: center; }
+.genre-actions button { height: 32px; padding: 0; }
+#genre-remove { grid-column: 2; }
 .genre-handle, .genre-pin { width: 22px; height: 28px; padding: 0; border-radius: 6px; flex: 0 0 22px; box-sizing: border-box; }
 .genre-handle { cursor: grab; color: #111; }
 .genre-pin { background: var(--btn-2); color: var(--text); border: 2px solid transparent; }
@@ -137,7 +141,6 @@ body.arrange .block * { pointer-events: none; }
 #suggest button.on { background: var(--line); }
 .ghost-tail { color: var(--muted); }
 .genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
-#genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
 .tag-hit { cursor: pointer; border-radius: 4px; padding: 0 3px; }
 .filter-find { margin: 0 0 8px; background: var(--search-bg); border: 1px solid var(--search-edge); border-radius: 6px; }
 .filter-find input, .filter-find .genre-ghost { border: 0; background: transparent; padding-right: 30px; }
@@ -279,6 +282,7 @@ let reelAt = -1;
 let follow = true;
 let shown = "";
 let genres = __OUBI_GENRES__;
+const maxGenres = __OUBI_MAX_GENRES__;
 let layout = __OUBI_LAYOUT__;
 let lang = "__OUBI_LANG__";
 let languageChoice = "__OUBI_LANGUAGE_CHOICE__";
@@ -901,7 +905,7 @@ function saveGenres() {
     fetch("/api/genres", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ genres: genres.slice(0, 20) }),
+      body: JSON.stringify({ genres }),
     });
   }, 300);
 }
@@ -1003,19 +1007,39 @@ function renderGenreRow(focusAt) {
     slot.append(handle, pin, field);
     row.append(slot);
   });
-  if (genres.length < 20) {
+  const actions = document.createElement("div");
+  actions.className = "genre-actions";
+  if (genres.length < maxGenres) {
     const add = document.createElement("button");
     add.type = "button";
     add.id = "genre-add";
     add.textContent = "+";
-    add.setAttribute("aria-label", t(101));
+    add.title = t(101);
+    add.setAttribute("aria-label", add.title);
     add.onclick = () => {
-      if (genres.length >= 20) return;
       genres.push("");
       renderGenreRow(genres.length - 1);
     };
-    row.append(add);
+    actions.append(add);
   }
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.id = "genre-remove";
+  remove.className = "secondary";
+  remove.textContent = "−";
+  remove.title = t(103);
+  remove.setAttribute("aria-label", remove.title);
+  remove.disabled = genres.length <= 1;
+  remove.onclick = () => {
+    genres.pop();
+    hideSuggest();
+    renderGenreRow(genres.length === 1 ? 0 : undefined);
+    if (genres.length > 1) document.getElementById("genre-remove").focus();
+    paintTags(tagText);
+    saveGenres();
+  };
+  actions.append(remove);
+  row.append(actions);
   if (focusAt !== undefined) {
     const inputs = row.querySelectorAll(".genre-field input");
     const target = inputs[focusAt];

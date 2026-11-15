@@ -37,6 +37,7 @@
 | `Identify` | Tag images in the selected folders when the model is ready. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
+| `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
 | `OUBI_PORT` | Choose the host port. The container listens on `8080`. |
 | `OUBI_NO_TXT=1` | Skip writing tag sidecars. Resume relies on sidecars that already exist. |
 | `OUBI_NSFW_FROM` | Use `q` to include `rating:q` and `rating:e`, or `e` to include only `rating:e`. |
