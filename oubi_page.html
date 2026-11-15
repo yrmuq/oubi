@@ -64,9 +64,7 @@ html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
 body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .topbar { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--pane); }
 .brand { font-size: 18px; font-weight: 650; }
-.themes { display: flex; gap: 4px; }
-.themes button { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
-.themes button.on { background: var(--btn); color: #fff; }
+#theme { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
 .top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
 .pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
@@ -201,11 +199,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   <div class="head-tools">
     <button id="arrange" type="button" title="Move blocks">✎</button>
     <button id="lang" type="button" title="Language">EN</button>
-    <div class="themes">
-    <button type="button" data-theme="light">светлая</button>
-    <button type="button" data-theme="dark">тёмная</button>
-    <button type="button" data-theme="auto">auto</button>
-    </div>
+    <button id="theme" type="button">auto</button>
   </div>
 </header>
 <div class="top">
@@ -227,6 +221,9 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <p id="step" class="step">Открываю…</p>
       <div class="bar"><div id="fill"></div></div>
       <p id="detail" class="detail"></p>
+    </div>
+    <div class="block grow" data-block="log">
+      <pre id="log" class="log"></pre>
     </div>
   </section>
   <div class="split split-v" id="split-left"></div>
@@ -260,9 +257,6 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.2 15.2 L21 21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </div>
       <div id="filter"></div>
-    </div>
-    <div class="block grow" data-block="log">
-      <pre id="log" class="log"></pre>
     </div>
   </section>
 </div>
@@ -318,9 +312,7 @@ function applyI18n() {
   document.getElementById("plan").textContent = t(3);
   document.getElementById("stop").textContent = t(4);
   document.getElementById("retry").textContent = t(5);
-  document.querySelector('.themes [data-theme="light"]').textContent = t(8);
-  document.querySelector('.themes [data-theme="dark"]').textContent = t(9);
-  document.querySelector('.themes [data-theme="auto"]').textContent = t(10);
+  document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("all-folders").title = t(83);
   document.getElementById("lang").title = t(21);
@@ -754,21 +746,20 @@ function applyTheme(next) {
   theme = next;
   if (next === "light" || next === "dark") document.documentElement.setAttribute("data-theme", next);
   else document.documentElement.removeAttribute("data-theme");
-  for (const button of document.querySelectorAll(".themes button")) {
-    button.classList.toggle("on", button.dataset.theme === next);
-  }
+  const button = document.getElementById("theme");
+  if (button) button.textContent = next === "light" ? t(8) : next === "dark" ? t(9) : t(10);
 }
 applyTheme(theme);
-for (const button of document.querySelectorAll(".themes button")) {
-  button.onclick = () => {
-    applyTheme(button.dataset.theme);
-    fetch("/api/theme", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ theme: button.dataset.theme }),
-    });
-  };
-}
+document.getElementById("theme").onclick = () => {
+  const order = ["light", "dark", "auto"];
+  const next = order[(order.indexOf(theme) + 1) % order.length];
+  applyTheme(next);
+  fetch("/api/theme", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ theme: next }),
+  });
+};
 for (const id of ["tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
 if (!Array.isArray(genres) || !genres.length) genres = [""];
 let genreTimer = 0;
