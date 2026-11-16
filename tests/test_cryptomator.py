@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from oubi_cryptomator import VaultError
 from oubi_files import sidecar_path
-from oubi_web import App, Workspace, images_under, read_info, recent_tagged, sort_command, tags_in_folders
+from oubi_web import App, Workspace, images_under, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
 
 
 class VaultWorkspaceTests(unittest.TestCase):
@@ -53,6 +53,26 @@ class VaultWorkspaceTests(unittest.TestCase):
             app.stop_folder_count()
         self.assertIsNone(app.folder_scan)
         self.assertIsNone(app.folder_cache)
+
+    def test_folder_scan_reports_discovery_then_exact_checked_counts(self):
+        first = self.root / "a.jpg"
+        second = self.root / "b.png"
+        first.touch()
+        second.touch()
+        sidecar_path(first).parent.mkdir()
+        sidecar_path(first).write_text("moon", encoding="utf-8")
+        updates = []
+
+        def progress(stage, done, total=None):
+            updates.append((stage, done, total))
+
+        folders = source_folders(self.root, csv=self.root / "missing.csv", sorted_list=self.root / "missing.txt",
+                                 progress=progress)
+        self.assertEqual([(folder["total"], folder["tagged"]) for folder in folders], [(2, 1)])
+        self.assertEqual(updates, [
+            ("discover", 1, None), ("discover", 2, None), ("checking", 0, 2),
+            ("checking", 1, 2), ("checking", 2, 2), ("done", 2, 2),
+        ])
 
     def test_folder_navigation_lists_children_without_exposing_vault_output(self):
         (self.root / "Album" / "Selected").mkdir(parents=True)

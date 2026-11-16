@@ -31,8 +31,10 @@ class Vault:
         self.app = None
 
     def owns(self, token):
-        return bool(self.token and token.isascii() and secrets.compare_digest(self.token, token)
-                    and self.process is not None and self.process.poll() is None and self.is_mounted())
+        owner, process = self.token, self.process
+        return bool(owner and token.isascii() and secrets.compare_digest(owner, token)
+                    and process is not None and process.poll() is None and self.is_mounted()
+                    and owner == self.token and process is self.process)
 
     def is_mounted(self):
         mount = str(self.mount).replace(chr(92), r"\134").replace(" ", r"\040")

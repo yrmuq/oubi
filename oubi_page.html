@@ -410,6 +410,9 @@ let vaultScope = __OUBI_VAULT_SCOPE__;
 let folderLocation = "";
 let folderSelectionTimer = null;
 let vaultBusy = false;
+let vaultOpening = false;
+let terminalHistory = [];
+let folderScan = null;
 let rocmState = null;
 let nvidiaState = null;
 let gpuPrompt = null;
@@ -470,11 +473,11 @@ function applyI18n() {
   up.setAttribute("aria-label", t(180));
   document.getElementById("vault-title").textContent = t(174);
   document.getElementById("vault-cancel").textContent = t(175);
-  vaultUnlock.textContent = t(163);
   sortTarget.setAttribute("aria-label", t(176));
   sortTarget.options[0].textContent = t(177);
   sortTarget.options[1].textContent = t(178);
   renderVault();
+  renderTerminal();
   const language = document.getElementById("lang");
   language.setAttribute("aria-label", t(21));
   language.options[0].textContent = t(102);
@@ -585,6 +588,7 @@ function renderVault() {
   vaultToggle.setAttribute("aria-pressed", String(opened));
   vaultToggle.disabled = vaultBusy;
   vaultUnlock.disabled = vaultBusy;
+  vaultUnlock.textContent = t(vaultOpening ? 190 : 163);
   vaultPassword.disabled = vaultBusy;
   sortTarget.hidden = !opened;
 }
@@ -611,6 +615,7 @@ function selectFolderLocation(path) {
   renderFilter();
   refreshGenreGhosts();
   takeFolders([]);
+  renderTerminal();
 }
 
 function navigateFolders(path) {
@@ -629,7 +634,9 @@ function useVault(scope) {
   sortTarget.value = "vault";
   document.getElementById("step").textContent = "";
   document.getElementById("detail").textContent = "";
-  document.getElementById("log").textContent = "";
+  terminalHistory = [];
+  folderScan = null;
+  renderTerminal();
   document.getElementById("fill").style.width = "0";
   renderVault();
   loadFolders();
@@ -637,7 +644,9 @@ function useVault(scope) {
 
 async function changeVault(action, password) {
   vaultBusy = true;
+  vaultOpening = action === "unlock";
   renderVault();
+  renderTerminal();
   vaultError.hidden = true;
   showNotice();
   try {
@@ -667,7 +676,9 @@ async function changeVault(action, password) {
     }
   } finally {
     vaultBusy = false;
+    vaultOpening = false;
     renderVault();
+    renderTerminal();
     if (vaultDialog.open) vaultPassword.focus();
     tick();
   }
@@ -898,6 +909,32 @@ async function confirmDelete() {
   }
 }
 
+function renderTerminal() {
+  const lines = terminalHistory.slice();
+  if (gpuPrompt && !lines.includes(gpuPrompt.message)) lines.push(gpuPrompt.message);
+  if (vaultOpening) {
+    lines.push(t(190));
+  } else if (!wasBusy && !gpuProgress && !gpuPrompt && folderScan?.directory === folderLocation) {
+    const { stage, done, total } = folderScan;
+    const number = new Intl.NumberFormat(lang);
+    if (stage === "discover") {
+      lines.push(t(191).replace("{count}", number.format(done)));
+    } else if (stage === "checking" && total > 0) {
+      const percent = Math.floor(100 * done / total);
+      lines.push(t(192).replace("{done}", number.format(done)).replace("{total}", number.format(total))
+        .replace("{percent}", percent));
+    } else if (stage === "done") {
+      lines.push(t(193).replace("{total}", number.format(total)));
+    }
+  }
+  const log = document.getElementById("log");
+  const contents = lines.join("\n");
+  if (log.textContent !== contents) {
+    log.textContent = contents;
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
 async function tick() {
   const request = ++statusRequest;
   const data = await (await fetch("/api/status")).json();
@@ -925,14 +962,11 @@ async function tick() {
   document.getElementById("step").textContent = gpuProgress?.step || step;
   document.getElementById("detail").textContent = (gpuProgress?.detail ?? data.detail) || "";
   document.getElementById("fill").style.width = (gpuProgress?.percent ?? data.percent ?? 0) + "%";
-  const log = document.getElementById("log");
-  const lines = data.log || [];
-  if (gpuPrompt && !lines.includes(gpuPrompt.message)) lines.push(gpuPrompt.message);
-  const contents = lines.join("\n");
-  if (log.textContent !== contents) {
-    log.textContent = contents;
-    log.scrollTop = log.scrollHeight;
-  }
+  terminalHistory = data.log || [];
+  const scan = data.scan_progress || null;
+  const scanFinished = scan?.stage === "done" && scan?.directory === folderLocation &&
+    (folderScan?.stage !== "done" || folderScan?.directory !== scan.directory);
+  folderScan = scan;
   const busy = data.job_running;
   const ready = data.model === "ready";
   const picked = selected.size > 0;
@@ -942,8 +976,9 @@ async function tick() {
   }
   document.getElementById("stop").disabled = !busy;
   document.getElementById("retry").hidden = data.model !== "error";
-  if (wasBusy && !busy) loadFolders();
+  if ((wasBusy && !busy) || scanFinished) loadFolders();
   wasBusy = !!busy;
+  renderTerminal();
   renderDeleteControls();
   if (follow && data.preview_file && data.preview_file !== (reel[reelAt] || "")) {
     if (!reel.includes(data.preview_file)) reel.push(data.preview_file);

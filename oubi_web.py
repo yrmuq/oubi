@@ -652,10 +652,13 @@ def index_paths(paths, root=None, *, cancelled=None):
 
 
 def summarize_images(rel, images, csv_paths, sorted_paths, root=None, *, cancelled=None):
+    return _summarize_images(rel, images, index_paths(csv_paths, root, cancelled=cancelled),
+                             index_paths(sorted_paths, root, cancelled=cancelled), root, cancelled=cancelled)
+
+
+def _summarize_images(rel, images, tagged_keys, sorted_keys, root, *, cancelled=None, checked=None):
     tagged = 0
     laid = 0
-    tagged_keys = index_paths(csv_paths, root, cancelled=cancelled)
-    sorted_keys = index_paths(sorted_paths, root, cancelled=cancelled)
     for image in images:
         if cancelled and cancelled():
             break
@@ -667,7 +670,9 @@ def summarize_images(rel, images, csv_paths, sorted_paths, root=None, *, cancell
             if keys & sorted_keys:
                 laid += 1
         except OSError:
-            continue
+            pass
+        if checked is not None:
+            checked()
     total = len(images)
     return {
         "path": rel,
@@ -701,27 +706,63 @@ def folder_paths(root, directory, exclude):
             for name in folder_names(folder, exclude=exclude)]
 
 
-def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTED_LIST, exclude=None, cancelled=None):
+def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTED_LIST,
+                   exclude=None, cancelled=None, progress=None):
     names = folder_paths(root, directory, exclude)
     if not names:
+        if progress is not None and not (cancelled and cancelled()):
+            progress("done", 0, 0)
         return []
+    base = Path(root)
+    total = 0
+
+    def discover():
+        nonlocal total
+        for name in names:
+            if cancelled and cancelled():
+                return
+            images = []
+            try:
+                for image in image_files(base / name, exclude, cancelled=cancelled):
+                    images.append(image)
+                    if progress is not None:
+                        total += 1
+                        progress("discover", total)
+            except OSError:
+                pass
+            yield name, images
+
+    candidates = discover()
+    if progress is not None:
+        candidates = list(candidates)
+        if cancelled and cancelled():
+            return []
+        progress("checking", 0, total)
+
     try:
         csv_paths = load_csv_paths(csv, cancelled=cancelled)
         sorted_paths = load_sorted_paths(sorted_list, cancelled=cancelled)
     except OSError:
         csv_paths, sorted_paths = set(), set()
-    base = Path(root)
-    found = []
-    for name in names:
+    tagged_keys = index_paths(csv_paths, base, cancelled=cancelled)
+    sorted_keys = index_paths(sorted_paths, base, cancelled=cancelled)
+
+    processed = 0
+
+    def checked():
+        nonlocal processed
+        processed += 1
+        progress("checking", processed, total)
+
+    summaries = []
+    for name, images in candidates:
         if cancelled and cancelled():
-            break
-        folder = base if name == "" else base / name
-        try:
-            images = images_under(folder, exclude, cancelled=cancelled)
-        except OSError:
-            images = []
-        found.append(summarize_images(name, images, csv_paths, sorted_paths, base, cancelled=cancelled))
-    return found
+            return []
+        summaries.append(_summarize_images(name, images, tagged_keys, sorted_keys, base, cancelled=cancelled,
+                                           checked=checked if progress is not None else None))
+    if not (cancelled and cancelled()) and progress is not None:
+        progress("done", total, total)
+    return summaries
 
 
 def absolute_folders(rels, root=IMAGES, *, language=None, exclude=None):
@@ -1005,6 +1046,7 @@ class App:
         self.current_file = ""
         self.folder_cache = None
         self.folder_scan = None
+        self.scan_progress = None
 
     def _append_line(self, line):
         self.lines.append(line)
@@ -1165,7 +1207,10 @@ class App:
             if fresh or self.folder_scan:
                 return
             cancel = threading.Event()
-            worker = threading.Thread(target=self._count_folders, args=(directory, cancel), daemon=True)
+            report_progress = self.workspace is not None and (not cached or cached[0] != directory)
+            if report_progress:
+                self.scan_progress = {"directory": directory, "stage": "discover", "done": 0, "total": None}
+            worker = threading.Thread(target=self._count_folders, args=(directory, cancel, report_progress), daemon=True)
             self.folder_scan = (cancel, worker)
             worker.start()
 
@@ -1179,6 +1224,7 @@ class App:
 
     def _invalidate_folders(self):
         self.folder_cache = None
+        self.scan_progress = None
         if self.folder_scan:
             self.folder_scan[0].set()
 
@@ -1195,18 +1241,39 @@ class App:
             self._invalidate_folders()
         return cleanup_pending
 
-    def _count_folders(self, directory, cancel):
+    def _count_folders(self, directory, cancel, report_progress):
         found = None
+        last_stage = None
+        last_report = 0.0
+
+        def report(stage, done, total=None):
+            nonlocal last_stage, last_report
+            if stage == "done":
+                return
+            now = time.monotonic()
+            if stage == last_stage and now - last_report < 0.2:
+                return
+            with self.lock:
+                if not cancel.is_set():
+                    self.scan_progress = {"directory": directory, "stage": stage, "done": done, "total": total}
+                    last_stage, last_report = stage, now
+
         try:
             paths = self.paths
             found = source_folders(paths.images, directory=directory, csv=paths.csv, sorted_list=paths.sorted_list,
-                                   exclude=paths.excluded, cancelled=cancel.is_set)
+                                   exclude=paths.excluded, cancelled=cancel.is_set,
+                                   progress=report if report_progress else None)
         except (OSError, ValueError) as error:
             self.note(text(27, error=error))
         finally:
             with self.lock:
                 if found is not None and not cancel.is_set():
                     self.folder_cache = (directory, found, time.monotonic())
+                    if report_progress:
+                        total = sum(folder["total"] for folder in found)
+                        self.scan_progress = {"directory": directory, "stage": "done", "done": total, "total": total}
+                elif report_progress:
+                    self.scan_progress = None
                 self.folder_scan = None
 
     def status(self):
@@ -1221,6 +1288,7 @@ class App:
                 "detail": self.detail,
                 "percent": self.percent,
                 "preview_file": "",
+                "scan_progress": self.scan_progress,
                 "log": self.lines[-80:],
             }
         if preview:
@@ -1457,6 +1525,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         workspace = Workspace.encrypted(vault.mount)
                         vault.app = App(workspace, devices=(self.app.rocm, self.app.nvidia))
+                        vault.app._ensure_count()
                     except (OSError, ValueError, VaultError):
                         vault.close()
                         raise
@@ -1483,15 +1552,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             gpu = self.app.gpu_status(self._language())
             normal = self.app.status()
-            with vault.lock:
-                authorized = self._vault_owner()
-                state = vault.app.status() if authorized else normal
-                if authorized and state["phase"] == "download":
-                    for field in ("step", "detail", "percent"):
-                        state[field] = normal[field] if normal["phase"] == "download" else None
-                self._send(200, {**state, **gpu, "model": normal["model"],
-                                 "vault_enabled": vault.path is not None,
-                                 "vault_scope": vault.scope if authorized else ""})
+            scope, opened_app = vault.scope, vault.app
+            state = normal
+            authorized = bool(opened_app and self._vault_owner())
+            if authorized:
+                vault_state = opened_app.status()
+                # Scoped filesystem requests can hold the vault lock while the NAS responds.
+                authorized = opened_app is vault.app and scope == vault.scope
+                if authorized:
+                    state = vault_state
+                    if state["phase"] == "download":
+                        for field in ("step", "detail", "percent"):
+                            state[field] = normal[field] if normal["phase"] == "download" else None
+            self._send(200, {**state, **gpu, "model": normal["model"],
+                             "vault_enabled": vault.path is not None,
+                             "vault_scope": scope if authorized else ""})
             return
         if path == "/":
             with vault.lock:
