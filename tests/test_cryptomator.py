@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from oubi_cryptomator import VaultError
-from oubi_files import sidecar_path
+from oubi_files import image_revision, sidecar_path
 from oubi_web import App, Workspace, images_under, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
 
 
@@ -73,6 +73,51 @@ class VaultWorkspaceTests(unittest.TestCase):
             ("discover", 1, None), ("discover", 2, None), ("checking", 0, 2),
             ("checking", 1, 2), ("checking", 2, 2), ("done", 2, 2),
         ])
+
+    def test_vault_reuses_root_scan_for_descendants_until_files_change(self):
+        workspace = Workspace.encrypted(self.root)
+        tagged = self.root / "Album" / "Selected" / "Deep" / "tagged.jpg"
+        untagged = self.root / "Album" / "Selected" / "untagged.jpg"
+        excluded = Path(workspace.output) / "excluded.jpg"
+        for image in (tagged, untagged, excluded):
+            image.parent.mkdir(parents=True, exist_ok=True)
+            image.touch()
+        tags = sidecar_path(tagged)
+        tags.parent.mkdir()
+        tags.write_text("moon")
+        Path(workspace.sorted_list).write_text(f"{tagged}\n")
+        app = App(workspace)
+        self.addCleanup(app.stop_folder_count)
+
+        def finish_scan():
+            with app.lock:
+                running = app.folder_scan
+            if running:
+                running[1].join(timeout=2)
+            self.assertIsNone(app.folder_scan)
+            return app.status()["scan_progress"]
+
+        with patch("oubi_web.source_folders", wraps=source_folders) as scan:
+            app.folders("Album")
+            self.assertEqual(finish_scan(), {"directory": "", "stage": "done", "done": 2, "total": 2})
+            with patch("oubi_web.time.monotonic", return_value=app.folder_cache[2] + 60):
+                for directory, child in (("", "Album"), ("Album", "Album/Selected")):
+                    with self.subTest(directory=directory):
+                        folder, = app.folders(directory)
+                        self.assertEqual((folder["path"], folder["total"], folder["scan"], folder["sort"]),
+                                         (child, 2, "part", "part"))
+                leaf, = app.folders("Album/Selected")
+                self.assertEqual((leaf["path"], leaf["total"], leaf["scan"], leaf["sort"]),
+                                 ("Album/Selected/Deep", 1, "done", "done"))
+                self.assertEqual(app.folders("Album/Selected/Deep"), [leaf])
+            self.assertEqual(scan.call_count, 1)
+            self.assertEqual(scan.call_args.kwargs["directory"], "")
+
+            app.remove_image(str(tagged.relative_to(self.root)), image_revision(tagged))
+            app.folders("Album/Selected")
+            self.assertEqual(finish_scan()["total"], 1)
+            self.assertEqual(app.folders("Album/Selected")[0]["scan"], "none")
+            self.assertEqual(scan.call_count, 2)
 
     def test_folder_navigation_lists_children_without_exposing_vault_output(self):
         (self.root / "Album" / "Selected").mkdir(parents=True)

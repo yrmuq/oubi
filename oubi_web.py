@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import dataclass
 from http.cookies import CookieError, SimpleCookie
@@ -662,18 +663,42 @@ def _summarize_images(rel, images, tagged_keys, sorted_keys, root, *, cancelled=
     for image in images:
         if cancelled and cancelled():
             break
-        try:
-            keys = path_keys(image, root)
-            txt = sidecar_path(image)
-            if keys & tagged_keys or (txt.is_file() and not txt.is_dir()):
-                tagged += 1
-            if keys & sorted_keys:
-                laid += 1
-        except OSError:
-            pass
+        is_tagged, is_sorted = _image_marks(image, root, tagged_keys, sorted_keys)
+        tagged += is_tagged
+        laid += is_sorted
         if checked is not None:
             checked()
-    total = len(images)
+    return _folder_summary(rel, len(images), tagged, laid)
+
+
+def _image_marks(image, root, tagged_keys, sorted_keys):
+    try:
+        keys = path_keys(image, root)
+        txt = sidecar_path(image)
+        return bool(keys & tagged_keys) or (txt.is_file() and not txt.is_dir()), bool(keys & sorted_keys)
+    except OSError:
+        return False, False
+
+
+def _summarize_tree(candidates, root, tagged_keys, sorted_keys, *, cancelled, checked):
+    counts = defaultdict(lambda: [0, 0, 0])
+    for _, images in candidates:
+        for image in images:
+            if cancelled and cancelled():
+                return []
+            tagged, laid = _image_marks(image, root, tagged_keys, sorted_keys)
+            for parent in image.relative_to(root).parents:
+                rel = parent.as_posix() if parent.parts else ""
+                totals = counts[rel]
+                totals[0] += 1
+                totals[1] += tagged
+                totals[2] += laid
+            if checked is not None:
+                checked()
+    return [_folder_summary(rel, *totals) for rel, totals in counts.items()]
+
+
+def _folder_summary(rel, total=0, tagged=0, laid=0):
     return {
         "path": rel,
         "name": text(84) if rel == "" else Path(rel).name,
@@ -707,7 +732,7 @@ def folder_paths(root, directory, exclude):
 
 
 def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTED_LIST,
-                   exclude=None, cancelled=None, progress=None):
+                   exclude=None, cancelled=None, progress=None, include_descendants=False):
     names = folder_paths(root, directory, exclude)
     if not names:
         if progress is not None and not (cancelled and cancelled()):
@@ -754,12 +779,16 @@ def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTE
         processed += 1
         progress("checking", processed, total)
 
-    summaries = []
-    for name, images in candidates:
-        if cancelled and cancelled():
-            return []
-        summaries.append(_summarize_images(name, images, tagged_keys, sorted_keys, base, cancelled=cancelled,
-                                           checked=checked if progress is not None else None))
+    on_checked = checked if progress is not None else None
+    if include_descendants:
+        summaries = _summarize_tree(candidates, base, tagged_keys, sorted_keys, cancelled=cancelled, checked=on_checked)
+    else:
+        summaries = []
+        for name, images in candidates:
+            if cancelled and cancelled():
+                return []
+            summaries.append(_summarize_images(name, images, tagged_keys, sorted_keys, base,
+                                               cancelled=cancelled, checked=on_checked))
     if not (cancelled and cancelled()) and progress is not None:
         progress("done", total, total)
     return summaries
@@ -1183,33 +1212,26 @@ class App:
         self._ensure_count(directory)
         with self.lock:
             cached = self.folder_cache
-        if cached is not None and cached[0] == directory:
-            summaries = {item["path"]: item for item in cached[1]}
+        if cached is not None and (self.workspace is not None or cached[0] == directory):
+            summaries = cached[1]
         else:
             summaries = {}
-        return [
-            summaries.get(name) or {
-                "path": name,
-                "name": text(84) if name == "" else Path(name).name,
-                "total": 0,
-                "tagged": 0,
-                "sorted": 0,
-                "scan": "none",
-                "sort": "none",
-            }
-            for name in names
-        ]
+        return [summaries.get(name) or _folder_summary(name) for name in names]
 
     def _ensure_count(self, directory=""):
         with self.lock:
             cached = self.folder_cache
-            fresh = cached and cached[0] == directory and time.monotonic() - cached[2] < 8
-            if fresh or self.folder_scan:
+            if self.folder_scan:
+                return
+            report_progress = self.workspace is not None
+            if report_progress:
+                if cached is not None or (self.job_running and self.job_mode != "plan"):
+                    return
+                directory = ""
+                self.scan_progress = {"directory": directory, "stage": "discover", "done": 0, "total": None}
+            elif cached and cached[0] == directory and time.monotonic() - cached[2] < 8:
                 return
             cancel = threading.Event()
-            report_progress = self.workspace is not None and (not cached or cached[0] != directory)
-            if report_progress:
-                self.scan_progress = {"directory": directory, "stage": "discover", "done": 0, "total": None}
             worker = threading.Thread(target=self._count_folders, args=(directory, cancel, report_progress), daemon=True)
             self.folder_scan = (cancel, worker)
             worker.start()
@@ -1262,15 +1284,16 @@ class App:
             paths = self.paths
             found = source_folders(paths.images, directory=directory, csv=paths.csv, sorted_list=paths.sorted_list,
                                    exclude=paths.excluded, cancelled=cancel.is_set,
-                                   progress=report if report_progress else None)
+                                   progress=report if report_progress else None, include_descendants=report_progress)
         except (OSError, ValueError) as error:
             self.note(text(27, error=error))
         finally:
             with self.lock:
                 if found is not None and not cancel.is_set():
-                    self.folder_cache = (directory, found, time.monotonic())
+                    summaries = {item["path"]: item for item in found}
+                    self.folder_cache = (directory, summaries, time.monotonic())
                     if report_progress:
-                        total = sum(folder["total"] for folder in found)
+                        total = summaries[""]["total"] if "" in summaries else 0
                         self.scan_progress = {"directory": directory, "stage": "done", "done": total, "total": total}
                 elif report_progress:
                     self.scan_progress = None
@@ -1371,7 +1394,8 @@ class App:
             self.detail = ""
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
             self.step = text(25, language=language)
-            self._invalidate_folders()
+            if not self.workspace or mode != "plan":
+                self._invalidate_folders()
         options = {"output": output} if self.workspace else {}
         threading.Thread(target=self._run, args=(mode, paths, language, tagging), kwargs=options, daemon=True).start()
         return None
@@ -1410,7 +1434,8 @@ class App:
                 self.job_running = False
                 self.job_mode = None
                 self.proc = None
-                self._invalidate_folders()
+                if not self.workspace or mode != "plan":
+                    self._invalidate_folders()
             if code == 0:
                 self.note(text(80, language=language))
             elif code < 0:

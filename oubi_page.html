@@ -894,6 +894,7 @@ async function confirmDelete() {
     if (target.scope === vaultScope) {
       workspaceMutation++;
       statusShown = ++statusRequest;
+      folderScan = null;
       discardDeletedImage(target.path);
       showNotice(data.warning || "");
       loadFolders();
@@ -914,7 +915,7 @@ function renderTerminal() {
   if (gpuPrompt && !lines.includes(gpuPrompt.message)) lines.push(gpuPrompt.message);
   if (vaultOpening) {
     lines.push(t(190));
-  } else if (!wasBusy && !gpuProgress && !gpuPrompt && folderScan?.directory === folderLocation) {
+  } else if (!wasBusy && !gpuProgress && !gpuPrompt && folderScan) {
     const { stage, done, total } = folderScan;
     const number = new Intl.NumberFormat(lang);
     if (stage === "discover") {
@@ -964,8 +965,7 @@ async function tick() {
   document.getElementById("fill").style.width = (gpuProgress?.percent ?? data.percent ?? 0) + "%";
   terminalHistory = data.log || [];
   const scan = data.scan_progress || null;
-  const scanFinished = scan?.stage === "done" && scan?.directory === folderLocation &&
-    (folderScan?.stage !== "done" || folderScan?.directory !== scan.directory);
+  const scanFinished = scan?.stage === "done" && folderScan?.stage !== "done";
   folderScan = scan;
   const busy = data.job_running;
   const ready = data.model === "ready";
