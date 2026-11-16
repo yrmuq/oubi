@@ -97,10 +97,16 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #delete-title { margin: 0 0 14px; overflow-wrap: anywhere; }
 #delete-error { margin-top: 10px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
-#folder-navigation { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; min-width: 0; }
-#folder-navigation[hidden] { display: none; }
+#vault-dialog .dialog-actions button { flex: 1 1 0; }
+.folder-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+#folder-navigation { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
 #folder-up { height: 28px; padding: 0 8px; }
 #folder-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-settings { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+#folder-size { width: 88px; min-width: 24px; margin: 0; accent-color: var(--pick); }
+#folder-order { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; }
+#folder-order svg { width: 16px; height: 16px; display: block; margin: auto; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#folder-order[aria-pressed="true"] svg { transform: scaleY(-1); }
 #all-folders { width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
 #all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
 #all-folders.on .box { background: currentColor; }
@@ -108,17 +114,19 @@ button { font: inherit; color: #fff; background: var(--btn); border: 0; border-r
 button.secondary { background: var(--btn-2); color: var(--btn-2-text); }
 button.danger { background: var(--danger); color: #fff; }
 button:disabled { opacity: 0.45; cursor: default; }
-#folders { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 16px; margin-left: 16px; padding: 4px; }
-.folder { width: 104px; background: transparent; color: inherit; border: 2px solid transparent; border-radius: 8px; padding: 4px; box-sizing: border-box; }
-.folder .icon { width: 72px; height: 56px; margin: 0 auto 6px; position: relative; }
+#folders { --folder-width: 104px; flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 16px; margin-left: 16px; padding: 4px; }
+.folder { width: var(--folder-width); background: transparent; color: inherit; border: 2px solid transparent; border-radius: 8px; padding: 4px; box-sizing: border-box; }
+.folder .icon { width: calc(var(--folder-width) * 72 / 104); aspect-ratio: 72 / 56; margin: 0 auto 6px; position: relative; }
 .folder .folder-art { width: 100%; height: 100%; display: block; filter: drop-shadow(0 2px 2px #0003); }
 .folder:hover { background: color-mix(in srgb, var(--pick) 10%, transparent); }
 .folder .name { display: block; font-size: 12px; line-height: 1.2; word-break: break-word; }
 .folder.on { border-color: var(--pick); }
 .badge { position: absolute; bottom: 0; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; border: 2px solid var(--pane); box-sizing: border-box; box-shadow: 0 1px 3px #0005; }
 .badge svg { display: block; width: 11px; height: 11px; }
-.badge.scan { left: 7px; }
-.badge.sort { right: 7px; }
+.badge.scan { left: min(7px, 7%); }
+.badge.sort { right: min(7px, 7%); }
+#folders.gallery .badge.sort { display: none; }
+#folders.gallery .badge.scan { left: 50%; transform: translateX(-50%); }
 .badge.none { background: #89939f; color: #fff; }
 .badge.part { background: #f5c453; color: #543c0b; }
 .badge.done { background: #208556; color: #fff; }
@@ -312,9 +320,17 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       </div>
     </div>
     <div class="block grow" data-block="folders">
-      <div id="folder-navigation" hidden>
-        <button id="folder-up" type="button" class="secondary" aria-label="Up one level">↑</button>
-        <span id="folder-location"></span>
+      <div class="folder-toolbar">
+        <div id="folder-navigation">
+          <button id="folder-up" type="button" class="secondary" aria-label="Up one level" hidden>↑</button>
+          <span id="folder-location">/</span>
+        </div>
+        <div class="folder-settings">
+          <input id="folder-size" type="range" min="68" max="160" step="4" value="104" aria-label="Folder size">
+          <button id="folder-order" type="button" class="secondary" aria-label="Reverse folder order" aria-pressed="false">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3v14m-3-3 3 3 3-3M10 5h3m-3 5h5m-5 5h7"/></svg>
+          </button>
+        </div>
       </div>
       <div id="folders"></div>
     </div>
@@ -460,6 +476,11 @@ const vaultPassword = document.getElementById("vault-password");
 const vaultError = document.getElementById("vault-error");
 const vaultUnlock = document.getElementById("vault-unlock");
 const sortTarget = document.getElementById("sort-target");
+const folderBox = document.getElementById("folders");
+const folderSize = document.getElementById("folder-size");
+const folderOrder = document.getElementById("folder-order");
+const folderUp = document.getElementById("folder-up");
+let reverseFolderOrder = readPreference("oubi.folder-order") === "reverse";
 let vaultScope = __OUBI_VAULT_SCOPE__;
 let folderLocation = "";
 let folderSelectionTimer = null;
@@ -503,6 +524,11 @@ function renderAppMode() {
   modeToggle.title = t(218);
   document.querySelector('[data-block="genres"]').hidden = gallery;
   document.getElementById("favorites").hidden = !gallery;
+  document.getElementById("sort").hidden = gallery;
+  document.getElementById("plan").hidden = gallery;
+  previewMode.hidden = gallery;
+  folderBox.classList.toggle("gallery", gallery);
+  renderVault();
   renderFavorites();
   fitSplits();
 }
@@ -510,6 +536,7 @@ function renderAppMode() {
 modeToggle.onclick = () => {
   appMode = appMode === "sorting" ? "gallery" : "sorting";
   savePreference("oubi.mode", appMode);
+  setPreviewMode(wasBusy);
   if (appMode === "sorting") {
     pinned = [];
     document.getElementById("filter-query").value = "";
@@ -574,15 +601,16 @@ function applyI18n() {
   recountFolders.title = t(194);
   recountFolders.setAttribute("aria-label", t(194));
   renderPreviewMode();
-  const up = document.getElementById("folder-up");
-  up.title = t(180);
-  up.setAttribute("aria-label", t(180));
+  folderUp.title = t(180);
+  folderUp.setAttribute("aria-label", t(180));
+  folderSize.title = t(220);
+  folderSize.setAttribute("aria-label", t(220));
+  renderFolderOrder();
   document.getElementById("vault-title").textContent = t(174);
   document.getElementById("vault-cancel").textContent = t(175);
   sortTarget.setAttribute("aria-label", t(176));
   sortTarget.options[0].textContent = t(177);
   sortTarget.options[1].textContent = t(178);
-  renderVault();
   renderTerminal();
   const language = document.getElementById("lang");
   language.setAttribute("aria-label", t(21));
@@ -626,16 +654,42 @@ function folderIcon(scan, sort) {
   return icon;
 }
 
+function renderFolderOrder() {
+  folderOrder.title = t(reverseFolderOrder ? 222 : 221);
+  folderOrder.setAttribute("aria-label", t(221));
+  folderOrder.setAttribute("aria-pressed", String(reverseFolderOrder));
+}
+
+function compareFolderNames(left, right, collator) {
+  const rank = token => /^\p{Nd}/u.test(token) ? 1 : /^[\p{L}\p{M}]/u.test(token) ? 2 : 0;
+  for (let index = 0; index < Math.min(left.parts.length, right.parts.length); index++) {
+    const a = left.parts[index];
+    const b = right.parts[index];
+    const order = rank(a) - rank(b) || collator.compare(a, b);
+    if (order) return order;
+  }
+  if (left.parts.length !== right.parts.length) return left.parts.length - right.parts.length;
+  if (left.name === right.name) return 0;
+  return left.name < right.name ? -1 : 1;
+}
+
 function renderFolders() {
-  const box = document.getElementById("folders");
-  box.innerHTML = "";
-  for (const folder of folders) {
+  const collator = new Intl.Collator(lang, { numeric: true, sensitivity: "base" });
+  const tiles = folders.map(folder => {
+    const name = folder.path === "" ? t(84) : folder.name;
+    const parts = name.normalize().match(/\p{Nd}+|[\p{L}\p{M}]\p{M}*|./gsu) || [];
+    return { folder, name, parts };
+  });
+  tiles.sort((a, b) => compareFolderNames(a, b, collator));
+  if (reverseFolderOrder) tiles.reverse();
+  folderBox.replaceChildren();
+  for (const { folder, name } of tiles) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "folder" + (selected.has(folder.path) ? " on" : "");
     const label = document.createElement("span");
     label.className = "name";
-    label.textContent = folder.path === "" ? t(84) : folder.name;
+    label.textContent = name;
     button.append(folderIcon(folder.scan, folder.sort), label);
     button.title = t(181);
     button.onclick = () => {
@@ -656,7 +710,7 @@ function renderFolders() {
         navigateFolders(folder.path);
       }
     };
-    box.appendChild(button);
+    folderBox.appendChild(button);
   }
   updateSelectAll();
 }
@@ -702,9 +756,9 @@ function renderVault() {
   vaultToggle.setAttribute("aria-pressed", String(opened));
   vaultToggle.disabled = vaultBusy;
   vaultUnlock.disabled = vaultBusy;
-  vaultUnlock.textContent = t(vaultOpening ? 190 : 163);
+  vaultUnlock.textContent = t(219);
   vaultPassword.disabled = vaultBusy;
-  sortTarget.hidden = !opened;
+  sortTarget.hidden = !opened || appMode === "gallery";
 }
 
 function selectFolderLocation(path) {
@@ -718,9 +772,9 @@ function selectFolderLocation(path) {
   galleryMessage = 201;
   galleryRequest++;
   const caption = document.getElementById("folder-location");
-  caption.textContent = path;
-  caption.title = path;
-  document.getElementById("folder-navigation").hidden = !path;
+  caption.textContent = path || "/";
+  caption.title = caption.textContent;
+  folderUp.hidden = !path;
   document.getElementById("filter-query").value = "";
   document.getElementById("filter-ghost").replaceChildren();
   hideSuggest();
@@ -1073,6 +1127,7 @@ function renderPreviewMode() {
 }
 
 function setPreviewMode(work) {
+  work = work && appMode === "sorting";
   if (workPreview === work) return;
   workPreview = work;
   closeZoom();
@@ -1273,7 +1328,7 @@ async function tick() {
   document.getElementById("stop").disabled = !busy;
   document.getElementById("retry").hidden = data.model !== "error";
   if (jobFinished || scanFinished) loadFolders();
-  if (jobFinished && !workPreview && !jobChanged) loadGallery();
+  if (jobFinished && !workPreview && (!jobChanged || appMode === "gallery")) loadGallery();
   else if ((galleryMessage === 204 && (!scan || scan.stage === "done")) ||
            (scanFinished && vaultScope && selected.size && !pinned.length)) loadGallery();
   recountFolders.disabled = recountPending || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
@@ -2068,8 +2123,21 @@ document.getElementById("vault-form").onsubmit = event => {
   vaultPassword.value = "";
   changeVault("unlock", password);
 };
-document.getElementById("folder-up").onclick = () => {
+folderUp.onclick = () => {
   navigateFolders(folderLocation.split("/").slice(0, -1).join("/"));
+};
+const savedFolderSize = readPreference("oubi.folder-size");
+if (savedFolderSize) folderSize.value = savedFolderSize;
+folderBox.style.setProperty("--folder-width", folderSize.value + "px");
+folderSize.oninput = () => {
+  folderBox.style.setProperty("--folder-width", folderSize.value + "px");
+  savePreference("oubi.folder-size", folderSize.value);
+};
+folderOrder.onclick = () => {
+  reverseFolderOrder = !reverseFolderOrder;
+  savePreference("oubi.folder-order", reverseFolderOrder ? "reverse" : "default");
+  renderFolderOrder();
+  renderFolders();
 };
 document.getElementById("all-folders").onclick = () => {
   clearTimeout(folderSelectionTimer);

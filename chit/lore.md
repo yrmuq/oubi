@@ -22,6 +22,8 @@
 - Keep the sort history open during a sort and flush completed entries in batches and when a graceful stop unwinds the job.
 - Keep the gallery selection separate from the latest completed tagging result so switching preview modes leaves the running job and gallery position intact.
 - Clear active tag filters on return from Gallery to Sorting, keeping favorite tags persistent per workspace and inside Cryptomator for an encrypted workspace.
+- Keep Gallery on the browsable image preview while a job runs and hide the sorting controls, sorting badges, and preview mode switch.
+- Order folder names by symbols, numbers, then letters by default, comparing digit sequences numerically.
 - Put tags from the CSV character column under Characters and all remaining favorites under Events.
 - Display the decoded preview and its filename together before requesting image tags so metadata reads do not delay the current frame.
 - Keep Cryptomator indexes, sort history, and generated metadata inside the vault; expose the unlocked workspace only to the browser session that unlocked it.

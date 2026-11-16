@@ -36,12 +36,13 @@
 | Input | Action |
 | :--- | :--- |
 | Folder tile | Click to select a source folder. Double-click or press Right Arrow to open its subfolders. Use the up arrow to return to the parent folder. |
+| Folder size and order | Resize folder tiles with the slider. The order button reverses the default order of symbols, numbers, then letters. |
 | Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
 | `Identify` | Tag images in the selected folders when the model is ready. |
 | `Tagging device` | Choose CPU, AMD, or NVIDIA. Oubi selects an available installed GPU when the page opens. |
-| `Sorting` / `Gallery` | Switch between genre settings and favorite tag filters. Returning to Sorting clears the active filters. |
+| `Sorting` / `Gallery` | Switch between genre settings and favorite tag filters. Gallery hides the sorting controls, sorting badges, and preview mode switch. Returning to Sorting clears the active filters. |
 | Hold an image tag | Add or remove the tag from favorites. The Gallery groups saved tags by character or event. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | Lock icon | Unlock or lock the Cryptomator vault from the folder controls. |
