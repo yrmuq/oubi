@@ -119,7 +119,7 @@ Choose `Auto` or a specific detected card. Oubi picks a PyTorch CUDA build using
 
 #### Cryptomator vaults
 
-Use the [Cryptomator Compose override](docker-compose.cryptomator.yml) with the `dev` channel on a Linux x86_64 host with FUSE. Set `OUBI_CRYPT` in `.env` to the directory containing `vault.cryptomator`. The container user needs write access to that directory.
+Use the [Cryptomator Compose override](docker-compose.cryptomator.yml) with the `dev` channel on a Linux x86_64 host with FUSE. Set `OUBI_CRYPT` in `.env` to the directory containing `vault.cryptomator`. The container user needs write access to that directory. FUSE requires a user name for the configured UID inside the container. The image provides one for the default UID `1000`.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml pull

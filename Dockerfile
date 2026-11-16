@@ -27,6 +27,12 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 COPY --from=cryptomator /opt/cryptomator-cli /opt/cryptomator-cli
 RUN ln -s /opt/cryptomator-cli/bin/cryptomator-cli /usr/local/bin/cryptomator-cli
 
+# fusermount3 resolves the default Compose UID through the user database.
+RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 oubi; fi \
+    && if ! getent passwd 1000 >/dev/null; then \
+        useradd --uid 1000 --gid 1000 --no-create-home --no-log-init --home-dir /data --shell /usr/sbin/nologin oubi; \
+    fi
+
 COPY tag_folder.py sort_images.py oubi_files.py oubi_cryptomator.py oubi_gpu.py oubi_rocm.py oubi_nvidia.py oubi_web.py oubi_page.html /opt/oubi/
 COPY languages /opt/oubi/languages
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

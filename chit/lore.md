@@ -18,3 +18,7 @@
 ## Compatibility Workarounds
 
 - Retry the unauthenticated GHCR pull after a successful push because the new manifest can take time to become visible. Remove the retry only when pulls can reliably see the just-pushed manifest.
+
+## External Compatibility Constraints
+
+- Keep a named account for the default Compose UID in the image because `fusermount3` resolves the numeric UID before mounting the vault.

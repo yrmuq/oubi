@@ -5,7 +5,7 @@ image="${1:?image}"
 platform="${2:?platform}"
 
 # A local model directory exercises the real entrypoint without downloading weights.
-container=$(docker run --detach --platform "$platform" -e OUBI_MODEL=/opt/oubi "$image")
+container=$(docker run --detach --platform "$platform" --user 1000:1000 -e OUBI_MODEL=/opt/oubi "$image")
 trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
 if ! docker exec -i "$container" python - <<'PY'
 import json
@@ -35,6 +35,7 @@ assert status["nvidia"]["installed"] == {}
 assert status["nvidia"]["install"]["state"] == "idle"
 assert not status["vault_enabled"]
 
+subprocess.run(["id", "-un"], check=True)
 subprocess.run(["cryptomator-cli", "--version"], check=True)
 subprocess.run(["fusermount3", "--version"], check=True)
 
