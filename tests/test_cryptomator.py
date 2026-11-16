@@ -123,6 +123,7 @@ class VaultWorkspaceTests(unittest.TestCase):
         with patch("oubi_web.source_folders", side_effect=slow_count):
             self.assertEqual([folder["path"] for folder in app.folders()], ["Album"])
             self.assertTrue(started.wait(1))
+            self.assertEqual(app.gallery(["Album"]), {"scanning": True})
             app.stop_folder_count()
         self.assertIsNone(app.folder_scan)
         self.assertIsNone(app.folder_cache)
@@ -170,7 +171,8 @@ class VaultWorkspaceTests(unittest.TestCase):
             self.assertIsNone(app.folder_scan)
             return app.status()["scan_progress"]
 
-        with patch("oubi_web.source_folders", wraps=source_folders) as scan:
+        with (patch("oubi_web.source_folders", wraps=source_folders) as scan,
+              patch("oubi_web.recent_tagged", side_effect=AssertionError("Gallery rescanned the vault"))):
             app.folders("Album")
             completed = finish_scan()
             self.assertEqual((completed["stage"], completed["done"], completed["total"]), ("done", 2, 2))
@@ -184,16 +186,23 @@ class VaultWorkspaceTests(unittest.TestCase):
                              ("Album/Selected/Deep", 1, "done", "done"))
             self.assertEqual(app.folders("Album/Selected/Deep"), [leaf])
             self.assertEqual(scan.call_count, 1)
+            path = tagged.relative_to(self.root).as_posix()
+            self.assertEqual(app.gallery(["Album"]), {"files": [path]})
+            self.assertEqual(app.gallery(["Album/Selected", "Album/Selected/Deep"]), {"files": [path]})
+            self.assertEqual(app.gallery(["Album/Select"]), {"files": []})
 
-            app.remove_image(str(tagged.relative_to(self.root)), image_revision(tagged))
+            app.remove_image(path, image_revision(tagged))
             self.assertEqual(app.folders("Album/Selected"), [leaf])
+            self.assertEqual(app.gallery(["Album"]), {"files": []})
             self.assertEqual(scan.call_count, 1)
             self.assertEqual(app.status()["scan_progress"], completed)
+            Path(workspace.csv).write_text(f"file\n{untagged.relative_to(self.root).as_posix()}\n", encoding="utf-8")
             self.assertTrue(app._ensure_count(refresh=True))
             refreshed = finish_scan()
             self.assertEqual(refreshed["total"], 1)
             self.assertNotEqual(refreshed["id"], completed["id"])
             self.assertEqual(app.folders("Album/Selected")[0]["scan"], "none")
+            self.assertEqual(app.gallery(["Album"]), {"files": [untagged.relative_to(self.root).as_posix()]})
             self.assertEqual(scan.call_count, 2)
 
     def test_work_preview_uses_completed_tag_events(self):

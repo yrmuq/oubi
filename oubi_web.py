@@ -5,6 +5,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -681,22 +682,34 @@ def _summarize_images(rel, images, tagged_keys, sorted_keys, root, *, cancelled=
     return _folder_summary(rel, len(images), tagged, laid)
 
 
-def _image_marks(image, root, tagged_keys, sorted_keys):
+def _image_marks(image, root, tagged_keys, sorted_keys, gallery=None):
     try:
-        keys = path_keys(image, root)
+        keys = path_keys(image, root) if gallery is None else {str(image)}
         txt = sidecar_path(image)
-        return bool(keys & tagged_keys) or (txt.is_file() and not txt.is_dir()), bool(keys & sorted_keys)
+        indexed = bool(keys & tagged_keys)
+        if gallery is None:
+            return indexed or (txt.is_file() and not txt.is_dir()), bool(keys & sorted_keys)
+        try:
+            sidecar = txt.stat()
+        except OSError:
+            sidecar = None
+        modified = sidecar.st_mtime if sidecar and stat.S_ISREG(sidecar.st_mode) else None
+        if modified is None and indexed:
+            modified = image.stat().st_mtime
+        if modified is not None:
+            gallery[image.relative_to(root).as_posix()] = modified
+        return modified is not None, bool(keys & sorted_keys)
     except OSError:
         return False, False
 
 
-def _summarize_tree(candidates, root, tagged_keys, sorted_keys, *, cancelled, checked):
+def _summarize_tree(candidates, root, tagged_keys, sorted_keys, *, cancelled, checked, gallery):
     counts = defaultdict(lambda: [0, 0, 0])
     for _, images in candidates:
         for image in images:
             if cancelled and cancelled():
                 return []
-            tagged, laid = _image_marks(image, root, tagged_keys, sorted_keys)
+            tagged, laid = _image_marks(image, root, tagged_keys, sorted_keys, gallery)
             for parent in image.relative_to(root).parents:
                 rel = parent.as_posix() if parent.parts else ""
                 totals = counts[rel]
@@ -742,7 +755,7 @@ def folder_paths(root, directory, exclude):
 
 
 def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTED_LIST,
-                   exclude=None, cancelled=None, progress=None, include_descendants=False):
+                   exclude=None, cancelled=None, progress=None, include_descendants=False, gallery=None):
     names = folder_paths(root, directory, exclude)
     if not names:
         if progress is not None and not (cancelled and cancelled()):
@@ -779,8 +792,12 @@ def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTE
         sorted_paths = load_sorted_paths(sorted_list, cancelled=cancelled)
     except OSError:
         csv_paths, sorted_paths = set(), set()
-    tagged_keys = index_paths(csv_paths, base, cancelled=cancelled)
-    sorted_keys = index_paths(sorted_paths, base, cancelled=cancelled)
+    if gallery is None:
+        tagged_keys = index_paths(csv_paths, base, cancelled=cancelled)
+        sorted_keys = index_paths(sorted_paths, base, cancelled=cancelled)
+    else:
+        tagged_keys = {os.path.normpath(base / name) for name in csv_paths}
+        sorted_keys = {os.path.normpath(base / name) for name in sorted_paths}
 
     processed = 0
 
@@ -791,7 +808,8 @@ def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTE
 
     on_checked = checked if progress is not None else None
     if include_descendants:
-        summaries = _summarize_tree(candidates, base, tagged_keys, sorted_keys, cancelled=cancelled, checked=on_checked)
+        summaries = _summarize_tree(candidates, base, tagged_keys, sorted_keys, cancelled=cancelled, checked=on_checked,
+                                    gallery=gallery)
     else:
         summaries = []
         for name, images in candidates:
@@ -1104,6 +1122,8 @@ class App:
         self.preview_file = ""
         self.character_cache = {}
         self.folder_cache = None
+        self.gallery_cache = None
+        self.gallery_removed = set()
         self.folder_scan = None
         self.scan_progress = None
 
@@ -1248,6 +1268,7 @@ class App:
                 return False
             if self.folder_scan or (self.folder_cache is not None and not refresh):
                 return True
+            self.gallery_removed.clear()
             cancel = threading.Event()
             scan_id = uuid4().hex
             self.scan_progress = {"id": scan_id, "stage": "discover", "done": 0, "total": None}
@@ -1266,6 +1287,7 @@ class App:
 
     def _invalidate_folders(self):
         self.folder_cache = None
+        self.gallery_cache = None
         self.scan_progress = None
         if self.folder_scan:
             self.folder_scan[0].set()
@@ -1274,14 +1296,20 @@ class App:
         workspace = self.paths
         cleanup_pending = delete_source_image(workspace.images, relative, revision, index=workspace.csv,
                                               sorted_list=workspace.sorted_list, excluded=workspace.excluded)
+        relative = Path(relative).as_posix()
         removed = Path(workspace.images).resolve() / relative
         with self.lock:
+            if self.gallery_cache is not None:
+                self.gallery_cache.pop(relative, None)
+            if self.folder_scan is not None:
+                self.gallery_removed.add(relative)
             if Path(self.preview_file) == removed:
                 self.preview_file = ""
         return cleanup_pending
 
     def _count_folders(self, cancel, scan_id):
         found = None
+        gallery = {} if self.workspace is not None else None
         last_stage = None
         last_report = 0.0
 
@@ -1301,7 +1329,7 @@ class App:
             paths = self.paths
             found = source_folders(paths.images, csv=paths.csv, sorted_list=paths.sorted_list,
                                    exclude=paths.excluded, cancelled=cancel.is_set, progress=report,
-                                   include_descendants=True)
+                                   include_descendants=True, gallery=gallery)
         except (OSError, ValueError) as error:
             self.note(text(27, error=error))
         finally:
@@ -1309,11 +1337,34 @@ class App:
                 if found is not None and not cancel.is_set():
                     summaries = {item["path"]: item for item in found}
                     self.folder_cache = summaries
+                    if gallery is not None:
+                        for name in self.gallery_removed:
+                            gallery.pop(name, None)
+                        self.gallery_cache = dict.fromkeys(sorted(gallery, key=lambda name: (gallery[name], name)))
                     total = summaries[""]["total"] if "" in summaries else 0
                     self.scan_progress = {"id": scan_id, "stage": "done", "done": total, "total": total}
                 else:
                     self.scan_progress = None
                 self.folder_scan = None
+                self.gallery_removed.clear()
+
+    def gallery(self, directories):
+        paths = self.paths
+        with self.lock:
+            names = tuple(self.gallery_cache) if self.gallery_cache is not None else None
+            scanning = self.workspace is not None and self.folder_scan and not self.folder_scan[0].is_set()
+        if names is not None:
+            base = Path(paths.images).resolve()
+            prefixes = []
+            for directory in directories:
+                folder = resolve_under(base, directory)
+                prefixes.append("" if folder == base else folder.relative_to(base).as_posix() + "/")
+            paths_to_match = tuple(prefixes)
+            return {"files": [name for name in names if name.startswith(paths_to_match)]}
+        if scanning:
+            return {"scanning": True}
+        return {"files": recent_tagged(directories, limit=None, root=paths.images, exclude=paths.excluded,
+                                       csv=paths.csv)}
 
     def status(self):
         with self.lock:
@@ -1648,9 +1699,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/folders":
                 return 200, app.folders(directories[0] if directories else "")
             if path == "/api/recent":
-                files = recent_tagged(directories, limit=None, root=workspace.images, exclude=workspace.excluded,
-                                      csv=workspace.csv)
-                return 200, {"files": files}
+                return 200, app.gallery(directories)
             if path == "/api/tagged":
                 files = images_with_tags(query.get("tag", []), path=workspace.csv,
                                          root=workspace.images, exclude=workspace.excluded, folders=query.get("folder"))

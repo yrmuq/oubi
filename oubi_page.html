@@ -387,6 +387,7 @@ let workFile = "";
 let lastJob = null;
 let galleryMessage = 201;
 let galleryRequest = 0;
+const galleryTimeoutMs = 30000;
 let shown = "";
 let previewRequest = null;
 let previewRevision = "";
@@ -523,7 +524,7 @@ function applyI18n() {
   showRocm();
   showNvidia();
   if (!hasFile && !previewRequest) showEmpty();
-  if (previewRequest?.failed) clearImage(t(203));
+  if (previewRequest?.failed) clearImage(t(previewRequest.failed));
   renderFolders();
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
 }
@@ -565,10 +566,10 @@ function renderFolders() {
       else selected.add(folder.path);
       button.classList.toggle("on", selected.has(folder.path));
       updateSelectAll();
+      vocab = [];
       clearTimeout(folderSelectionTimer);
       folderSelectionTimer = setTimeout(() => {
         loadGallery(true);
-        loadVocab();
       }, 250);
     };
     button.ondblclick = () => navigateFolders(folder.path);
@@ -752,15 +753,21 @@ async function loadGallery(reset = false) {
   const query = new URLSearchParams();
   paths.forEach(path => query.append("folder", path));
   tags.forEach(tag => query.append("tag", tag));
-  const data = await workspaceData((tags.length ? "/api/tagged?" : "/api/recent?") + query).catch(() => null);
+  const signal = AbortSignal.timeout(galleryTimeoutMs);
+  const data = await workspaceData((tags.length ? "/api/tagged?" : "/api/recent?") + query, signal).catch(() => null);
   if (request !== galleryRequest || paths.length !== selected.size || paths.some(path => !selected.has(path))) return;
+  if (data?.scanning) {
+    galleryMessage = 204;
+    if (!workPreview && !reel.length) showEmpty();
+    return;
+  }
   if (data) {
     const current = reel[reelAt];
     reel = data.files || [];
     reelAt = reel.indexOf(current);
     if (reelAt < 0 && reel.length) reelAt = tags.length ? 0 : reel.length - 1;
   }
-  galleryMessage = data ? 195 : 202;
+  galleryMessage = data ? 195 : signal.aborted ? 206 : 202;
   if (!workPreview) renderGallery();
 }
 
@@ -899,16 +906,24 @@ async function showImage(root, path) {
   previewRevision = "";
   renderDeleteControls();
   if (image !== previous) {
+    if (!hasFile) document.getElementById("tags").textContent = t(205);
     image.src = workspaceUrl("/api/file?root=" + root + "&path=" + encodeURIComponent(path));
+    let timeout;
+    const deadline = new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new DOMException("", "TimeoutError")), galleryTimeoutMs);
+    });
     try {
-      await image.decode();
-    } catch {
+      await Promise.race([image.decode(), deadline]);
+    } catch (error) {
       if (previewRequest === request) {
-        request.failed = true;
+        image.removeAttribute("src");
+        request.failed = error.name === "TimeoutError" ? 207 : 203;
         closeZoom();
-        clearImage(t(203));
+        clearImage(t(request.failed));
       }
       return;
+    } finally {
+      clearTimeout(timeout);
     }
     if (previewRequest !== request) return;
     image.id = previous.id;
@@ -986,7 +1001,7 @@ async function confirmDelete() {
       statusShown = ++statusRequest;
       discardDeletedImage(target.path);
       showNotice(data.warning || "");
-      loadVocab();
+      vocab = [];
       tick();
     }
   } catch {
@@ -1068,6 +1083,8 @@ async function tick() {
   document.getElementById("retry").hidden = data.model !== "error";
   if (jobFinished || scanFinished) loadFolders();
   if (jobFinished && !workPreview && !jobChanged) loadGallery();
+  else if ((galleryMessage === 204 && (!scan || scan.stage === "done")) ||
+           (scanFinished && vaultScope && selected.size && !pinned.length)) loadGallery();
   recountFolders.disabled = recountPending || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
   wasBusy = !!busy;
   workFile = data.preview_file || "";
@@ -1851,9 +1868,9 @@ document.getElementById("all-folders").onclick = () => {
   const every = folders.length > 0 && folders.every((folder) => selected.has(folder.path));
   if (every) selected.clear();
   else for (const folder of folders) selected.add(folder.path);
+  vocab = [];
   renderFolders();
   loadGallery(true);
-  loadVocab();
 };
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
 previewMode.onclick = () => {

@@ -15,6 +15,7 @@
 - Keep status polling independent of vault filesystem requests so the terminal can report a slow unlock or network scan.
 - Release the Cryptomator lock before sending file and folder responses so a slow or disconnected browser cannot block other reads or page reloads.
 - Scan from the workspace root and reuse the counts for every subfolder. Deleting an image leaves counts available until a manual recount or a tagging or sorting job refreshes them.
+- Reuse the vault scan's tagged image list for the gallery so selecting an already scanned folder does not walk it again.
 - Keep the gallery selection separate from the latest completed tagging result so switching preview modes leaves the running job and gallery position intact.
 - Display the decoded preview and its filename together before requesting image tags so metadata reads do not delay the current frame.
 - Keep the Cryptomator preview index in memory scoped to the open vault session and rebuild it when `tags.csv` changes.
