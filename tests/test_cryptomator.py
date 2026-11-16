@@ -54,6 +54,42 @@ class VaultWorkspaceTests(unittest.TestCase):
                 else:
                     handler.wfile.write.assert_called_once_with(b"preview")
 
+    def test_vault_preview_reuses_its_index_until_the_csv_is_replaced(self):
+        workspace = Workspace.encrypted(self.root)
+        image = self.root / "Album" / " photo.jpg"
+        image.parent.mkdir()
+        image.touch()
+        index = Path(workspace.csv)
+        index.write_text(f"file,character\n{image},alice\n", encoding="utf-8")
+        app = App(workspace)
+        handler = Handler.__new__(Handler)
+        query = {"path": ["Album/ photo.jpg"]}
+        open_file = Path.open
+        reads = []
+
+        def track_open(path, mode="r", *args, **kwargs):
+            if path == index and mode == "r":
+                reads.append(path)
+            return open_file(path, mode, *args, **kwargs)
+
+        with patch.object(Path, "open", track_open), patch("oubi_web.path_keys") as resolve_index_paths:
+            for _ in range(2):
+                status, info = handler._file_response("/api/tags", query, app)
+                self.assertEqual((status, info["character"]), (200, "alice"))
+            self.assertEqual(reads, [index])
+
+            replacement = index.with_suffix(".new")
+            replacement.write_text(f"file,character\n{image},carol\n", encoding="utf-8")
+            original = index.stat()
+            os.utime(replacement, ns=(original.st_atime_ns, original.st_mtime_ns))
+            replacement.replace(index)
+            self.assertEqual(handler._file_response("/api/tags", query, app)[1]["character"], "carol")
+            self.assertEqual(reads, [index, index])
+
+            self.assertEqual(handler._file_response("/api/tags", query, App(workspace))[1]["character"], "carol")
+            self.assertEqual(reads, [index, index, index])
+            resolve_index_paths.assert_not_called()
+
     def test_vault_destination_stays_within_mount_and_is_excluded_from_source(self):
         with patch.dict(os.environ, {"OUBI_CRYPT_OUTPUT": "Gallery/Sorted"}):
             workspace = Workspace.encrypted(self.root)

@@ -878,48 +878,57 @@ def first_character(value):
     return (value or "").split(",")[0].strip()
 
 
-def character_index(path=CSV_PATH, root=IMAGES, *, cache=True):
+def character_index(path=CSV_PATH, root=IMAGES, *, cache=None, encrypted=False):
     file = Path(path)
     if not file.is_file():
+        if cache is not None:
+            cache.clear()
         return {}
     stat = file.stat()
-    cached = getattr(character_index, "cache", None)
-    if cache and cached and cached["key"] == (file, root, stat.st_mtime_ns, stat.st_size):
-        return cached["rows"]
+    stamp = (file, root, stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+    cached = cache.get("index") if cache is not None else None
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
     import csv
     csv.field_size_limit(10**9)
     rows = {}
+    base = Path(root).resolve() if encrypted else None
     try:
         handle = file.open(encoding="utf-8", errors="replace")
     except OSError:
         return {}
     try:
         for row in csv.DictReader(handle):
-            name = (row.get("file") or "").strip()
-            if not name:
+            name = row.get("file") or ""
+            if not name.strip():
                 continue
             character = first_character(row.get("character"))
-            for key in path_keys(name, root):
-                rows[key] = character
+            if base is not None:
+                # The vault tagger indexes paths without file symlinks.
+                rows[os.path.normpath(base / name)] = character
+            else:
+                for key in path_keys(name, root):
+                    rows[key] = character
     except (OSError, csv.Error):
         return {}
     finally:
         handle.close()
-    if cache:
-        character_index.cache = {"key": (file, root, stat.st_mtime_ns, stat.st_size), "rows": rows}
+    if cache is not None:
+        cache["index"] = (stamp, rows)
     return rows
 
 
-def read_info(rel, *, root=IMAGES, csv=CSV_PATH, encrypted=False):
+def read_info(rel, *, root=IMAGES, csv=CSV_PATH, encrypted=False, cache=None):
     base = Path(root).resolve()
     image = resolve_under(base, rel)
     text = ""
     txt = sidecar_path(image)
     if txt.is_file() and (base in txt.resolve().parents or txt.resolve() == base):
         text = txt.read_text(encoding="utf-8", errors="replace")[:4000]
-    names = character_index(csv, root, cache=not encrypted)
+    names = character_index(csv, root, cache=cache, encrypted=encrypted)
     character = ""
-    for key in path_keys(image, base):
+    keys = (str(image),) if encrypted else path_keys(image, base)
+    for key in keys:
         if names.get(key):
             character = names[key]
             break
@@ -1093,6 +1102,7 @@ class App:
         self.percent = None
         self.proc = None
         self.preview_file = ""
+        self.character_cache = {}
         self.folder_cache = None
         self.folder_scan = None
         self.scan_progress = None
@@ -1660,7 +1670,8 @@ class Handler(BaseHTTPRequestHandler):
                 file = resolve_under(workspace.images, rel)
                 if in_output(file, workspace.excluded):
                     raise ValueError(rel)
-                data = read_info(rel, root=workspace.images, csv=workspace.csv, encrypted=bool(workspace.excluded))
+                data = read_info(rel, root=workspace.images, csv=workspace.csv,
+                                 encrypted=bool(workspace.excluded), cache=app.character_cache)
                 if file.suffix.lower() in IMAGE_EXTS and file.is_file():
                     data["revision"] = image_revision(file)
                 return 200, data

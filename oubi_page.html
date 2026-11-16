@@ -388,6 +388,7 @@ let lastJob = null;
 let galleryMessage = 201;
 let galleryRequest = 0;
 let shown = "";
+let previewRequest = null;
 let previewRevision = "";
 let workspaceMutation = 0;
 let genres = __OUBI_GENRES__;
@@ -451,7 +452,14 @@ function t(id) {
   return pack[String(id)] || english[String(id)] || "";
 }
 
-function showEmpty() {
+function cancelPreviewRequest() {
+  if (!previewRequest) return;
+  previewRequest.controller.abort();
+  if (!previewRequest.image.isConnected) previewRequest.image.removeAttribute("src");
+  previewRequest = null;
+}
+
+function clearImage(message) {
   hasFile = false;
   shown = "";
   previewRevision = "";
@@ -461,7 +469,12 @@ function showEmpty() {
   document.getElementById("name").textContent = t(11);
   document.getElementById("who").textContent = "";
   tagText = "";
-  document.getElementById("tags").textContent = t(workPreview ? 12 : selected.size ? galleryMessage : 200);
+  document.getElementById("tags").textContent = message;
+}
+
+function showEmpty() {
+  cancelPreviewRequest();
+  clearImage(t(workPreview ? 12 : selected.size ? galleryMessage : 200));
 }
 
 function applyI18n() {
@@ -509,7 +522,8 @@ function applyI18n() {
   }
   showRocm();
   showNvidia();
-  if (!hasFile) showEmpty();
+  if (!hasFile && !previewRequest) showEmpty();
+  if (previewRequest?.failed) clearImage(t(203));
   renderFolders();
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
 }
@@ -593,10 +607,10 @@ function workspaceUrl(path, scope = vaultScope) {
   return path + (path.includes("?") ? "&" : "?") + "scope=" + encodeURIComponent(scope);
 }
 
-async function workspaceData(path) {
+async function workspaceData(path, signal) {
   const scope = vaultScope;
   const mutation = workspaceMutation;
-  const response = await fetch(workspaceUrl(path, scope));
+  const response = await fetch(workspaceUrl(path, scope), { signal });
   if (!response.ok) return null;
   const data = await response.json();
   return scope === vaultScope && mutation === workspaceMutation ? data : null;
@@ -848,12 +862,12 @@ function showAt(index) {
 
 function renderGallery() {
   if (!reel.length) showEmpty();
-  else if (shown !== "images:" + reel[reelAt]) showAt(reelAt);
+  else showAt(reelAt);
 }
 
 function renderWorkPreview() {
   if (!workFile) showEmpty();
-  else if (shown !== "images:" + workFile) showImage("images", workFile);
+  else showImage("images", workFile);
 }
 
 function renderPreviewMode() {
@@ -876,9 +890,33 @@ function setPreviewMode(work) {
 async function showImage(root, path) {
   if (!path) return;
   const imageKey = root + ":" + path;
-  shown = imageKey;
+  if (previewRequest?.key === imageKey) return;
+  cancelPreviewRequest();
+  const previous = document.getElementById("shot");
+  const image = shown === imageKey ? previous : new Image();
+  const request = { key: imageKey, image, controller: new AbortController() };
+  previewRequest = request;
   previewRevision = "";
-  document.getElementById("shot").src = workspaceUrl("/api/file?root=" + root + "&path=" + encodeURIComponent(path));
+  renderDeleteControls();
+  if (image !== previous) {
+    image.src = workspaceUrl("/api/file?root=" + root + "&path=" + encodeURIComponent(path));
+    try {
+      await image.decode();
+    } catch {
+      if (previewRequest === request) {
+        request.failed = true;
+        closeZoom();
+        clearImage(t(203));
+      }
+      return;
+    }
+    if (previewRequest !== request) return;
+    image.id = previous.id;
+    image.alt = previous.alt;
+    previous.replaceWith(image);
+    if (!zoom.hidden && !workPreview) showZoomImage(image);
+  }
+  shown = imageKey;
   document.getElementById("name").textContent = fileName(path);
   hasFile = true;
   renderDeleteControls();
@@ -886,8 +924,9 @@ async function showImage(root, path) {
   document.getElementById("tags").replaceChildren();
   tagText = "";
   if (root !== "images") return;
-  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(path));
-  if (!data || shown !== imageKey) return;
+  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(path), request.controller.signal)
+    .catch(() => null);
+  if (!data || previewRequest !== request) return;
   document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
   tagText = data.text || "";
   previewRevision = data.revision || "";
@@ -919,6 +958,7 @@ function discardDeletedImage(path) {
   if (workFile === path) workFile = "";
   reelAt = activePath === path ? Math.min(index, reel.length - 1) : reel.indexOf(activePath);
   if (!reel.length) galleryMessage = 195;
+  if (shown === "images:" + path) showEmpty();
   if (workPreview) renderWorkPreview();
   else renderGallery();
 }
@@ -1035,7 +1075,7 @@ async function tick() {
   lastJob = data.job_id;
   renderTerminal();
   renderDeleteControls();
-  if (workPreview && (workFile || hasFile)) renderWorkPreview();
+  if (workPreview && (workFile || hasFile || previewRequest)) renderWorkPreview();
 }
 
 function showTerminalInput() {
@@ -1784,8 +1824,6 @@ deleteImage.onclick = openDeleteDialog;
 deleteConfirm.onclick = confirmDelete;
 deleteCancel.onclick = () => deleteDialog.close();
 deleteDialog.addEventListener("cancel", event => { if (deleteBusy) event.preventDefault(); });
-document.getElementById("shot").addEventListener("load", renderDeleteControls);
-document.getElementById("shot").addEventListener("error", renderDeleteControls);
 document.getElementById("stop").onclick = () => fetch(workspaceUrl("/api/stop"), { method: "POST" });
 vaultToggle.onclick = () => {
   if (vaultScope) {
@@ -1837,15 +1875,18 @@ function closeZoom() {
   zoom.hidden = true;
   view.drag = null;
 }
-document.getElementById("shot").onclick = () => {
-  if (!document.getElementById("shot").src) return;
+function showZoomImage(image) {
   view.scale = 1;
   view.x = 0;
   view.y = 0;
   view.drag = null;
-  zoomImg.src = document.getElementById("shot").src;
-  zoom.hidden = false;
+  zoomImg.src = image.src;
   paintZoom();
+}
+document.getElementById("shot-frame").onclick = (event) => {
+  if (event.target.id !== "shot" || !event.target.getAttribute("src")) return;
+  showZoomImage(event.target);
+  zoom.hidden = false;
 };
 document.getElementById("zoom-close").onclick = closeZoom;
 document.addEventListener("keydown", (event) => {
@@ -1855,12 +1896,6 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (workPreview || !reel.length) return;
     showAt(reelAt + (event.key === "ArrowRight" ? 1 : -1));
-    zoomImg.src = document.getElementById("shot").src;
-    view.scale = 1;
-    view.x = 0;
-    view.y = 0;
-    view.drag = null;
-    paintZoom();
   }
 });
 zoom.addEventListener("wheel", (event) => {

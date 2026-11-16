@@ -16,6 +16,8 @@
 - Release the Cryptomator lock before sending file and folder responses so a slow or disconnected browser cannot block other reads or page reloads.
 - Scan from the workspace root and reuse the counts for every subfolder. Deleting an image leaves counts available until a manual recount or a tagging or sorting job refreshes them.
 - Keep the gallery selection separate from the latest completed tagging result so switching preview modes leaves the running job and gallery position intact.
+- Display the decoded preview and its filename together before requesting image tags so metadata reads do not delay the current frame.
+- Keep the Cryptomator preview index in memory scoped to the open vault session and rebuild it when `tags.csv` changes.
 - Keep Cryptomator indexes, sort history, and generated metadata inside the vault; expose the unlocked workspace only to the browser session that unlocked it.
 - Resolve the internal sort destination relative to the Cryptomator mount and exclude its subtree from vault source operations.
 - Ship Cryptomator in the shared Oubi image so operators can install or update vault-enabled deployments with Compose pulls.
