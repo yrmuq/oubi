@@ -16,9 +16,9 @@ def sidecar_path(image):
     return image.parent / "tags" / (image.name + ".txt")
 
 
-def image_files(folder, exclude=None, *, cancelled=None):
+def image_files(folder, exclude=None, *, cancelled=None, visit=None, onerror=None):
     excluded = Path(exclude).resolve() if exclude else None
-    for directory, subdirs, names in os.walk(folder):
+    for directory, subdirs, names in os.walk(folder, onerror=onerror):
         if cancelled and cancelled():
             return
         parent = Path(directory)
@@ -27,6 +27,9 @@ def image_files(folder, exclude=None, *, cancelled=None):
             continue
         subdirs[:] = [name for name in subdirs if name != "tags"
                       and not (excluded and (parent / name).resolve() == excluded)]
+        if visit is not None:
+            subdirs[:] = [name for name in subdirs if not name.startswith(".") and not (parent / name).is_symlink()]
+            visit(parent)
         for name in names:
             if cancelled and cancelled():
                 return
@@ -115,7 +118,7 @@ def _apply_removal(changes):
     return cleanup_pending
 
 
-def delete_source_image(root, relative, revision, *, index, sorted_list, excluded=None):
+def delete_source_image(root, relative, revision, *, index, sorted_list, excluded=None, before_commit=None):
     root = Path(root).resolve()
     path = Path(relative)
     if (path.is_absolute() or not path.parts or any(part in {"..", "tags", ".oubi"} for part in path.parts)
@@ -149,4 +152,6 @@ def delete_source_image(root, relative, revision, *, index, sorted_list, exclude
             if updated is not None:
                 changes.append((path, updated))
         check_revision()
+        if before_commit is not None:
+            before_commit()
         return _apply_removal(changes)

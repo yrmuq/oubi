@@ -25,6 +25,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from oubi_files import sidecar_path
+from oubi_index import report_changes
 
 csv.field_size_limit(10**9)
 
@@ -299,6 +300,7 @@ def main():
     for path, tag in stuck:
         print(say(72, path=path, tag=tag), flush=True)
     if stuck and not args.dry_run and fieldnames:
+        report_changes(path for path, _ in stuck)
         write_tags(args.csv, fieldnames, rows)
         for path, tag in stuck:
             stick_txt(path, tag)
@@ -359,6 +361,7 @@ def main():
         if args.dry_run:
             print(f"{src} -> {dst}")
         else:
+            report_changes([src])
             dst_dir.mkdir(parents=True, exist_ok=True)
             op = shutil.move if args.move else shutil.copy2
             op(str(src), str(dst))

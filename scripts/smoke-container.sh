@@ -9,6 +9,7 @@ container=$(docker run --detach --platform "$platform" --user 1000:1000 -e OUBI_
 trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
 if ! docker exec -i "$container" python - <<'PY'
 import json
+import sqlite3
 import subprocess
 import time
 from urllib.error import URLError
@@ -43,6 +44,15 @@ with urlopen(Request(base, headers={"Accept-Language": "en"}), timeout=2) as res
     page = response.read()
 assert b'<html lang="en">' in page
 assert b'id="tag"' in page
+
+with sqlite3.connect(":memory:") as catalog:
+    catalog.execute("CREATE TABLE smoke(path TEXT)")
+    catalog.execute("INSERT INTO smoke VALUES ('image.jpg')")
+    catalog.commit()
+    snapshot = catalog.serialize()
+    catalog.deserialize(snapshot)
+    assert catalog.execute("SELECT path FROM smoke").fetchone() == ("image.jpg",)
+    assert catalog.execute("SELECT value FROM json_each('[1]')").fetchone() == (1,)
 
 import torch
 assert not torch.cuda.is_available(), "CPU image loaded CUDA"

@@ -5,7 +5,7 @@ import json
 import os
 import re
 import signal
-import stat
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
 from oubi_files import IMAGE_EXTS, ImageChangedError, delete_source_image, image_files, image_revision, sidecar_path
+from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, image_metadata, read_metadata, relative_path
 from oubi_gpu import GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
@@ -67,7 +68,7 @@ class Workspace:
                 or (output.exists() and not output.is_dir())):
             raise VaultError(168)
         data.mkdir(mode=0o700, exist_ok=True)
-        for name in ("tags.csv", "sorted.txt", "genders.csv", "unknown_genders.txt"):
+        for name in ("tags.csv", "sorted.txt", "genders.csv", "unknown_genders.txt", INDEX_NAME, DIRTY_NAME):
             if (data / name).is_symlink():
                 raise VaultError(168)
         return cls(str(root), str(output), str(data / "tags.csv"), str(data / "sorted.txt"),
@@ -614,7 +615,7 @@ def load_csv_paths(path=CSV_PATH, *, cancelled=None):
     return found
 
 
-def folder_names(root=IMAGES, *, exclude=None):
+def folder_names(root=IMAGES, *, exclude=None, strict=False):
     base = Path(root)
     if not base.is_dir():
         return []
@@ -622,6 +623,8 @@ def folder_names(root=IMAGES, *, exclude=None):
         children = [path for path in base.iterdir() if path.is_dir() and path.name != "tags"
                     and not path.name.startswith(".") and not in_output(path, exclude)]
     except OSError as error:
+        if strict:
+            raise
         if not exclude:
             print(text(26, path=root, error=error), flush=True)
         return []
@@ -682,34 +685,25 @@ def _summarize_images(rel, images, tagged_keys, sorted_keys, root, *, cancelled=
     return _folder_summary(rel, len(images), tagged, laid)
 
 
-def _image_marks(image, root, tagged_keys, sorted_keys, gallery=None):
+def _image_marks(image, root, tagged_keys, sorted_keys):
     try:
-        keys = path_keys(image, root) if gallery is None else {str(image)}
+        keys = path_keys(image, root)
         txt = sidecar_path(image)
-        indexed = bool(keys & tagged_keys)
-        if gallery is None:
-            return indexed or (txt.is_file() and not txt.is_dir()), bool(keys & sorted_keys)
-        try:
-            sidecar = txt.stat()
-        except OSError:
-            sidecar = None
-        modified = sidecar.st_mtime if sidecar and stat.S_ISREG(sidecar.st_mode) else None
-        if modified is None and indexed:
-            modified = image.stat().st_mtime
-        if modified is not None:
-            gallery[image.relative_to(root).as_posix()] = modified
-        return modified is not None, bool(keys & sorted_keys)
+        return bool(keys & tagged_keys) or (txt.is_file() and not txt.is_dir()), bool(keys & sorted_keys)
     except OSError:
         return False, False
 
 
-def _summarize_tree(candidates, root, tagged_keys, sorted_keys, *, cancelled, checked, gallery):
+def _summarize_tree(candidates, root, tagged_keys, sorted_keys, *, cancelled, checked, index_image):
     counts = defaultdict(lambda: [0, 0, 0])
     for _, images in candidates:
         for image in images:
             if cancelled and cancelled():
                 return []
-            tagged, laid = _image_marks(image, root, tagged_keys, sorted_keys, gallery)
+            if index_image is None:
+                tagged, laid = _image_marks(image, root, tagged_keys, sorted_keys)
+            else:
+                tagged, laid = index_image(image)
             for parent in image.relative_to(root).parents:
                 rel = parent.as_posix() if parent.parts else ""
                 totals = counts[rel]
@@ -741,7 +735,7 @@ def images_under(folder, exclude=None, *, cancelled=None):
     return list(image_files(folder, exclude, cancelled=cancelled))
 
 
-def folder_paths(root, directory, exclude):
+def folder_paths(root, directory, exclude, *, strict=False):
     base = Path(root)
     folder = resolve_under(base, directory) if directory else base
     if directory:
@@ -751,12 +745,13 @@ def folder_paths(root, directory, exclude):
             raise ValueError(directory)
         directory = rel.as_posix() if rel.parts else ""
     return ["/".join(part for part in (directory, name) if part)
-            for name in folder_names(folder, exclude=exclude)]
+            for name in folder_names(folder, exclude=exclude, strict=strict)]
 
 
 def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTED_LIST,
-                   exclude=None, cancelled=None, progress=None, include_descendants=False, gallery=None):
-    names = folder_paths(root, directory, exclude)
+                   exclude=None, cancelled=None, progress=None, include_descendants=False,
+                   visit_folder=None, index_image=None):
+    names = folder_paths(root, directory, exclude, strict=visit_folder is not None)
     if not names:
         if progress is not None and not (cancelled and cancelled()):
             progress("done", 0, 0)
@@ -764,20 +759,27 @@ def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTE
     base = Path(root)
     total = 0
 
+    def scan_error(error):
+        raise error
+
     def discover():
         nonlocal total
         for name in names:
             if cancelled and cancelled():
                 return
+            if visit_folder is not None and (base / name).is_symlink():
+                continue
             images = []
             try:
-                for image in image_files(base / name, exclude, cancelled=cancelled):
+                for image in image_files(base / name, exclude, cancelled=cancelled, visit=visit_folder,
+                                         onerror=scan_error if visit_folder else None):
                     images.append(image)
                     if progress is not None:
                         total += 1
                         progress("discover", total)
             except OSError:
-                pass
+                if visit_folder is not None:
+                    raise
             yield name, images
 
     candidates = discover()
@@ -787,17 +789,15 @@ def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTE
             return []
         progress("checking", 0, total)
 
-    try:
-        csv_paths = load_csv_paths(csv, cancelled=cancelled)
-        sorted_paths = load_sorted_paths(sorted_list, cancelled=cancelled)
-    except OSError:
-        csv_paths, sorted_paths = set(), set()
-    if gallery is None:
+    tagged_keys = sorted_keys = set()
+    if index_image is None:
+        try:
+            csv_paths = load_csv_paths(csv, cancelled=cancelled)
+            sorted_paths = load_sorted_paths(sorted_list, cancelled=cancelled)
+        except OSError:
+            csv_paths, sorted_paths = set(), set()
         tagged_keys = index_paths(csv_paths, base, cancelled=cancelled)
         sorted_keys = index_paths(sorted_paths, base, cancelled=cancelled)
-    else:
-        tagged_keys = {os.path.normpath(base / name) for name in csv_paths}
-        sorted_keys = {os.path.normpath(base / name) for name in sorted_paths}
 
     processed = 0
 
@@ -809,7 +809,7 @@ def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTE
     on_checked = checked if progress is not None else None
     if include_descendants:
         summaries = _summarize_tree(candidates, base, tagged_keys, sorted_keys, cancelled=cancelled, checked=on_checked,
-                                    gallery=gallery)
+                                    index_image=index_image)
     else:
         summaries = []
         for name, images in candidates:
@@ -1101,7 +1101,7 @@ class LineTee:
 
 # ===== STATE =====
 class App:
-    def __init__(self, workspace=None, *, devices=None):
+    def __init__(self, workspace=None, *, devices=None, index_guard=None):
         self.workspace = workspace
         self.vault = None if workspace else Vault()
         self.lock = threading.Lock()
@@ -1122,10 +1122,21 @@ class App:
         self.preview_file = ""
         self.character_cache = {}
         self.folder_cache = None
-        self.gallery_cache = None
+        self.catalog = None
+        self.index_guard = index_guard or threading.RLock()
+        self.index_changes = set()
         self.gallery_removed = set()
         self.folder_scan = None
         self.scan_progress = None
+        if self.workspace is not None:
+            catalog = VaultIndex(self.workspace)
+            try:
+                if catalog.restore():
+                    self.catalog = catalog
+            except (OSError, sqlite3.Error, AttributeError):
+                pass
+            if self.catalog is None:
+                catalog.db.close()
 
     def _append_line(self, line):
         self.lines.append(line)
@@ -1136,6 +1147,14 @@ class App:
         if not text:
             return
         with self.lock:
+            if text.startswith(CHANGE_EVENT):
+                try:
+                    changes = json.loads(text.removeprefix(CHANGE_EVENT))
+                except ValueError:
+                    return
+                if self.workspace is not None and isinstance(changes, list):
+                    self.index_changes.update(path for path in changes if isinstance(path, str))
+                return
             if text.startswith(TAG_PREVIEW_EVENT):
                 try:
                     path = json.loads(text.removeprefix(TAG_PREVIEW_EVENT))
@@ -1255,6 +1274,8 @@ class App:
         return self.workspace or normal_workspace()
 
     def folders(self, directory=""):
+        if self.catalog is not None:
+            return [_folder_summary(name, *self.catalog.totals(name)) for name in self.catalog.children(directory)]
         paths = self.paths
         names = folder_paths(paths.images, directory, paths.excluded)
         self._ensure_count()
@@ -1266,7 +1287,7 @@ class App:
         with self.lock:
             if self.job_running and self.job_mode != "plan":
                 return False
-            if self.folder_scan or (self.folder_cache is not None and not refresh):
+            if self.folder_scan or ((self.catalog is not None or self.folder_cache is not None) and not refresh):
                 return True
             self.gallery_removed.clear()
             cancel = threading.Event()
@@ -1287,29 +1308,74 @@ class App:
 
     def _invalidate_folders(self):
         self.folder_cache = None
-        self.gallery_cache = None
+        self.catalog = None
         self.scan_progress = None
         if self.folder_scan:
             self.folder_scan[0].set()
 
+    def close_catalog(self):
+        if self.catalog is not None:
+            self.catalog.db.close()
+            self.catalog = None
+
     def remove_image(self, relative, revision):
         workspace = self.paths
+        catalog = self.catalog
         cleanup_pending = delete_source_image(workspace.images, relative, revision, index=workspace.csv,
-                                              sorted_list=workspace.sorted_list, excluded=workspace.excluded)
+                                              sorted_list=workspace.sorted_list, excluded=workspace.excluded,
+                                              before_commit=catalog.mark_dirty if catalog is not None else None)
         relative = Path(relative).as_posix()
         removed = Path(workspace.images).resolve() / relative
         with self.lock:
-            if self.gallery_cache is not None:
-                self.gallery_cache.pop(relative, None)
             if self.folder_scan is not None:
                 self.gallery_removed.add(relative)
             if Path(self.preview_file) == removed:
                 self.preview_file = ""
+        if catalog is not None:
+            try:
+                catalog.remove(relative)
+                self._save_catalog(catalog)
+            except sqlite3.Error:
+                self.close_catalog()
+                with self.lock:
+                    self._invalidate_folders()
+                self.note(text(208))
         return cleanup_pending
+
+    def _save_catalog(self, catalog):
+        try:
+            catalog.save()
+        except (OSError, sqlite3.Error, AttributeError):
+            self.note(text(208))
+
+    def _refresh_index(self, catalog):
+        with self.index_guard:
+            if self.catalog is not catalog:
+                return
+            if self.index_changes:
+                workspace = self.paths
+                base = Path(workspace.images)
+                tags, sorted_paths = read_metadata(workspace)
+                for raw in self.index_changes:
+                    name = relative_path(raw, base)
+                    if name is None:
+                        continue
+                    image = base / name
+                    if (image.suffix.lower() not in IMAGE_EXTS or not image.is_file()
+                            or image.resolve() != image or in_output(image, workspace.excluded)):
+                        catalog.remove(name)
+                        continue
+                    tagged, modified, character, details, terms = image_metadata(image, tags.get(name))
+                    for parent in Path(name).parents:
+                        if parent.parts:
+                            catalog.add_folder(parent.as_posix())
+                    catalog.set_image(name, tagged, name in sorted_paths, modified, character, details, terms)
+            self._save_catalog(catalog)
 
     def _count_folders(self, cancel, scan_id):
         found = None
-        gallery = {} if self.workspace is not None else None
+        catalog = None
+        visit = index_image = None
         last_stage = None
         last_report = 0.0
 
@@ -1327,20 +1393,44 @@ class App:
 
         try:
             paths = self.paths
+            if self.workspace is not None:
+                catalog = VaultIndex(paths).initialize()
+                base = Path(paths.images)
+                tags, sorted_paths = read_metadata(paths)
+                catalog.add_folder("")
+
+                def visit(directory):
+                    catalog.add_folder(directory.relative_to(base).as_posix() if directory != base else "")
+
+                def index_image(image):
+                    name = image.relative_to(base).as_posix()
+                    tagged, modified, character, details, terms = image_metadata(image, tags.get(name))
+                    laid = name in sorted_paths
+                    catalog.set_image(name, tagged, laid, modified, character, details, terms)
+                    return tagged, laid
+
             found = source_folders(paths.images, csv=paths.csv, sorted_list=paths.sorted_list,
                                    exclude=paths.excluded, cancelled=cancel.is_set, progress=report,
-                                   include_descendants=True, gallery=gallery)
-        except (OSError, ValueError) as error:
+                                   include_descendants=True, visit_folder=visit, index_image=index_image)
+            if catalog is not None and not cancel.is_set():
+                with self.index_guard:
+                    if not cancel.is_set():
+                        for name in self.gallery_removed:
+                            catalog.remove(name)
+                        self._save_catalog(catalog)
+                        self.catalog = catalog
+                        total, _, _ = catalog.totals("")
+                        found = [{"path": "", "total": total}]
+        except (OSError, ValueError, sqlite3.Error) as error:
+            found = None
             self.note(text(27, error=error))
         finally:
+            if catalog is not None and self.catalog is not catalog:
+                catalog.db.close()
             with self.lock:
                 if found is not None and not cancel.is_set():
                     summaries = {item["path"]: item for item in found}
                     self.folder_cache = summaries
-                    if gallery is not None:
-                        for name in self.gallery_removed:
-                            gallery.pop(name, None)
-                        self.gallery_cache = dict.fromkeys(sorted(gallery, key=lambda name: (gallery[name], name)))
                     total = summaries[""]["total"] if "" in summaries else 0
                     self.scan_progress = {"id": scan_id, "stage": "done", "done": total, "total": total}
                 else:
@@ -1348,21 +1438,19 @@ class App:
                 self.folder_scan = None
                 self.gallery_removed.clear()
 
-    def gallery(self, directories):
+    def gallery(self, directories, tags=None):
         paths = self.paths
+        if self.catalog is not None:
+            folders = [""] if directories is None else directories
+            files = self.catalog.gallery(folders) if tags is None else self.catalog.search(folders, tags)
+            return {"files": files}
         with self.lock:
-            names = tuple(self.gallery_cache) if self.gallery_cache is not None else None
             scanning = self.workspace is not None and self.folder_scan and not self.folder_scan[0].is_set()
-        if names is not None:
-            base = Path(paths.images).resolve()
-            prefixes = []
-            for directory in directories:
-                folder = resolve_under(base, directory)
-                prefixes.append("" if folder == base else folder.relative_to(base).as_posix() + "/")
-            paths_to_match = tuple(prefixes)
-            return {"files": [name for name in names if name.startswith(paths_to_match)]}
         if scanning:
             return {"scanning": True}
+        if tags is not None:
+            return {"files": images_with_tags(tags, path=paths.csv, root=paths.images, exclude=paths.excluded,
+                                              folders=directories)}
         return {"files": recent_tagged(directories, limit=None, root=paths.images, exclude=paths.excluded,
                                        csv=paths.csv)}
 
@@ -1464,7 +1552,10 @@ class App:
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
             self.step = text(25, language=language)
             if mode != "plan":
-                self._invalidate_folders()
+                if self.catalog is None:
+                    self._invalidate_folders()
+                elif self.folder_scan:
+                    self.folder_scan[0].set()
         options = {"output": output} if self.workspace else {}
         threading.Thread(target=self._run, args=(mode, paths, language, tagging), kwargs=options, daemon=True).start()
         return None
@@ -1476,7 +1567,14 @@ class App:
             commands.append(sort_command(plan=mode == "plan", folders=folders, workspace=workspace, output=output))
         code = 0
         env = dict(os.environ, OUBI_JOB_LANGUAGE=language or read_lang(), PYTHONNOUSERSITE="1", OUBI_WEB_TAG_PREVIEW="1")
+        catalog = self.catalog if mode != "plan" else None
+        self.index_changes.clear()
+        refresh_index = False
         try:
+            if catalog is not None:
+                catalog.mark_dirty()
+                env["OUBI_INDEX_EVENTS"] = "1"
+                refresh_index = True
             for command in commands:
                 with self.lock:
                     if self.cancel_requested:
@@ -1497,13 +1595,21 @@ class App:
                     break
         except OSError as error:
             code = 1
-            self.note(text(26, path=command[0], error=error, language=language))
+            self.note(text(26, path=workspace.data or workspace.images, error=error, language=language))
         finally:
+            if refresh_index:
+                try:
+                    self._refresh_index(catalog)
+                except (OSError, sqlite3.Error, ValueError):
+                    with self.index_guard:
+                        if self.catalog is catalog:
+                            self.close_catalog()
+                    self.note(text(208, language=language))
             with self.lock:
                 self.job_running = False
                 self.job_mode = None
                 self.proc = None
-                if mode != "plan":
+                if mode != "plan" and self.catalog is None:
                     self._invalidate_folders()
             if code == 0:
                 self.note(text(80, language=language))
@@ -1624,7 +1730,7 @@ class Handler(BaseHTTPRequestHandler):
                     vault.unlock(payload.get("password"))
                     try:
                         workspace = Workspace.encrypted(vault.mount)
-                        vault.app = App(workspace, devices=(self.app.rocm, self.app.nvidia))
+                        vault.app = App(workspace, devices=(self.app.rocm, self.app.nvidia), index_guard=vault.lock)
                         vault.app._ensure_count()
                     except (OSError, ValueError, VaultError):
                         vault.close()
@@ -1701,12 +1807,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/recent":
                 return 200, app.gallery(directories)
             if path == "/api/tagged":
-                files = images_with_tags(query.get("tag", []), path=workspace.csv,
-                                         root=workspace.images, exclude=workspace.excluded, folders=query.get("folder"))
-                return 200, {"files": files}
+                return 200, app.gallery(query.get("folder"), query.get("tag", []))
             if path == "/api/vocabulary":
-                tags = tags_in_folders(directories, path=workspace.csv, root=workspace.images,
-                                       exclude=workspace.excluded)
+                tags = (app.catalog.vocabulary(directories) if app.catalog is not None else
+                        tags_in_folders(directories, path=workspace.csv, root=workspace.images, exclude=workspace.excluded))
                 return 200, {"tags": tags}
             if path == "/api/browse":
                 if in_output(resolve_under(root, rel), excluded):
@@ -1719,8 +1823,12 @@ class Handler(BaseHTTPRequestHandler):
                 file = resolve_under(workspace.images, rel)
                 if in_output(file, workspace.excluded):
                     raise ValueError(rel)
-                data = read_info(rel, root=workspace.images, csv=workspace.csv,
-                                 encrypted=bool(workspace.excluded), cache=app.character_cache)
+                data = None
+                if app.catalog is not None and not app.status()["job_running"]:
+                    data = app.catalog.details(rel)
+                if data is None:
+                    data = read_info(rel, root=workspace.images, csv=workspace.csv,
+                                     encrypted=bool(workspace.excluded), cache=app.character_cache)
                 if file.suffix.lower() in IMAGE_EXTS and file.is_file():
                     data["revision"] = image_revision(file)
                 return 200, data

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from oubi_files import image_files, sidecar_path
 from oubi_gpu import GpuError
+from oubi_index import report_changes
 from oubi_nvidia import GPU_UUID, nvidia_device
 from oubi_rocm import amd_device
 
@@ -403,6 +404,7 @@ def main():
             else:
                 print(say(69, start=loaded[0][0], end=loaded[-1][0], total=len(files)), flush=True)
             results = tag_images(tagger, [image for _, _, image in loaded])
+            report_changes(path for (_, path, _), result in zip(loaded, results) if not isinstance(result, Exception))
             last_tagged = None
             for (index, path, image), result in zip(loaded, results):
                 image.close()

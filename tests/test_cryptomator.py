@@ -1,5 +1,6 @@
 import csv
 import os
+import sys
 import tempfile
 import threading
 import unittest
@@ -148,7 +149,7 @@ class VaultWorkspaceTests(unittest.TestCase):
             ("checking", 1, 2), ("checking", 2, 2), ("done", 2, 2),
         ])
 
-    def test_vault_reuses_root_scan_after_deletion_until_manual_recount(self):
+    def test_vault_reuses_saved_index_and_tracks_deletion_until_manual_recount(self):
         workspace = Workspace.encrypted(self.root)
         tagged = self.root / "Album" / "Selected" / "Deep" / "tagged.jpg"
         untagged = self.root / "Album" / "Selected" / "untagged.jpg"
@@ -190,12 +191,26 @@ class VaultWorkspaceTests(unittest.TestCase):
             self.assertEqual(app.gallery(["Album"]), {"files": [path]})
             self.assertEqual(app.gallery(["Album/Selected", "Album/Selected/Deep"]), {"files": [path]})
             self.assertEqual(app.gallery(["Album/Select"]), {"files": []})
+            reopened = App(workspace)
+            self.addCleanup(reopened.close_catalog)
+            self.assertEqual(reopened.folders("Album/Selected"), [leaf])
+            self.assertEqual(reopened.gallery(["Album"], ["MOON"]), {"files": [path]})
+            self.assertEqual(reopened.catalog.vocabulary(["Album"]), ["moon"])
+            many = ["Album", *(f"unused-{number}" for number in range(101))]
+            self.assertEqual(reopened.gallery(many), {"files": [path]})
+            self.assertEqual(reopened.gallery(many, ["moon"]), {"files": [path]})
+            self.assertEqual(scan.call_count, 1)
 
             app.remove_image(path, image_revision(tagged))
-            self.assertEqual(app.folders("Album/Selected"), [leaf])
+            self.assertEqual(app.folders("Album/Selected")[0]["total"], 0)
             self.assertEqual(app.gallery(["Album"]), {"files": []})
+            self.assertEqual(app.gallery(["Album"], ["moon"]), {"files": []})
             self.assertEqual(scan.call_count, 1)
             self.assertEqual(app.status()["scan_progress"], completed)
+            after_delete = App(workspace)
+            self.addCleanup(after_delete.close_catalog)
+            self.assertEqual(after_delete.folders("Album/Selected")[0]["total"], 0)
+            self.assertEqual(after_delete.catalog.vocabulary(["Album"]), [])
             Path(workspace.csv).write_text(f"file\n{untagged.relative_to(self.root).as_posix()}\n", encoding="utf-8")
             self.assertTrue(app._ensure_count(refresh=True))
             refreshed = finish_scan()
@@ -204,6 +219,32 @@ class VaultWorkspaceTests(unittest.TestCase):
             self.assertEqual(app.folders("Album/Selected")[0]["scan"], "none")
             self.assertEqual(app.gallery(["Album"]), {"files": [untagged.relative_to(self.root).as_posix()]})
             self.assertEqual(scan.call_count, 2)
+
+    def test_vault_index_updates_tag_jobs_and_recovers_dirty_snapshots(self):
+        workspace = Workspace.encrypted(self.root)
+        image = self.root / "a.jpg"
+        image.touch()
+        app = App(workspace)
+        app._count_folders(threading.Event(), "initial")
+        initial = app.catalog
+        command = [sys.executable, "-c", """
+import csv, json, os, sys
+assert os.environ['OUBI_INDEX_EVENTS'] == '1'
+print('OUBI_INDEX_CHANGES ' + json.dumps([sys.argv[1]]), flush=True)
+with open(sys.argv[2], 'w') as out:
+    csv.writer(out).writerows([('file', 'character', 'general'), (sys.argv[1], 'person', 'sun')])
+""", str(image), workspace.csv]
+        with patch("oubi_web.source_folders", side_effect=AssertionError("Job triggered a rescan")):
+            app._run("tag", [str(self.root)], "en", command)
+            self.assertIs(app.catalog, initial)
+            self.assertEqual(app.folders()[0]["tagged"], 1)
+            self.assertEqual(app.gallery([""], ["sun", "person"]), {"files": ["a.jpg"]})
+        reopened = App(workspace)
+        self.assertEqual(reopened.catalog.details("a.jpg")["character"], "person")
+        reopened.catalog.mark_dirty()
+        self.assertIsNone(App(workspace).catalog)
+        reopened.close_catalog()
+        app.close_catalog()
 
     def test_work_preview_uses_completed_tag_events(self):
         app = App(Workspace.encrypted(self.root))
@@ -242,6 +283,7 @@ class VaultWorkspaceTests(unittest.TestCase):
         tags.parent.mkdir()
         tags.write_text("rating:g, person")
         app = App(workspace)
+        app._count_folders(threading.Event(), "initial")
         selected = [str(self.root)]
         self.assertIn("--dry-run", sort_command(True, selected, workspace=workspace))
         with patch.dict(os.environ, {"OUBI_COPY_TXT": "1", "OUBI_MOVE": "0"}):
@@ -252,6 +294,11 @@ class VaultWorkspaceTests(unittest.TestCase):
         result, = Path(workspace.output).rglob("*.jpg")
         self.assertEqual(sidecar_path(result).read_text(), "rating:g, person")
         self.assertEqual(Path(workspace.sorted_list).read_text().strip(), str(original))
+        self.assertEqual(app.folders()[0]["sorted"], 1)
+        with patch.dict(os.environ, {"OUBI_COPY_TXT": "1", "OUBI_MOVE": "1"}):
+            app._run("sort", selected, "en", None, output=workspace.output)
+        self.assertEqual(app.folders()[0]["total"], 0)
+        self.assertEqual(app.gallery([""]), {"files": []})
 
     def test_web_reads_only_tags_subfolder_and_keeps_image_extensions_distinct(self):
         first = self.root / "a.jpg"

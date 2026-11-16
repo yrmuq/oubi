@@ -119,5 +119,7 @@ class Vault:
             self.app.stop_folder_count()
         if self.process is not None:
             self._unmount()
+        if self.app is not None:
+            self.app.close_catalog()
         self.token = self.scope = ""
         self.app = self.process = None

@@ -33,7 +33,7 @@ RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 oubi; fi \
         useradd --uid 1000 --gid 1000 --no-create-home --no-log-init --home-dir /data --shell /usr/sbin/nologin oubi; \
     fi
 
-COPY tag_folder.py sort_images.py oubi_files.py oubi_cryptomator.py oubi_gpu.py oubi_rocm.py oubi_nvidia.py oubi_web.py oubi_page.html /opt/oubi/
+COPY tag_folder.py sort_images.py oubi_files.py oubi_index.py oubi_cryptomator.py oubi_gpu.py oubi_rocm.py oubi_nvidia.py oubi_web.py oubi_page.html /opt/oubi/
 COPY languages /opt/oubi/languages
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 755 /usr/local/bin/entrypoint.sh /opt/oubi/tag_folder.py /opt/oubi/sort_images.py /opt/oubi/oubi_web.py
