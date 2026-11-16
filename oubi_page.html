@@ -340,7 +340,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     <div class="block grow" data-block="info">
       <div id="info">
         <p id="who"></p>
-        <p id="tags">Select a file to show tags</p>
+        <p id="tags">Select a folder to see tagged images</p>
       </div>
     </div>
     <div class="block" data-block="filter">
@@ -385,7 +385,7 @@ let reelAt = -1;
 let workPreview = false;
 let workFile = "";
 let lastJob = null;
-let galleryEmpty = false;
+let galleryMessage = 201;
 let galleryRequest = 0;
 let shown = "";
 let previewRevision = "";
@@ -461,7 +461,7 @@ function showEmpty() {
   document.getElementById("name").textContent = t(11);
   document.getElementById("who").textContent = "";
   tagText = "";
-  document.getElementById("tags").textContent = t(!workPreview && galleryEmpty ? 195 : 12);
+  document.getElementById("tags").textContent = t(workPreview ? 12 : selected.size ? galleryMessage : 200);
 }
 
 function applyI18n() {
@@ -623,7 +623,7 @@ function selectFolderLocation(path) {
   vocab = [];
   reel = [];
   reelAt = -1;
-  galleryEmpty = false;
+  galleryMessage = 201;
   galleryRequest++;
   const caption = document.getElementById("folder-location");
   caption.textContent = path;
@@ -726,30 +726,28 @@ async function loadFolders() {
 
 async function loadGallery(reset = false) {
   const request = ++galleryRequest;
+  galleryMessage = 201;
   if (reset || !selected.size) {
     reel = [];
     reelAt = -1;
-    galleryEmpty = !selected.size && pinned.length > 0;
-    if (!workPreview) showEmpty();
   }
+  if (!workPreview && !reel.length) showEmpty();
   if (!selected.size) return;
   const paths = [...selected];
   const tags = [...pinned];
   const query = new URLSearchParams();
   paths.forEach(path => query.append("folder", path));
   tags.forEach(tag => query.append("tag", tag));
-  try {
-    const data = await workspaceData((tags.length ? "/api/tagged?" : "/api/recent?") + query);
-    if (!data || request !== galleryRequest || paths.length !== selected.size || paths.some(path => !selected.has(path))) return;
+  const data = await workspaceData((tags.length ? "/api/tagged?" : "/api/recent?") + query).catch(() => null);
+  if (request !== galleryRequest || paths.length !== selected.size || paths.some(path => !selected.has(path))) return;
+  if (data) {
     const current = reel[reelAt];
     reel = data.files || [];
-    galleryEmpty = tags.length > 0 && !reel.length;
     reelAt = reel.indexOf(current);
     if (reelAt < 0 && reel.length) reelAt = tags.length ? 0 : reel.length - 1;
-    if (!workPreview) renderGallery();
-  } catch {
-    return;
   }
+  galleryMessage = data ? 195 : 202;
+  if (!workPreview) renderGallery();
 }
 
 async function loadVocab() {
@@ -920,7 +918,7 @@ function discardDeletedImage(path) {
   reel = reel.filter(item => item !== path);
   if (workFile === path) workFile = "";
   reelAt = activePath === path ? Math.min(index, reel.length - 1) : reel.indexOf(activePath);
-  if (pinned.length && index >= 0 && !reel.length) galleryEmpty = true;
+  if (!reel.length) galleryMessage = 195;
   if (workPreview) renderWorkPreview();
   else renderGallery();
 }
@@ -944,6 +942,7 @@ async function confirmDelete() {
     deleteDialog.close();
     if (target.scope === vaultScope) {
       workspaceMutation++;
+      galleryRequest++;
       statusShown = ++statusRequest;
       discardDeletedImage(target.path);
       showNotice(data.warning || "");
