@@ -4,11 +4,12 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
-from oubi_cryptomator import VaultError
+from oubi_cryptomator import COOKIE_NAME, VaultError
 from oubi_files import image_revision, sidecar_path
-from oubi_web import App, Workspace, images_under, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
+from oubi_web import App, Handler, Workspace, images_under, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
 
 
 class VaultWorkspaceTests(unittest.TestCase):
@@ -16,6 +17,42 @@ class VaultWorkspaceTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+
+    def test_vault_response_releases_lock_before_writing_to_a_disconnected_client(self):
+        lock = threading.Lock()
+        workspace = Workspace.encrypted(self.root)
+        (self.root / "preview.jpg").touch()
+        vault = SimpleNamespace(lock=lock, scope="test-scope", app=SimpleNamespace(paths=workspace), owns=lambda _: True)
+
+        def read_image(_):
+            self.assertTrue(lock.locked())
+            return b"preview"
+
+        def disconnect(*_):
+            self.assertFalse(lock.locked())
+            raise BrokenPipeError()
+
+        for during_headers in (True, False):
+            with self.subTest(during_headers=during_headers), patch.object(Path, "read_bytes", read_image):
+                handler = Handler.__new__(Handler)
+                handler.app = SimpleNamespace(vault=vault)
+                handler.path = "/api/file?scope=test-scope&path=preview.jpg"
+                handler.headers = {"Cookie": f"{COOKIE_NAME}=test-token"}
+                handler.send_response = Mock()
+                handler.send_header = Mock()
+                handler.end_headers = Mock(side_effect=disconnect if during_headers else None)
+                handler.wfile = Mock()
+                handler.wfile.write.side_effect = disconnect
+                handler.close_connection = False
+
+                handler.do_GET()
+
+                handler.send_response.assert_called_once_with(200)
+                self.assertTrue(handler.close_connection)
+                if during_headers:
+                    handler.wfile.write.assert_not_called()
+                else:
+                    handler.wfile.write.assert_called_once_with(b"preview")
 
     def test_vault_destination_stays_within_mount_and_is_excluded_from_source(self):
         with patch.dict(os.environ, {"OUBI_CRYPT_OUTPUT": "Gallery/Sorted"}):

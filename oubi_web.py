@@ -1477,14 +1477,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         if cookie is not None:
             self.send_header("Set-Cookie", cookie)
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
 
     def _language(self):
         return read_lang(header=self.headers.get("Accept-Language", ""))
 
+    def _error_response(self, status, message):
+        return status, {"error": text(message, language=self._language())}
+
     def _error(self, status, message):
-        self._send(status, {"error": text(message, language=self._language())})
+        self._send(*self._error_response(status, message))
 
     def _vault_owner(self):
         try:
@@ -1615,11 +1621,12 @@ class Handler(BaseHTTPRequestHandler):
         with vault.lock if scope else nullcontext():
             app = self._scoped_app(scope)
             if app is None:
-                self._error(409, 172)
-                return
-            self._get_files(path, query, app)
+                response = self._error_response(409, 172)
+            else:
+                response = self._file_response(path, query, app)
+        self._send(*response)
 
-    def _get_files(self, path, query, app):
+    def _file_response(self, path, query, app):
         workspace = app.paths
         rel = query.get("path", [""])[0]
         directories = query.get("folder", [])
@@ -1629,31 +1636,26 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if path == "/api/folders":
-                self._send(200, app.folders(directories[0] if directories else ""))
-                return
+                return 200, app.folders(directories[0] if directories else "")
             if path == "/api/recent":
                 files = recent_tagged(directories, limit=None, root=workspace.images, exclude=workspace.excluded,
                                       csv=workspace.csv)
-                self._send(200, {"files": files})
-                return
+                return 200, {"files": files}
             if path == "/api/tagged":
                 files = images_with_tags(query.get("tag", []), path=workspace.csv,
                                          root=workspace.images, exclude=workspace.excluded, folders=query.get("folder"))
-                self._send(200, {"files": files})
-                return
+                return 200, {"files": files}
             if path == "/api/vocabulary":
                 tags = tags_in_folders(directories, path=workspace.csv, root=workspace.images,
                                        exclude=workspace.excluded)
-                self._send(200, {"tags": tags})
-                return
+                return 200, {"tags": tags}
             if path == "/api/browse":
                 if in_output(resolve_under(root, rel), excluded):
                     raise ValueError(rel)
                 data = browse_dir(root, rel)
                 if excluded:
                     data["items"] = [item for item in data["items"] if not in_output(Path(root) / item["path"], excluded)]
-                self._send(200, data)
-                return
+                return 200, data
             if path == "/api/tags":
                 file = resolve_under(workspace.images, rel)
                 if in_output(file, workspace.excluded):
@@ -1661,18 +1663,15 @@ class Handler(BaseHTTPRequestHandler):
                 data = read_info(rel, root=workspace.images, csv=workspace.csv, encrypted=bool(workspace.excluded))
                 if file.suffix.lower() in IMAGE_EXTS and file.is_file():
                     data["revision"] = image_revision(file)
-                self._send(200, data)
-                return
+                return 200, data
             if path == "/api/file":
                 file = resolve_under(root, rel)
                 if not file.is_file() or file.suffix.lower() not in IMAGE_EXTS or in_output(file, excluded):
                     raise ValueError(rel)
-                self._send(200, file.read_bytes(), content_type(file))
-                return
+                return 200, file.read_bytes(), content_type(file)
         except (OSError, ValueError):
-            self._error(404, 87 if path in {"/api/tags", "/api/file"} else 86)
-            return
-        self._error(404, 88)
+            return self._error_response(404, 87 if path in {"/api/tags", "/api/file"} else 86)
+        return self._error_response(404, 88)
 
     def do_POST(self):
         parsed = urlparse(self.path)

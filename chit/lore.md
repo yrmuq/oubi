@@ -13,6 +13,7 @@
 - Read and write image tag sidecars only in the image directory's `tags/` subfolder, using the full image filename plus `.txt` to distinguish images with the same stem.
 - Preview deletion applies only to the confirmed image in its original workspace and removes only that image's tag sidecar and index entries.
 - Keep status polling independent of vault filesystem requests so the terminal can report a slow unlock or network scan.
+- Release the Cryptomator lock before sending file and folder responses so a slow or disconnected browser cannot block other reads or page reloads.
 - Scan from the workspace root and reuse the counts for every subfolder. Deleting an image leaves counts available until a manual recount or a tagging or sorting job refreshes them.
 - Keep the gallery selection separate from the latest completed tagging result so switching preview modes leaves the running job and gallery position intact.
 - Keep Cryptomator indexes, sort history, and generated metadata inside the vault; expose the unlocked workspace only to the browser session that unlocked it.
