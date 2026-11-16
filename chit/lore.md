@@ -8,6 +8,7 @@
 - Apply genre folders only to `original` images and use the first matching configured genre so the order chosen in the UI decides ties.
 - Keep the genre add and remove buttons together in one field-width slot so a shorter row does not stretch its numbered fields.
 - Keep GPU runtime downloads opt-in and separate from the CPU Python environment so standard Docker pulls and CPU tagging never require ROCm or CUDA packages.
+- Prefer a ready installed GPU at page startup and honor an explicit manual device selection while the device is available.
 - In the web interface, show the GPU bundle and its estimated download size in the shared terminal before starting a download. Accept `y` or `n` there for the specific pending installation request.
 
 - Read and write image tag sidecars only in the image directory's `tags/` subfolder, using the full image filename plus `.txt` to distinguish images with the same stem.
@@ -20,6 +21,8 @@
 - List each folder's tag sidecars once during a vault index rebuild to avoid a separate NAS lookup for every missing sidecar.
 - Keep the sort history open during a sort and flush completed entries in batches and when a graceful stop unwinds the job.
 - Keep the gallery selection separate from the latest completed tagging result so switching preview modes leaves the running job and gallery position intact.
+- Clear active tag filters on return from Gallery to Sorting, keeping favorite tags persistent per workspace and inside Cryptomator for an encrypted workspace.
+- Put tags from the CSV character column under Characters and all remaining favorites under Events.
 - Display the decoded preview and its filename together before requesting image tags so metadata reads do not delay the current frame.
 - Keep Cryptomator indexes, sort history, and generated metadata inside the vault; expose the unlocked workspace only to the browser session that unlocked it.
 - Resolve the internal sort destination relative to the Cryptomator mount and exclude its subtree from vault source operations.

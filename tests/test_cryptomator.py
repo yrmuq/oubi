@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from oubi_cryptomator import COOKIE_NAME, VaultError
 from oubi_files import image_revision, sidecar_path
 from oubi_index import folder_sidecars
-from oubi_web import App, Handler, Workspace, images_under, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
+from oubi_web import App, Handler, Workspace, images_under, read_favorites, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
 
 
 class VaultWorkspaceTests(unittest.TestCase):
@@ -19,6 +19,26 @@ class VaultWorkspaceTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+
+    def test_favorites_use_all_csv_characters_and_stay_in_the_vault(self):
+        workspace = Workspace.encrypted(self.root)
+        image = self.root / "panel.jpg"
+        image.touch()
+        with open(workspace.csv, "w", encoding="utf-8", newline="") as handle:
+            csv.writer(handle).writerows([("file", "character", "general"),
+                                          (str(image), "first_character, second_character", "halloween")])
+        app = App(workspace)
+        self.assertEqual(app.toggle_favorite("panel.jpg", "second_character"),
+                         {"character": ["second_character"], "event": []})
+        self.assertEqual(app.toggle_favorite("panel.jpg", "halloween"),
+                         {"character": ["second_character"], "event": ["halloween"]})
+        reopened = App(workspace)
+        self.assertEqual(reopened.favorites_path, self.root / ".oubi" / "favorites.json")
+        self.assertEqual(read_favorites(reopened.favorites_path)["event"], ["halloween"])
+        self.assertEqual(reopened.toggle_favorite("panel.jpg", "SECOND_CHARACTER"),
+                         {"character": [], "event": ["halloween"]})
+        with self.assertRaises(ValueError):
+            reopened.toggle_favorite("../outside.jpg", "outside")
 
     def test_thumbnails_are_reused_replaced_and_removed_with_sources(self):
         workspace = Workspace.encrypted(self.root)

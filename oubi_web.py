@@ -17,6 +17,7 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Formatter
+from tempfile import NamedTemporaryFile
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
@@ -46,6 +47,8 @@ LANG_PATH = "/data/language"
 LANG_FILES = {"en": "English.ini", "ru": "Russian.ini"}
 LANG_CHOICES = {"auto", *LANG_FILES}
 TAG_PREVIEW_EVENT = "OUBI_TAG_PREVIEW "
+FAVORITES_NAME = "favorites.json"
+FAVORITE_GROUPS = ("character", "event")
 
 @dataclass(frozen=True)
 class Workspace:
@@ -69,7 +72,7 @@ class Workspace:
                 or (output.exists() and not output.is_dir())):
             raise VaultError(168)
         data.mkdir(mode=0o700, exist_ok=True)
-        for name in ("tags.csv", "sorted.txt", "genders.csv", "unknown_genders.txt", INDEX_NAME, DIRTY_NAME):
+        for name in ("tags.csv", "sorted.txt", "genders.csv", "unknown_genders.txt", INDEX_NAME, DIRTY_NAME, FAVORITES_NAME):
             if (data / name).is_symlink():
                 raise VaultError(168)
         return cls(str(root), str(output), str(data / "tags.csv"), str(data / "sorted.txt"),
@@ -897,6 +900,30 @@ def first_character(value):
     return (value or "").split(",")[0].strip()
 
 
+def read_favorites(path):
+    if path.is_symlink():
+        raise ValueError(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {group: [] for group in FAVORITE_GROUPS}
+    if (not isinstance(data, dict) or any(not isinstance(data.get(group), list) or
+            any(not isinstance(tag, str) for tag in data[group]) for group in FAVORITE_GROUPS)):
+        raise ValueError(path)
+    return data
+
+
+def write_favorites(path, data):
+    with NamedTemporaryFile(dir=path.parent, prefix=".favorites-", delete=False, mode="w", encoding="utf-8") as handle:
+        temporary = Path(handle.name)
+        try:
+            json.dump(data, handle, ensure_ascii=False)
+            handle.close()
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 def character_index(path=CSV_PATH, root=IMAGES, *, cache=None, encrypted=False):
     file = Path(path)
     if not file.is_file():
@@ -921,7 +948,7 @@ def character_index(path=CSV_PATH, root=IMAGES, *, cache=None, encrypted=False):
             name = row.get("file") or ""
             if not name.strip():
                 continue
-            character = first_character(row.get("character"))
+            character = row.get("character") or ""
             if base is not None:
                 # The vault tagger indexes paths without file symlinks.
                 rows[os.path.normpath(base / name)] = character
@@ -937,6 +964,12 @@ def character_index(path=CSV_PATH, root=IMAGES, *, cache=None, encrypted=False):
     return rows
 
 
+def image_characters(image, root, csv, *, encrypted, cache):
+    names = character_index(csv, root, cache=cache, encrypted=encrypted)
+    keys = (str(image),) if encrypted else path_keys(image, root)
+    return next((names[key] for key in keys if names.get(key)), "")
+
+
 def read_info(rel, *, root=IMAGES, csv=CSV_PATH, encrypted=False, cache=None):
     base = Path(root).resolve()
     image = resolve_under(base, rel)
@@ -944,14 +977,8 @@ def read_info(rel, *, root=IMAGES, csv=CSV_PATH, encrypted=False, cache=None):
     txt = sidecar_path(image)
     if txt.is_file() and (base in txt.resolve().parents or txt.resolve() == base):
         text = txt.read_text(encoding="utf-8", errors="replace")[:4000]
-    names = character_index(csv, root, cache=cache, encrypted=encrypted)
-    character = ""
-    keys = (str(image),) if encrypted else path_keys(image, base)
-    for key in keys:
-        if names.get(key):
-            character = names[key]
-            break
-    return {"text": text, "character": character}
+    characters = image_characters(image, root, csv, cache=cache, encrypted=encrypted)
+    return {"text": text, "character": first_character(characters)}
 
 
 def parse_progress(line):
@@ -1274,6 +1301,34 @@ class App:
     @property
     def paths(self):
         return self.workspace or normal_workspace()
+
+    @property
+    def favorites_path(self):
+        return Path(self.paths.csv).parent / FAVORITES_NAME
+
+    def toggle_favorite(self, relative, label):
+        label = label.strip()
+        if not label or len(label) > 512 or "\0" in label:
+            raise ValueError(label)
+        path = self.favorites_path
+        favorites = read_favorites(path)
+        key = label.casefold()
+        for group in FAVORITE_GROUPS:
+            matching = next((tag for tag in favorites[group] if tag.casefold() == key), None)
+            if matching is not None:
+                favorites[group].remove(matching)
+                break
+        else:
+            workspace = self.paths
+            image = resolve_under(workspace.images, relative)
+            if image.suffix.lower() not in IMAGE_EXTS or not image.is_file() or in_output(image, workspace.excluded):
+                raise ValueError(relative)
+            characters = image_characters(image, workspace.images, workspace.csv,
+                                          encrypted=self.workspace is not None, cache=self.character_cache)
+            group = "character" if any(tag.strip().casefold() == key for tag in characters.split(",")) else "event"
+            favorites[group].append(label)
+        write_favorites(path, favorites)
+        return favorites
 
     def folders(self, directory=""):
         if self.catalog is not None:
@@ -1862,6 +1917,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/folders":
                 return 200, app.folders(directories[0] if directories else "")
+            if path == "/api/favorites":
+                return 200, read_favorites(app.favorites_path)
             if path == "/api/recent":
                 return 200, app.gallery(directories)
             if path == "/api/tagged":
@@ -1935,6 +1992,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(400, 93)
                 return
             self._send(200, {"genres": read_genres()})
+            return
+        if parsed.path == "/api/favorites":
+            scope, relative, label = (payload.get(key) for key in ("scope", "path", "tag"))
+            if self.headers.get_content_type() != "application/json" or not all(
+                    isinstance(value, str) for value in (scope, relative, label)):
+                self._error(400, 89)
+                return
+            with self.app.vault.lock:
+                app = self._scoped_app(scope)
+                if app is None:
+                    response = self._error_response(409, 172)
+                else:
+                    try:
+                        response = (200, app.toggle_favorite(relative, label))
+                    except (OSError, ValueError):
+                        response = self._error_response(409, 217)
+            self._send(*response)
             return
         if parsed.path in {"/api/vault/unlock", "/api/vault/lock"}:
             self._vault_action(parsed.path, payload)

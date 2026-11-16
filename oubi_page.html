@@ -62,7 +62,15 @@
 }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
 body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
-.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; box-sizing: border-box; min-height: 48px; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--pane); }
+.topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px 12px; box-sizing: border-box; min-height: 48px; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--pane); }
+.head-compute { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+#app-mode { min-width: 102px; padding: 5px 12px; }
+#app-mode[aria-pressed="true"] { background: var(--btn); color: white; }
+@media (max-width: 760px) {
+  .head-compute { grid-column: 1 / -1; }
+  #app-mode { grid-column: 2; }
+  .head-tools { grid-column: 1 / -1; }
+}
 .brand { font-size: 18px; font-weight: 650; }
 #theme { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
 .top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
@@ -102,16 +110,18 @@ button.danger { background: var(--danger); color: #fff; }
 button:disabled { opacity: 0.45; cursor: default; }
 #folders { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 16px; margin-left: 16px; padding: 4px; }
 .folder { width: 104px; background: transparent; color: inherit; border: 2px solid transparent; border-radius: 8px; padding: 4px; box-sizing: border-box; }
-.folder .icon { width: 72px; height: 56px; margin: 0 auto 6px; position: relative; background: none; border: 0; }
-.folder .icon svg { width: 100%; height: 100%; display: block; }
+.folder .icon { width: 72px; height: 56px; margin: 0 auto 6px; position: relative; }
+.folder .folder-art { width: 100%; height: 100%; display: block; filter: drop-shadow(0 2px 2px #0003); }
+.folder:hover { background: color-mix(in srgb, var(--pick) 10%, transparent); }
 .folder .name { display: block; font-size: 12px; line-height: 1.2; word-break: break-word; }
 .folder.on { border-color: var(--pick); }
-.badge { position: absolute; bottom: 7px; width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; }
-.badge.scan { left: 12px; }
-.badge.sort { right: 12px; }
-.badge.none { background: #8d8d8d; border: 1px solid #5a5a5a; }
-.badge.part { background: #f5c400; border: 1px solid #8a6d00; }
-.badge.done { background: #3dba6a; border: 1px solid #1e7a3a; }
+.badge { position: absolute; bottom: 0; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; border: 2px solid var(--pane); box-sizing: border-box; box-shadow: 0 1px 3px #0005; }
+.badge svg { display: block; width: 11px; height: 11px; }
+.badge.scan { left: 7px; }
+.badge.sort { right: 7px; }
+.badge.none { background: #89939f; color: #fff; }
+.badge.part { background: #f5c453; color: #543c0b; }
+.badge.done { background: #208556; color: #fff; }
 .split { position: relative; touch-action: none; }
 .split-v { cursor: col-resize; margin: 8px 0 0; }
 .split-h { cursor: row-resize; }
@@ -126,6 +136,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .mid { position: relative; text-align: center; gap: 0; display: flex; flex-direction: column; }
 .block { min-width: 0; min-height: 0; position: relative; }
 .block.grow { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; }
+.block[hidden] { display: none; }
 .block-split { flex: 0 0 8px; height: 8px; margin: 6px 0; }
 .edge-split { position: absolute; left: 0; right: 0; bottom: 0; height: 10px; margin: 0; z-index: 3; }
 body.arrange .block { outline: 1px dashed var(--pick); cursor: grab; border-radius: 8px; }
@@ -178,6 +189,14 @@ body.arrange .block * { pointer-events: none; }
 .filter-find input, .filter-find .genre-ghost { border: 0; background: transparent; padding-right: 30px; }
 .search-icon { position: absolute; right: 8px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 .filter-tag { color: #111; border-radius: 6px; }
+#favorites { order: 1; flex: 0 1 auto; max-height: 36%; overflow: auto; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+#favorites h2 { margin: 0 0 8px; font-size: 14px; }
+#favorites h3 { margin: 4px 0; font-size: 12px; color: var(--muted); }
+#favorites .favorite-list { display: flex; flex-wrap: wrap; gap: 4px; }
+#favorites .favorite-tag { padding: 3px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--pane); color: var(--text); overflow-wrap: anywhere; }
+#favorites .favorite-tag[aria-pressed="true"] { background: var(--pick); color: #111; border-color: var(--pick); }
+#favorites-empty { margin: 0; font-size: 12px; color: var(--muted); }
+.tag-hit.favorite::after { content: "★"; color: var(--pick); margin-inline-start: 3px; font-size: 0.8em; }
 .genre { border-radius: 4px; padding: 0 3px; color: #111; }
 .genre-1, .genre-handle.genre-1 { background: #ffb4b4; }
 .genre-2, .genre-handle.genre-2 { background: #b9d0ff; }
@@ -234,24 +253,27 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
 </head>
 <body>
 <header class="topbar">
-  <span class="brand">oubi</span>
-  <div class="compute">
-    <select id="compute-device" aria-label="Tagging device">
-      <option value="cpu">CPU</option>
-      <option value="amd" disabled>AMD</option>
-      <option value="nvidia" disabled>NVIDIA</option>
-    </select>
+  <div class="head-compute">
+    <span class="brand">oubi</span>
+    <div class="compute">
+      <select id="compute-device" aria-label="Tagging device">
+        <option value="cpu">CPU</option>
+        <option value="amd" disabled>AMD</option>
+        <option value="nvidia" disabled>NVIDIA</option>
+      </select>
+    </div>
+    <div class="compute" id="amd-controls" hidden>
+      <span>AMD</span>
+      <select id="rocm-arch"></select>
+      <button type="button" class="secondary" id="rocm-install">Install</button>
+    </div>
+    <div class="compute" id="nvidia-controls" hidden>
+      <span>NVIDIA</span>
+      <select id="nvidia-card"><option value="auto">Auto</option></select>
+      <button type="button" class="secondary" id="nvidia-install">Install</button>
+    </div>
   </div>
-  <div class="compute" id="amd-controls" hidden>
-    <span>AMD</span>
-    <select id="rocm-arch"></select>
-    <button type="button" class="secondary" id="rocm-install">Install</button>
-  </div>
-  <div class="compute" id="nvidia-controls" hidden>
-    <span>NVIDIA</span>
-    <select id="nvidia-card"><option value="auto">Auto</option></select>
-    <button type="button" class="secondary" id="nvidia-install">Install</button>
-  </div>
+  <button id="app-mode" type="button" class="secondary" aria-pressed="false">Sorting</button>
   <div class="head-tools">
     <button id="arrange" type="button" title="Move blocks">✎</button>
     <select id="lang" aria-label="Language">
@@ -351,6 +373,11 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       </div>
       <div id="filter"></div>
     </div>
+    <aside id="favorites" aria-labelledby="favorites-title" hidden>
+      <h2 id="favorites-title"></h2>
+      <div id="favorite-groups"></div>
+      <p id="favorites-empty"></p>
+    </aside>
   </section>
 </div>
 <div id="suggest" hidden></div>
@@ -402,10 +429,17 @@ let tagText = "";
 let hasFile = false;
 let pinned = [];
 let vocab = [];
+let appMode = readPreference("oubi.mode") === "gallery" ? "gallery" : "sorting";
+let manualDevice = null;
+let preferredGpu = readPreference("oubi.gpu");
+let favorites = { character: [], event: [] };
+let favoritesVersion = 0;
+let favoriteWrites = Promise.resolve();
 let theme = savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto" ? savedTheme : "auto";
 let wasBusy = false;
 const panes = { left: null, mid: null, right: null };
 const deviceInput = document.getElementById("compute-device");
+const modeToggle = document.getElementById("app-mode");
 const rocmArch = document.getElementById("rocm-arch");
 const rocmInstall = document.getElementById("rocm-install");
 const nvidiaCard = document.getElementById("nvidia-card");
@@ -452,6 +486,42 @@ function t(id) {
   const english = catalogs.en || {};
   return pack[String(id)] || english[String(id)] || "";
 }
+
+function readPreference(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function savePreference(key, value) {
+  try { localStorage.setItem(key, value); } catch { return; }
+}
+
+function renderAppMode() {
+  const gallery = appMode === "gallery";
+  modeToggle.textContent = t(gallery ? 211 : 210);
+  modeToggle.setAttribute("aria-pressed", String(gallery));
+  modeToggle.setAttribute("aria-label", t(218));
+  modeToggle.title = t(218);
+  document.querySelector('[data-block="genres"]').hidden = gallery;
+  document.getElementById("favorites").hidden = !gallery;
+  renderFavorites();
+  fitSplits();
+}
+
+modeToggle.onclick = () => {
+  appMode = appMode === "sorting" ? "gallery" : "sorting";
+  savePreference("oubi.mode", appMode);
+  if (appMode === "sorting") {
+    pinned = [];
+    document.getElementById("filter-query").value = "";
+    document.getElementById("filter-ghost").replaceChildren();
+    hideSuggest();
+    renderFilter();
+    renderGenreRow();
+    loadGallery(true);
+  }
+  if (hasFile) paintTags(tagText);
+  renderAppMode();
+};
 
 function cancelPreviewRequest() {
   if (!previewRequest) return;
@@ -526,6 +596,7 @@ function applyI18n() {
   if (!hasFile && !previewRequest) showEmpty();
   if (previewRequest?.failed) clearImage(t(previewRequest.failed));
   renderFolders();
+  renderAppMode();
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
 }
 
@@ -535,16 +606,22 @@ function badge(kind, state) {
     sort: { none: t(16), part: t(17), done: t(18) },
   }[kind][state] || "";
   if (!title) return "";
-  return `<span class="badge ${kind} ${state}" title="${title}"></span>`;
+  const shape = {
+    none: '<circle cx="7" cy="7" r="2" fill="currentColor"/>',
+    part: '<path d="M7 2.5a4.5 4.5 0 1 1-4.5 4.5"/>',
+    done: '<path d="m3 7 2.5 2.5L11 4"/>',
+  }[state];
+  return `<span class="badge ${kind} ${state}" title="${title}"><svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${shape}</svg></span>`;
 }
 
 function folderIcon(scan, sort) {
   const icon = document.createElement("div");
   icon.className = "icon";
-  icon.innerHTML = `<svg viewBox="0 0 64 52" aria-hidden="true">
-    <path fill="var(--folder-tab)" d="M8 18h14l4-8h24a4 4 0 0 1 4 4v8H8z"/>
-    <path fill="var(--folder)" stroke="var(--folder-edge)" stroke-width="1.4" d="M4 18h56a4 4 0 0 1 4 4v22a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V18z"/>
-    <path fill="var(--folder-front)" d="M4 28h56v16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V28z"/>
+  icon.innerHTML = `<svg class="folder-art" viewBox="0 0 72 56" aria-hidden="true">
+    <path fill="var(--folder-tab)" stroke="var(--folder-edge)" stroke-width="1.25" d="M6 15a6 6 0 0 1 6-6h16c2 0 3 1 5 3l3 3h23a6 6 0 0 1 6 6v24a5 5 0 0 1-5 5H12a6 6 0 0 1-6-6z"/>
+    <path fill="var(--folder-front)" stroke="var(--folder-edge)" stroke-width="1.25" d="M7 22h57a4 4 0 0 1 4 4.8l-4 18a6 6 0 0 1-6 5H13a6 6 0 0 1-6-5l-3.5-18A4 4 0 0 1 7 22z"/>
+    <path fill="var(--folder)" d="M8 37h56l-2 8a5 5 0 0 1-5 4H14a5 5 0 0 1-5-4z" opacity=".48"/>
+    <path d="M10 26h51" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".53"/>
   </svg>` + badge("scan", scan) + badge("sort", sort);
   return icon;
 }
@@ -667,6 +744,10 @@ function useVault(scope) {
   if (scope === vaultScope) return;
   if (deleteDialog.open && !deleteBusy) deleteDialog.close();
   vaultScope = scope;
+  favoritesVersion++;
+  favorites = { character: [], event: [] };
+  renderFavorites();
+  loadFavorites();
   workPreview = false;
   workFile = "";
   lastJob = null;
@@ -811,6 +892,107 @@ function renderFilter() {
     button.onclick = () => togglePin(tag);
     box.append(button);
   });
+  renderFavorites();
+}
+
+function renderFavorites() {
+  const box = document.getElementById("favorite-groups");
+  document.getElementById("favorites-title").textContent = t(212);
+  const empty = document.getElementById("favorites-empty");
+  empty.textContent = t(215);
+  empty.hidden = favorites.character.length > 0 || favorites.event.length > 0;
+  box.replaceChildren();
+  if (!empty.hidden) return;
+  for (const [group, label] of [["character", 213], ["event", 214]]) {
+    const heading = document.createElement("h3");
+    heading.textContent = t(label);
+    const list = document.createElement("div");
+    list.className = "favorite-list";
+    list.dataset.group = group;
+    for (const tag of favorites[group]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "favorite-tag";
+      button.textContent = tag;
+      button.setAttribute("aria-pressed", String(pinIndex(tag) >= 0));
+      button.onclick = () => togglePin(tag);
+      list.append(button);
+    }
+    box.append(heading, list);
+  }
+}
+
+function favoriteTag(tag) {
+  const key = tag.toLowerCase();
+  return [...favorites.character, ...favorites.event].some(item => item.toLowerCase() === key);
+}
+
+function showFavorites(data) {
+  favorites = data;
+  renderFavorites();
+  for (const tag of document.querySelectorAll("#tags .tag-hit")) {
+    tag.classList.toggle("favorite", favoriteTag(tag.dataset.tag));
+  }
+}
+
+async function loadFavorites() {
+  const request = ++favoritesVersion;
+  const data = await workspaceData("/api/favorites", AbortSignal.timeout(galleryTimeoutMs)).catch(() => null);
+  if (data && request === favoritesVersion) showFavorites(data);
+}
+
+function toggleFavorite(tag) {
+  if (!shown.startsWith("images:")) return;
+  const scope = vaultScope;
+  const path = shown.slice("images:".length);
+  favoriteWrites = favoriteWrites.then(async () => {
+    if (scope !== vaultScope) return;
+    const request = ++favoritesVersion;
+    try {
+      const response = await fetch("/api/favorites", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope, path, tag }), signal: AbortSignal.timeout(galleryTimeoutMs),
+      });
+      const data = await response.json();
+      if (scope !== vaultScope || request !== favoritesVersion) return;
+      if (response.ok) showFavorites(data);
+      else showNotice(data.error || t(217));
+    } catch {
+      if (scope === vaultScope && request === favoritesVersion) showNotice(t(217));
+    }
+  });
+}
+
+function bindTagActions(span, token) {
+  let timer = null;
+  let held = false;
+  let start;
+  const cancelHold = () => clearTimeout(timer);
+  span.onpointerdown = event => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    held = false;
+    start = { x: event.clientX, y: event.clientY };
+    timer = setTimeout(() => {
+      if (!span.isConnected) return;
+      held = true;
+      toggleFavorite(token);
+    }, 500);
+  };
+  span.onpointermove = event => {
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) cancelHold();
+  };
+  span.onpointerup = span.onpointerleave = span.onpointercancel = cancelHold;
+  span.onclick = () => {
+    if (held) held = false;
+    else togglePin(token);
+  };
+  span.onkeydown = event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    if (event.repeat) return;
+    if (event.shiftKey) toggleFavorite(token);
+    else togglePin(token);
+  };
 }
 
 function addFilterTag(raw) {
@@ -849,14 +1031,19 @@ function paintTags(text) {
     if (!token) return;
     const span = document.createElement("span");
     span.className = "tag-hit";
+    span.dataset.tag = token;
+    span.classList.toggle("favorite", favoriteTag(token));
+    span.tabIndex = 0;
+    span.setAttribute("role", "button");
+    span.title = t(216);
     const pinnedAt = pinIndex(token);
     const rank = genres.findIndex((item) => item && item.toLowerCase() === token.toLowerCase());
     if (pinnedAt >= 0) {
       span.style.background = rainbow(pinnedAt);
       span.style.color = "#111";
-    } else if (rank >= 0 && rank < 20) span.classList.add("genre", "genre-" + (rank + 1));
+    } else if (appMode === "sorting" && rank >= 0 && rank < 20) span.classList.add("genre", "genre-" + (rank + 1));
     span.textContent = part;
-    span.onclick = () => togglePin(token);
+    bindTagActions(span, token);
     box.append(span);
   });
 }
@@ -1059,6 +1246,7 @@ async function tick() {
   gpuProgress = data.gpu_progress;
   showTerminalInput();
   const readyDevices = { cpu: true, amd: showRocm(), nvidia: showNvidia() };
+  deviceInput.value = [manualDevice, preferredGpu, "amd", "nvidia", "cpu"].find(device => readyDevices[device] === true);
   let step = data.step || t(7);
   if (data.phase === "download" && !data.job_running) {
     if (data.model === "ready") step = t(23);
@@ -1103,6 +1291,12 @@ function showTerminalInput() {
   terminalInput.placeholder = t(gpuPrompt ? 159 : gpuProgress ? 162 : 160);
 }
 
+function selectedRocmArch() {
+  if (!rocmState || rocmArch.value !== "auto") return rocmArch.value;
+  const candidates = Object.keys(rocmState.gpus).filter(arch => rocmState.architectures.includes(arch));
+  return candidates.find(arch => rocmState.installed[arch]) || candidates[0];
+}
+
 function showRocm() {
   if (!rocmState) return false;
   const { architectures, gpus, installed, visible, install } = rocmState;
@@ -1113,9 +1307,8 @@ function showRocm() {
     rocmArch.value = rocmState.default;
   }
   rocmArch.options[0].textContent = t(10);
-  const choice = rocmArch.value;
   const detected = Object.keys(gpus);
-  const arch = choice === "auto" ? detected.find(value => architectures.includes(value)) : choice;
+  const arch = selectedRocmArch();
   const matches = !detected.length || detected.includes(arch);
   const name = visible && matches && installed[arch];
   const installing = Boolean(gpuPrompt || gpuProgress || sendingGpuRequest);
@@ -1135,6 +1328,11 @@ function showRocm() {
   return Boolean(name);
 }
 
+function selectedNvidiaGpu() {
+  if (!nvidiaState || nvidiaCard.value !== "auto") return nvidiaCard.value;
+  return nvidiaState.gpus.find(gpu => nvidiaState.installed[gpu.uuid])?.uuid || nvidiaState.default;
+}
+
 function showNvidia() {
   if (!nvidiaState) return false;
   const { gpus, installed, install } = nvidiaState;
@@ -1147,7 +1345,7 @@ function showNvidia() {
     nvidiaCard.dataset.options = options;
   }
   nvidiaCard.options[0].textContent = t(10);
-  const uuid = nvidiaCard.value === "auto" ? nvidiaState.default : nvidiaCard.value;
+  const uuid = selectedNvidiaGpu();
   const gpu = gpus.find(item => item.uuid === uuid);
   const name = installed[uuid];
   const installing = Boolean(gpuPrompt || gpuProgress || sendingGpuRequest);
@@ -1192,7 +1390,14 @@ async function sendGpuRequest(endpoint, payload, errorId) {
 
 rocmArch.onchange = () => { showRocm(); tick(); };
 nvidiaCard.onchange = () => { showNvidia(); tick(); };
-deviceInput.onchange = () => tick();
+deviceInput.onchange = () => {
+  manualDevice = deviceInput.value;
+  if (manualDevice !== "cpu") {
+    preferredGpu = manualDevice;
+    savePreference("oubi.gpu", preferredGpu);
+  }
+  tick();
+};
 rocmInstall.onclick = async () => {
   if (await sendGpuRequest("/api/rocm", { architecture: rocmArch.value }, 121)) terminalInput.focus();
 };
@@ -1227,8 +1432,8 @@ async function start(mode) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        mode, folders: [...selected], device: deviceInput.value, architecture: rocmArch.value || "auto",
-        gpu: nvidiaCard.value, scope, destination: scope ? sortTarget.value : "output",
+        mode, folders: [...selected], device: deviceInput.value, architecture: selectedRocmArch() || "auto",
+        gpu: selectedNvidiaGpu() || "auto", scope, destination: scope ? sortTarget.value : "output",
       }),
     });
     if (!response.ok) {
@@ -1327,7 +1532,7 @@ function fitSplits() {
   for (const id of ["left", "mid", "right"]) {
     const host = document.getElementById(id);
     for (const old of host.querySelectorAll(":scope > .block-split, :scope .edge-split")) old.remove();
-    const blocks = [...host.querySelectorAll(":scope > .block")];
+    const blocks = [...host.querySelectorAll(":scope > .block:not([hidden])")];
     for (let index = 0; index < blocks.length - 1; index += 1) {
       const split = document.createElement("div");
       split.className = "split split-h block-split";
@@ -1735,7 +1940,7 @@ function arrangeMove(event) {
   const hit = document.elementFromPoint(event.clientX, event.clientY);
   const panel = hit && hit.closest(".pane");
   if (!panel || !dragBlock) return;
-  const blocks = [...panel.querySelectorAll(":scope > .block")].filter((item) => item !== dragBlock);
+  const blocks = [...panel.querySelectorAll(":scope > .block:not([hidden])")].filter((item) => item !== dragBlock);
   let before = null;
   let after = null;
   for (const item of blocks) {
@@ -1941,6 +2146,7 @@ window.addEventListener("mousemove", (event) => {
 });
 window.addEventListener("mouseup", () => { view.drag = null; });
 loadFolders();
+loadFavorites();
 renderFolders();
 tick();
 setInterval(tick, 1000);

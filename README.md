@@ -40,7 +40,9 @@
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
 | `Identify` | Tag images in the selected folders when the model is ready. |
-| `Tagging device` | In the header, choose CPU, AMD, or NVIDIA for the next tagging job. |
+| `Tagging device` | Choose CPU, AMD, or NVIDIA. Oubi selects an available installed GPU when the page opens. |
+| `Sorting` / `Gallery` | Switch between genre settings and favorite tag filters. Returning to Sorting clears the active filters. |
+| Hold an image tag | Add or remove the tag from favorites. The Gallery groups saved tags by character or event. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | Lock icon | Unlock or lock the Cryptomator vault from the folder controls. |
 | `Sort destination` | With the vault open, choose the destination for both sorting and its plan. |
@@ -132,7 +134,7 @@ docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml up -d
 
 The standard Oubi image includes Cryptomator CLI and `fuse3`. The override mounts encrypted files at `/crypt` and enables FUSE access. It grants `SYS_ADMIN` and selects `apparmor:unconfined` for FUSE mounting. Click the lock in the folder controls and enter the password to switch to vault folders in the current browser session. On the first unlock, Oubi builds `.oubi/index.sqlite3` in the vault and shows progress in the terminal. Later unlocks reuse that index for browsing, counts, search, and suggestions. Tagging, sorting, and deletion in Oubi update the affected entries. The recount control rebuilds the index from the files and tag metadata. Click the lock again after any active job finishes or stops to return to the ordinary source folders. Serve the web interface over authenticated HTTPS when accessing it remotely.
 
-Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, and gender overrides use the vault’s `.oubi/` folder.
+Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, favorite tags, and gender overrides use the vault’s `.oubi/` folder.
 
 Oubi saves gallery thumbnails on demand in `.oubi/thumbnails/`. Open a preview to load the original image. Deletion through Oubi removes the corresponding thumbnail, and a recount removes cached thumbnails whose originals were deleted elsewhere.
 
