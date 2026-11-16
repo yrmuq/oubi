@@ -54,10 +54,26 @@ def read_metadata(workspace):
     return rows, sorted_paths
 
 
-def image_metadata(image, row):
+def folder_sidecars(folder):
+    directory = folder / "tags"
+    if directory.is_symlink():
+        return {}
+    try:
+        with os.scandir(directory) as entries:
+            return {entry.name: entry for entry in entries
+                    if entry.name.endswith(".txt") and entry.is_file(follow_symlinks=False)}
+    except (FileNotFoundError, NotADirectoryError):
+        return {}
+
+
+def image_metadata(image, row, *, sidecars=None):
     sidecar = sidecar_path(image)
     try:
-        info = sidecar.lstat()
+        if sidecars is None:
+            info = sidecar.lstat()
+        else:
+            entry = sidecars.get(sidecar.name)
+            info = entry.stat(follow_symlinks=False) if entry is not None else None
     except FileNotFoundError:
         info = None
     sidecar_text = None
@@ -182,6 +198,9 @@ class VaultIndex:
 
     def remove(self, name):
         self.db.execute("DELETE FROM images WHERE path = ?", (name,))
+
+    def paths(self):
+        return (row[0] for row in self.db.execute("SELECT path FROM images"))
 
     def children(self, name):
         if self.db.execute("SELECT 1 FROM folders WHERE path = ?", (name,)).fetchone() is None:

@@ -16,6 +16,9 @@
 - Release the Cryptomator lock before sending file and folder responses so a slow or disconnected browser cannot block other reads or page reloads.
 - Store the vault's rebuildable SQLite index inside Cryptomator and execute queries in memory for the open session, avoiding SQLite file locking on the NAS.
 - Update the vault index for files changed through Oubi and use the recount control to reconcile edits made outside Oubi.
+- Generate vault thumbnails on demand inside Cryptomator, load the original on zoom, and remove cached previews when Oubi deletes the source or a recount finds it missing.
+- List each folder's tag sidecars once during a vault index rebuild to avoid a separate NAS lookup for every missing sidecar.
+- Keep the sort history open during a sort and flush completed entries in batches and when a graceful stop unwinds the job.
 - Keep the gallery selection separate from the latest completed tagging result so switching preview modes leaves the running job and gallery position intact.
 - Display the decoded preview and its filename together before requesting image tags so metadata reads do not delay the current frame.
 - Keep Cryptomator indexes, sort history, and generated metadata inside the vault; expose the unlocked workspace only to the browser session that unlocked it.

@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 from oubi_cryptomator import COOKIE_NAME, VaultError
 from oubi_files import image_revision, sidecar_path
+from oubi_index import folder_sidecars
 from oubi_web import App, Handler, Workspace, images_under, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
 
 
@@ -18,6 +19,68 @@ class VaultWorkspaceTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+
+    def test_thumbnails_are_reused_replaced_and_removed_with_sources(self):
+        workspace = Workspace.encrypted(self.root)
+        images = self.root / "Album"
+        images.mkdir()
+        first, second = images / "a.jpg", images / "b.png"
+        first.write_bytes(b"first")
+        second.write_bytes(b"second")
+        app = App(workspace)
+        handler = Handler.__new__(Handler)
+        lock = threading.Lock()
+        handler.app = SimpleNamespace(vault=SimpleNamespace(lock=lock))
+        handler.headers = {}
+        handler._scoped_app = Mock(return_value=app)
+        cache_dir = self.root / ".oubi" / "thumbnails"
+
+        with patch("oubi_web.render_thumbnail", side_effect=lambda data: b"preview of " + data) as render:
+            def preview(path):
+                return handler._thumbnail_response(path.relative_to(self.root).as_posix(), "scope")
+
+            result = (200, b"preview of first", "image/webp")
+            self.assertEqual(preview(first), result)
+            self.assertEqual(preview(first), result)
+            render.assert_called_once_with(b"first")
+            first.write_bytes(b"updated source")
+            self.assertEqual(preview(first)[1], b"preview of updated source")
+            self.assertEqual(len(list(cache_dir.rglob("*.webp"))), 1)
+            self.assertEqual(preview(second)[1], b"preview of second")
+
+        app.remove_image(first.relative_to(self.root).as_posix(), image_revision(first))
+        self.assertEqual([entry.read_bytes() for entry in cache_dir.rglob("*.webp")], [b"preview of second"])
+        second.unlink()
+        app._count_folders(threading.Event(), "recount")
+        self.assertEqual(list(cache_dir.rglob("*.webp")), [])
+        first.write_bytes(b"concurrent deletion")
+
+        def remove_during_render(_):
+            self.assertFalse(lock.locked())
+            app.remove_image("Album/a.jpg", image_revision(first))
+            return b"expired preview"
+
+        with patch("oubi_web.render_thumbnail", side_effect=remove_during_render):
+            self.assertEqual(handler._thumbnail_response("Album/a.jpg", "scope")[0], 404)
+        self.assertEqual(list(cache_dir.rglob("*.webp")), [])
+        app.close_catalog()
+
+    def test_vault_scan_lists_sidecars_once_per_image_folder(self):
+        workspace = Workspace.encrypted(self.root)
+        folder = self.root / "Album"
+        folder.mkdir()
+        for filename in ("a.jpg", "a.png", "b.jpg"):
+            (folder / filename).touch()
+        sidecar = sidecar_path(folder / "a.png")
+        sidecar.parent.mkdir()
+        sidecar.write_text("moon", encoding="utf-8")
+        app = App(workspace)
+        with patch("oubi_web.folder_sidecars", wraps=folder_sidecars) as list_sidecars:
+            app._count_folders(threading.Event(), "scan")
+        list_sidecars.assert_called_once_with(folder)
+        self.assertEqual(app.folders()[0]["total"], 3)
+        self.assertEqual(app.gallery(["Album"], ["moon"]), {"files": ["Album/a.png"]})
+        app.close_catalog()
 
     def test_vault_response_releases_lock_before_writing_to_a_disconnected_client(self):
         lock = threading.Lock()

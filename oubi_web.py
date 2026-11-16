@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,10 +22,11 @@ from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
 from oubi_files import IMAGE_EXTS, ImageChangedError, delete_source_image, image_files, image_revision, sidecar_path
-from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, image_metadata, read_metadata, relative_path
+from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
 from oubi_gpu import GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
+from oubi_thumbnails import VaultThumbnails, render_thumbnail
 
 # ===== SETTINGS =====
 HERE = Path(__file__).resolve().parent
@@ -1104,6 +1105,7 @@ class App:
     def __init__(self, workspace=None, *, devices=None, index_guard=None):
         self.workspace = workspace
         self.vault = None if workspace else Vault()
+        self.thumbnails = VaultThumbnails(workspace.data) if workspace is not None else None
         self.lock = threading.Lock()
         self.gpu_lock = threading.Lock()
         self.rocm, self.nvidia = devices or (RocmRuntime(), NvidiaRuntime())
@@ -1325,6 +1327,11 @@ class App:
                                               sorted_list=workspace.sorted_list, excluded=workspace.excluded,
                                               before_commit=catalog.mark_dirty if catalog is not None else None)
         relative = Path(relative).as_posix()
+        if self.thumbnails is not None:
+            try:
+                self.thumbnails.remove(relative)
+            except OSError:
+                cleanup_pending = True
         removed = Path(workspace.images).resolve() / relative
         with self.lock:
             if self.folder_scan is not None:
@@ -1364,6 +1371,8 @@ class App:
                     if (image.suffix.lower() not in IMAGE_EXTS or not image.is_file()
                             or image.resolve() != image or in_output(image, workspace.excluded)):
                         catalog.remove(name)
+                        with suppress(OSError):
+                            self.thumbnails.remove(name)
                         continue
                     tagged, modified, character, details, terms = image_metadata(image, tags.get(name))
                     for parent in Path(name).parents:
@@ -1398,13 +1407,18 @@ class App:
                 base = Path(paths.images)
                 tags, sorted_paths = read_metadata(paths)
                 catalog.add_folder("")
+                tag_folder, sidecars = None, {}
 
                 def visit(directory):
                     catalog.add_folder(directory.relative_to(base).as_posix() if directory != base else "")
 
                 def index_image(image):
+                    nonlocal tag_folder, sidecars
+                    if image.parent != tag_folder:
+                        tag_folder = image.parent
+                        sidecars = folder_sidecars(tag_folder)
                     name = image.relative_to(base).as_posix()
-                    tagged, modified, character, details, terms = image_metadata(image, tags.get(name))
+                    tagged, modified, character, details, terms = image_metadata(image, tags.get(name), sidecars=sidecars)
                     laid = name in sorted_paths
                     catalog.set_image(name, tagged, laid, modified, character, details, terms)
                     return tagged, laid
@@ -1417,6 +1431,10 @@ class App:
                     if not cancel.is_set():
                         for name in self.gallery_removed:
                             catalog.remove(name)
+                        try:
+                            self.thumbnails.prune(catalog.paths())
+                        except OSError:
+                            self.note(text(209))
                         self._save_catalog(catalog)
                         self.catalog = catalog
                         total, _, _ = catalog.totals("")
@@ -1785,6 +1803,9 @@ class Handler(BaseHTTPRequestHandler):
                 )
             self._send(200, page, "text/html; charset=utf-8")
             return
+        if path == "/api/thumbnail":
+            self._send(*self._thumbnail_response(query.get("path", [""])[0], scope))
+            return
         with vault.lock if scope else nullcontext():
             app = self._scoped_app(scope)
             if app is None:
@@ -1792,6 +1813,43 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 response = self._file_response(path, query, app)
         self._send(*response)
+
+    def _thumbnail_response(self, relative, scope):
+        if not scope:
+            return self._error_response(404, 87)
+        vault = self.app.vault
+        try:
+            with vault.lock:
+                app = self._scoped_app(scope)
+                if app is None:
+                    return self._error_response(409, 172)
+                workspace = app.paths
+                root = Path(workspace.images).resolve()
+                file = resolve_under(root, relative)
+                if file.suffix.lower() not in IMAGE_EXTS or file.is_relative_to(workspace.excluded):
+                    raise ValueError(relative)
+                name = file.relative_to(root).as_posix()
+                revision = image_revision(file)
+                cached = None
+                with suppress(OSError):
+                    cached = app.thumbnails.read(name, revision)
+                if cached is not None:
+                    return 200, cached, "image/webp"
+                original = file.read_bytes()
+
+            preview = render_thumbnail(original)
+            with vault.lock:
+                if self._scoped_app(scope) is not app:
+                    return self._error_response(409, 172)
+                if image_revision(file) != revision:
+                    raise ValueError(relative)
+                if preview is not None:
+                    with suppress(OSError):
+                        app.thumbnails.write(name, revision, preview)
+                    return 200, preview, "image/webp"
+            return 200, original, content_type(file)
+        except (OSError, ValueError):
+            return self._error_response(404, 87)
 
     def _file_response(self, path, query, app):
         workspace = app.paths

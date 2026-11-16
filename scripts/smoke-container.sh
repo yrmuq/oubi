@@ -54,6 +54,17 @@ with sqlite3.connect(":memory:") as catalog:
     assert catalog.execute("SELECT path FROM smoke").fetchone() == ("image.jpg",)
     assert catalog.execute("SELECT value FROM json_each('[1]')").fetchone() == (1,)
 
+from io import BytesIO
+from PIL import Image
+from sys import path
+path.insert(0, "/opt/oubi")
+from oubi_thumbnails import render_thumbnail
+original = BytesIO()
+Image.new("RGB", (2048, 1536)).save(original, "PNG")
+preview = render_thumbnail(original.getvalue())
+with Image.open(BytesIO(preview)) as image:
+    assert image.format == "WEBP" and image.size == (1024, 768)
+
 import torch
 assert not torch.cuda.is_available(), "CPU image loaded CUDA"
 PY

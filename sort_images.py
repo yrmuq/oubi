@@ -20,8 +20,9 @@ genders.csv (строки вида "hatsune_miku,f" или "gojou_satoru,m") ч�
 
 По умолчанию файлы КОПИРУЮТСЯ (оригиналы не трогаются). --move перемещает, --dry-run только показывает.
 """
-import argparse, csv, os, re, shutil, sys
+import argparse, csv, os, re, shutil, signal, sys
 from collections import Counter, defaultdict
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from oubi_files import sidecar_path
@@ -37,6 +38,36 @@ def say(number, **values):
 
 GIRLS = {"1girl": 1, "2girls": 2, "3girls": 3, "4girls": 4, "5girls": 5, "6+girls": 6, "multiple_girls": 2}
 BOYS = {"1boy", "2boys", "3boys", "4boys", "5boys", "6+boys", "multiple_boys"}
+SORT_HISTORY_BATCH = 25
+
+
+@contextmanager
+def sort_history(path):
+    with ExitStack() as resources:
+        handle = None
+        pending = 0
+
+        def record(source):
+            nonlocal handle, pending
+            if not path:
+                return
+            if handle is None:
+                handle = resources.enter_context(open(path, "a", encoding="utf-8"))
+            handle.write(str(source.resolve()) + "\n")
+            pending += 1
+            if pending == SORT_HISTORY_BATCH:
+                handle.flush()
+                pending = 0
+
+        yield record
+
+
+class SortInterrupted(Exception):
+    pass
+
+
+def interrupt_sort(signum, _frame):
+    raise SortInterrupted(signum)
 
 def split(s):
     return [t.strip() for t in s.split(",") if t.strip()]
@@ -248,7 +279,11 @@ def main():
     ap.add_argument("--genres", default="", help="жанры для copyright original, через запятую, по приоритету")
     ap.add_argument("--sorted-list", default="", help="дописывать путь после успешного копирования")
     args = ap.parse_args()
+    with sort_history(args.sorted_list) as record:
+        sort_files(args, record)
 
+
+def sort_files(args, record):
     with open(args.csv, encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         fieldnames = list(reader.fieldnames or [])
@@ -370,9 +405,7 @@ def main():
                 destination = sidecar_path(dst)
                 destination.parent.mkdir(exist_ok=True)
                 op(str(txt), str(destination))
-            if args.sorted_list:
-                with open(args.sorted_list, "a", encoding="utf-8") as mark:
-                    mark.write(str(src.resolve()) + "\n")
+            record(src)
         stats["group" if folder_char == "group" else ("unknown" if folder_char == "unknown" else say(78))] += 1
 
     print(say(75, stats=dict(stats)))
@@ -382,4 +415,10 @@ def main():
         print(say(76, count=len(unknown_gender)))
 
 if __name__ == "__main__":
-    main()
+    signal.signal(signal.SIGTERM, interrupt_sort)
+    try:
+        main()
+    except SortInterrupted as interrupted:
+        signum = interrupted.args[0]
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)

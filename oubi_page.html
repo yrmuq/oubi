@@ -907,7 +907,9 @@ async function showImage(root, path) {
   renderDeleteControls();
   if (image !== previous) {
     if (!hasFile) document.getElementById("tags").textContent = t(205);
-    image.src = workspaceUrl("/api/file?root=" + root + "&path=" + encodeURIComponent(path));
+    const query = "path=" + encodeURIComponent(path);
+    image.dataset.original = workspaceUrl("/api/file?root=" + root + "&" + query);
+    image.src = vaultScope && root === "images" ? workspaceUrl("/api/thumbnail?" + query) : image.dataset.original;
     let timeout;
     const deadline = new Promise((_, reject) => {
       timeout = setTimeout(() => reject(new DOMException("", "TimeoutError")), galleryTimeoutMs);
@@ -1898,7 +1900,7 @@ function showZoomImage(image) {
   view.x = 0;
   view.y = 0;
   view.drag = null;
-  zoomImg.src = image.src;
+  zoomImg.src = image.dataset.original || image.src;
   paintZoom();
 }
 document.getElementById("shot-frame").onclick = (event) => {
