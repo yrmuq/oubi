@@ -8,12 +8,17 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import nullcontext
+from dataclasses import dataclass
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Formatter
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
+from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
+from oubi_files import IMAGE_EXTS, image_files, sidecar_path
 from oubi_gpu import GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
@@ -31,11 +36,43 @@ MAX_GENRES = 20
 THEMES = {"light", "dark", "auto"}
 MODES = {"all", "tag", "sort", "plan"}
 PAGE_PATH = HERE / "oubi_page.html"
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 SORTED_LIST = "/data/sorted.txt"
 LANG_PATH = "/data/language"
 LANG_FILES = {"en": "English.ini", "ru": "Russian.ini"}
 LANG_CHOICES = {"auto", *LANG_FILES}
+
+@dataclass(frozen=True)
+class Workspace:
+    images: str
+    output: str
+    csv: str
+    sorted_list: str
+    genders: str
+    excluded: str | None = None
+    data: str | None = None
+
+    @classmethod
+    def encrypted(cls, root):
+        relative = Path(os.environ.get("OUBI_CRYPT_OUTPUT", "Sorted"))
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+            raise VaultError(168)
+        data = root / ".oubi"
+        output = (root / relative).resolve()
+        if (not output.is_relative_to(root) or output == root or output.is_relative_to(data)
+                or data.is_relative_to(output) or "tags" in relative.parts or data.is_symlink()
+                or (output.exists() and not output.is_dir())):
+            raise VaultError(168)
+        data.mkdir(mode=0o700, exist_ok=True)
+        for name in ("tags.csv", "sorted.txt", "genders.csv", "unknown_genders.txt"):
+            if (data / name).is_symlink():
+                raise VaultError(168)
+        return cls(str(root), str(output), str(data / "tags.csv"), str(data / "sorted.txt"),
+                   str(data / "genders.csv"), str(output), str(data))
+
+
+def normal_workspace():
+    return Workspace(IMAGES, OUTPUT, CSV_PATH, SORTED_LIST, GENDERS_PATH)
+
 
 def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalogs=None, language_choice="auto"):
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
@@ -350,7 +387,7 @@ def images_with_tag(tag, path=CSV_PATH, root=IMAGES):
     return images_with_tags([tag], path, root)
 
 
-def images_with_tags(tags, path=CSV_PATH, root=IMAGES):
+def images_with_tags(tags, path=CSV_PATH, root=IMAGES, *, exclude=None):
     required = []
     seen_needles = set()
     for tag in tags or []:
@@ -391,7 +428,7 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES):
                     rel = image.resolve().relative_to(base).as_posix()
                 except (OSError, ValueError):
                     continue
-                if rel in seen or not image.is_file():
+                if rel in seen or not image.is_file() or in_output(image, exclude):
                     continue
                 seen.add(rel)
                 found.append(rel)
@@ -402,8 +439,8 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES):
         return found
     if not base.is_dir():
         return []
-    for image in images_under(base):
-        txt = image.with_suffix(".txt")
+    for image in images_under(base, exclude):
+        txt = sidecar_path(image)
         if not txt.is_file():
             continue
         parts = [part.strip().casefold() for part in txt.read_text(encoding="utf-8", errors="replace").split(",")]
@@ -413,19 +450,19 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES):
     return found
 
 
-def tags_in_folders(rels, path=CSV_PATH, root=IMAGES):
+def tags_in_folders(rels, path=CSV_PATH, root=IMAGES, *, exclude=None):
     base = Path(root).resolve()
     folder_rels = []
     for rel in rels or []:
         folder = resolve_under(base, rel)
-        if not folder.is_dir():
+        if not folder.is_dir() or in_output(folder, exclude):
             raise ValueError(rel)
         folder_rels.append("" if folder == base else folder.relative_to(base).as_posix())
     file = Path(path)
     stamp = (file.stat().st_mtime_ns, file.stat().st_size) if file.is_file() else (0, 0)
     key = (str(file), stamp, tuple(sorted(folder_rels)), str(base))
     cached = getattr(tags_in_folders, "cache", None)
-    if cached and cached["key"] == key:
+    if not exclude and cached and cached["key"] == key:
         return cached["tags"]
     seen = set()
     found = []
@@ -471,7 +508,8 @@ def tags_in_folders(rels, path=CSV_PATH, root=IMAGES):
         if handle is not None:
             try:
                 for row in csv.DictReader(handle):
-                    if not listed(relative_file(row.get("file"))):
+                    rel = relative_file(row.get("file"))
+                    if not listed(rel) or in_output(base / rel, exclude):
                         continue
                     for column in columns:
                         for part in (row.get(column) or "").split(","):
@@ -484,11 +522,11 @@ def tags_in_folders(rels, path=CSV_PATH, root=IMAGES):
         for rel in folder_rels:
             folder = base if rel == "" else base / rel
             try:
-                images = images_under(folder)
+                images = images_under(folder, exclude)
             except OSError:
                 images = []
             for image in images:
-                txt = image.with_suffix(".txt")
+                txt = sidecar_path(image)
                 if not txt.is_file():
                     continue
                 try:
@@ -498,7 +536,8 @@ def tags_in_folders(rels, path=CSV_PATH, root=IMAGES):
                 for part in raw.split(","):
                     add(part)
     found.sort(key=str.casefold)
-    tags_in_folders.cache = {"key": key, "tags": found}
+    if not exclude:
+        tags_in_folders.cache = {"key": key, "tags": found}
     return found
 
 
@@ -554,14 +593,16 @@ def load_csv_paths(path=CSV_PATH):
     return found
 
 
-def folder_names(root=IMAGES):
+def folder_names(root=IMAGES, *, exclude=None):
     base = Path(root)
     if not base.is_dir():
         return []
     try:
-        children = [path for path in base.iterdir() if path.is_dir() and not path.name.startswith(".")]
+        children = [path for path in base.iterdir() if path.is_dir() and path.name != "tags"
+                    and not path.name.startswith(".") and not in_output(path, exclude)]
     except OSError as error:
-        print(text(26, path=root, error=error), flush=True)
+        if not exclude:
+            print(text(26, path=root, error=error), flush=True)
         return []
     children.sort(key=lambda path: path.name.lower())
     if children:
@@ -607,7 +648,7 @@ def summarize_images(rel, images, csv_paths, sorted_paths, root=None):
     for image in images:
         try:
             keys = path_keys(image, root)
-            txt = image.with_suffix(".txt")
+            txt = sidecar_path(image)
             if keys & tagged_keys or (txt.is_file() and not txt.is_dir()):
                 tagged += 1
             if keys & sorted_keys:
@@ -626,17 +667,21 @@ def summarize_images(rel, images, csv_paths, sorted_paths, root=None):
     }
 
 
-def images_under(folder):
-    return [path for path in folder.rglob("*") if path.is_file() and path.suffix.lower() in IMAGE_EXTS]
+def in_output(path, exclude):
+    return bool(exclude and Path(path).resolve().is_relative_to(exclude))
 
 
-def source_folders(root=IMAGES):
-    names = folder_names(root)
+def images_under(folder, exclude=None):
+    return list(image_files(folder, exclude))
+
+
+def source_folders(root=IMAGES, *, csv=CSV_PATH, sorted_list=SORTED_LIST, exclude=None):
+    names = folder_names(root, exclude=exclude)
     if not names:
         return []
     try:
-        csv_paths = load_csv_paths()
-        sorted_paths = load_sorted_paths()
+        csv_paths = load_csv_paths(csv)
+        sorted_paths = load_sorted_paths(sorted_list)
     except OSError:
         csv_paths, sorted_paths = set(), set()
     base = Path(root)
@@ -644,14 +689,14 @@ def source_folders(root=IMAGES):
     for name in names:
         folder = base if name == "" else base / name
         try:
-            images = images_under(folder)
+            images = images_under(folder, exclude)
         except OSError:
             images = []
         found.append(summarize_images(name, images, csv_paths, sorted_paths, base))
     return found
 
 
-def absolute_folders(rels, root=IMAGES, *, language=None):
+def absolute_folders(rels, root=IMAGES, *, language=None, exclude=None):
     if not isinstance(rels, list) or not rels:
         return None, text(85, language=language)
     paths = []
@@ -662,7 +707,7 @@ def absolute_folders(rels, root=IMAGES, *, language=None):
             path = resolve_under(root, rel)
         except ValueError:
             return None, text(86, language=language)
-        if not path.is_dir():
+        if not path.is_dir() or in_output(path, exclude):
             return None, text(86, language=language)
         paths.append(str(path))
     return paths, None
@@ -698,13 +743,13 @@ def browse_dir(root, rel):
     return {"path": "" if path == base else str(path.relative_to(base)), "parent": parent, "items": items}
 
 
-def recent_tagged(rels, limit=40):
-    base = Path(IMAGES).resolve()
+def recent_tagged(rels, limit=40, *, root=IMAGES, exclude=None):
+    base = Path(root).resolve()
     found = []
     for rel in rels:
         folder = resolve_under(base, rel)
-        for image in images_under(folder):
-            txt = image.with_suffix(".txt")
+        for image in images_under(folder, exclude):
+            txt = sidecar_path(image)
             if txt.is_file():
                 found.append((txt.stat().st_mtime, str(image.resolve().relative_to(base))))
     found.sort()
@@ -715,13 +760,13 @@ def first_character(value):
     return (value or "").split(",")[0].strip()
 
 
-def character_index(path=CSV_PATH):
+def character_index(path=CSV_PATH, root=IMAGES, *, cache=True):
     file = Path(path)
     if not file.is_file():
         return {}
     stat = file.stat()
     cached = getattr(character_index, "cache", None)
-    if cached and cached["mtime"] == stat.st_mtime and cached["size"] == stat.st_size:
+    if cache and cached and cached["key"] == (file, root, stat.st_mtime_ns, stat.st_size):
         return cached["rows"]
     import csv
     csv.field_size_limit(10**9)
@@ -736,24 +781,25 @@ def character_index(path=CSV_PATH):
             if not name:
                 continue
             character = first_character(row.get("character"))
-            for key in path_keys(name, IMAGES):
+            for key in path_keys(name, root):
                 rows[key] = character
     except (OSError, csv.Error):
         return {}
     finally:
         handle.close()
-    character_index.cache = {"mtime": stat.st_mtime, "size": stat.st_size, "rows": rows}
+    if cache:
+        character_index.cache = {"key": (file, root, stat.st_mtime_ns, stat.st_size), "rows": rows}
     return rows
 
 
-def read_info(rel):
-    base = Path(IMAGES).resolve()
+def read_info(rel, *, root=IMAGES, csv=CSV_PATH, encrypted=False):
+    base = Path(root).resolve()
     image = resolve_under(base, rel)
     text = ""
-    txt = image.with_suffix(".txt")
+    txt = sidecar_path(image)
     if txt.is_file() and (base in txt.resolve().parents or txt.resolve() == base):
         text = txt.read_text(encoding="utf-8", errors="replace")[:4000]
-    names = character_index()
+    names = character_index(csv, root, cache=not encrypted)
     character = ""
     for key in path_keys(image, base):
         if names.get(key):
@@ -810,15 +856,17 @@ def reject_reason(model_state, job_running, mode, *, language=None):
     return None
 
 
-def preflight(mode, *, language=None):
-    if mode in {"tag", "all"} and not os.path.isdir(IMAGES):
+def preflight(mode, *, language=None, workspace=None, output=None):
+    workspace = workspace or normal_workspace()
+    output = output or workspace.output
+    if mode in {"tag", "all"} and not os.path.isdir(workspace.images):
         return text(35, language=language)
     batch = os.environ.get("OUBI_BATCH_SIZE", "1")
     if mode in {"tag", "all"} and (not batch.isdigit() or int(batch) < 1):
         return text(36, language=language)
-    if mode in {"sort", "plan", "all"} and not os.path.isdir(OUTPUT):
+    if mode in {"sort", "plan", "all"} and not os.path.isdir(output) and output != workspace.excluded:
         return text(37, language=language)
-    if mode in {"sort", "plan"} and not os.path.isfile(CSV_PATH):
+    if mode in {"sort", "plan"} and not os.path.isfile(workspace.csv):
         return text(38, language=language)
     if mode in {"sort", "plan", "all"} and os.environ.get("OUBI_NSFW_FROM", "q") not in {"q", "e"}:
         return text(39, language=language)
@@ -826,7 +874,8 @@ def preflight(mode, *, language=None):
 
 
 # ===== COMMANDS =====
-def tag_command(folders, *, device="cpu", architecture=None, gpu=None, python=None):
+def tag_command(folders, *, device="cpu", architecture=None, gpu=None, python=None, workspace=None):
+    workspace = workspace or normal_workspace()
     command = [
         python or sys.executable,
         str(HERE / "tag_folder.py"),
@@ -834,12 +883,14 @@ def tag_command(folders, *, device="cpu", architecture=None, gpu=None, python=No
         "--model",
         os.environ.get("OUBI_MODEL", "pixai-labs/pixai-tagger-v1.0"),
         "--csv",
-        CSV_PATH,
+        workspace.csv,
         "--batch-size",
         os.environ.get("OUBI_BATCH_SIZE", "1"),
         "--device",
         device,
     ]
+    if workspace.excluded:
+        command.extend(["--exclude", workspace.excluded])
     if architecture:
         command.extend(["--gpu-arch", architecture])
     if gpu:
@@ -851,19 +902,22 @@ def tag_command(folders, *, device="cpu", architecture=None, gpu=None, python=No
     return command
 
 
-def sort_command(plan=False, folders=None):
+def sort_command(plan=False, folders=None, *, workspace=None, output=None):
+    workspace = workspace or normal_workspace()
     command = [
         sys.executable,
         str(HERE / "sort_images.py"),
         "--csv",
-        CSV_PATH,
+        workspace.csv,
         "--out",
-        OUTPUT,
+        output or workspace.output,
         "--nsfw-from",
         os.environ.get("OUBI_NSFW_FROM", "q"),
     ]
-    if os.path.isfile(GENDERS_PATH):
-        command.extend(["--genders", GENDERS_PATH])
+    if workspace.excluded:
+        command.extend(["--exclude", workspace.excluded])
+    if os.path.isfile(workspace.genders):
+        command.extend(["--genders", workspace.genders])
     if folders:
         command.append("--only")
         command.extend(folders)
@@ -872,7 +926,7 @@ def sort_command(plan=False, folders=None):
     if plan:
         command.append("--dry-run")
     elif folders:
-        command.extend(["--sorted-list", SORTED_LIST])
+        command.extend(["--sorted-list", workspace.sorted_list])
     if flag_on(os.environ.get("OUBI_COPY_TXT")):
         command.append("--copy-txt")
     genres = [item for item in read_genres() if item]
@@ -902,15 +956,17 @@ class LineTee:
 
 # ===== STATE =====
 class App:
-    def __init__(self):
+    def __init__(self, workspace=None, *, devices=None):
+        self.workspace = workspace
+        self.vault = None if workspace else Vault()
         self.lock = threading.Lock()
         self.gpu_lock = threading.Lock()
-        self.rocm = RocmRuntime()
-        self.nvidia = NvidiaRuntime()
+        self.rocm, self.nvidia = devices or (RocmRuntime(), NvidiaRuntime())
         self.gpu_prompt = None
         self.lines = []
         self.model_state = "downloading"
         self.job_running = False
+        self.cancel_requested = False
         self.job_mode = None
         self.phase = "download"
         self.step = text(22)
@@ -952,7 +1008,7 @@ class App:
                     self.preview_file = path
             elif text.startswith(("Готово", "Done")) and self.current_file:
                 self.preview_file = self.current_file
-        if echo:
+        if echo and self.workspace is None:
             print(text, flush=True)
 
     def gpu_note(self, message_id, language, **values):
@@ -1048,12 +1104,17 @@ class App:
         return {"gpu_prompt": public_prompt, "gpu_progress": status,
                 "rocm": rocm, "nvidia": nvidia}
 
+    @property
+    def paths(self):
+        return self.workspace or normal_workspace()
+
     def folders(self):
         self._ensure_count()
         with self.lock:
             cached = self.folder_cache
         if cached is not None:
             return cached
+        paths = self.paths
         return [
             {
                 "path": name,
@@ -1064,7 +1125,7 @@ class App:
                 "scan": "none",
                 "sort": "none",
             }
-            for name in folder_names()
+            for name in folder_names(paths.images, exclude=paths.excluded)
         ]
 
     def _ensure_count(self):
@@ -1086,9 +1147,10 @@ class App:
 
     def _count_folders(self):
         try:
-            found = source_folders()
-        except Exception as error:
-            print(text(27, error=error), flush=True)
+            paths = self.paths
+            found = source_folders(paths.images, csv=paths.csv, sorted_list=paths.sorted_list, exclude=paths.excluded)
+        except (OSError, ValueError) as error:
+            self.note(text(27, error=error))
             found = None
         with self.lock:
             if found is not None:
@@ -1112,7 +1174,7 @@ class App:
             }
         if preview:
             try:
-                payload["preview_file"] = str(Path(preview).resolve().relative_to(Path(IMAGES).resolve()))
+                payload["preview_file"] = str(Path(preview).relative_to(self.paths.images))
             except ValueError:
                 payload["preview_file"] = ""
         return payload
@@ -1153,9 +1215,15 @@ class App:
         threading.Thread(target=self.download, daemon=True).start()
         return True
 
-    def start(self, mode, folders, *, language=None, device="cpu", architecture="auto", gpu="auto"):
-        paths, error = absolute_folders(folders, language=language)
-        reason = error or preflight(mode, language=language)
+    def start(self, mode, folders, *, language=None, device="cpu", architecture="auto", gpu="auto", destination=None):
+        workspace = self.paths
+        if destination is not None and destination not in ("vault", "output"):
+            return text(171, language=language)
+        if destination == "vault" and not workspace.excluded:
+            return text(171, language=language)
+        output = OUTPUT if destination == "output" else workspace.output
+        paths, error = absolute_folders(folders, workspace.images, language=language, exclude=workspace.excluded)
+        reason = error or preflight(mode, language=language, workspace=workspace, output=output)
         if reason:
             self.note(text(79, reason=reason, language=language))
             return reason
@@ -1173,48 +1241,46 @@ class App:
                     python = self.nvidia.python_for(build, uuid)
             except GpuError as error:
                 return text(error.message_id, language=language)
-            tagging = tag_command(paths, device=device, architecture=arch, gpu=uuid, python=python)
+            tagging = tag_command(paths, device=device, architecture=arch, gpu=uuid, python=python, workspace=workspace)
         with self.lock:
             if self.job_running:
                 return text(33, language=language)
             self.job_running = True
+            self.cancel_requested = False
             self.job_mode = mode
             self.percent = None
             self.detail = ""
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
             self.step = text(25, language=language)
             self.folder_cache = None
-        threading.Thread(target=self._run, args=(mode, paths, language, tagging), daemon=True).start()
+        options = {"output": output} if self.workspace else {}
+        threading.Thread(target=self._run, args=(mode, paths, language, tagging), kwargs=options, daemon=True).start()
         return None
 
-    def _run(self, mode, folders, language, tagging):
+    def _run(self, mode, folders, language, tagging, *, output=None):
+        workspace = self.paths
         commands = [tagging] if tagging else []
         if mode in {"sort", "plan", "all"}:
-            commands.append(sort_command(plan=mode == "plan", folders=folders))
+            commands.append(sort_command(plan=mode == "plan", folders=folders, workspace=workspace, output=output))
         code = 0
         env = dict(os.environ, OUBI_JOB_LANGUAGE=language or read_lang(), PYTHONNOUSERSITE="1")
         try:
             for command in commands:
-                if not self.job_running:
-                    code = -15
-                    break
                 with self.lock:
-                    if not self.job_running:
+                    if self.cancel_requested:
                         code = -15
                         break
-                self.proc = subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    env=env,
-                    text=True,
-                    bufsize=1,
-                    start_new_session=True,
-                )
-                for line in self.proc.stdout:
-                    self.note(line)
-                code = self.proc.wait()
-                self.proc = None
+                    self.proc = subprocess.Popen(
+                        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        env=env, cwd=workspace.data, text=True, bufsize=1, start_new_session=True,
+                    )
+                    proc = self.proc
+                with proc.stdout:
+                    for line in proc.stdout:
+                        self.note(line)
+                code = proc.wait()
+                with self.lock:
+                    self.proc = None
                 if code != 0:
                     break
         except OSError as error:
@@ -1235,8 +1301,8 @@ class App:
 
     def stop(self):
         with self.lock:
+            self.cancel_requested = True
             proc = self.proc
-            self.job_running = False
         if proc is None or proc.poll() is not None:
             return
         try:
@@ -1251,11 +1317,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
-    def _send(self, status, payload, content_type="application/json; charset=utf-8"):
+    def _send(self, status, payload, content_type="application/json; charset=utf-8", *, cookie=None):
         body = payload if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        if cookie is not None:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(body)
 
@@ -1265,10 +1334,83 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, status, message):
         self._send(status, {"error": text(message, language=self._language())})
 
+    def _vault_owner(self):
+        try:
+            cookie = SimpleCookie(self.headers.get("Cookie", ""))
+        except CookieError:
+            return False
+        entry = cookie.get(COOKIE_NAME)
+        return bool(entry and self.app.vault.owns(entry.value))
+
+    def _cookie(self, token):
+        cookie = SimpleCookie()
+        cookie[COOKIE_NAME] = token
+        entry = cookie[COOKIE_NAME]
+        entry["httponly"] = True
+        entry["samesite"] = "Strict"
+        entry["path"] = "/"
+        if self.headers.get("X-Forwarded-Proto") == "https":
+            entry["secure"] = True
+        if not token:
+            entry["max-age"] = 0
+        return entry.OutputString()
+
+    def _scoped_app(self, scope):
+        if not scope:
+            return self.app
+        vault = self.app.vault
+        if scope == vault.scope and self._vault_owner():
+            return vault.app
+        return None
+
+    def _vault_action(self, path, payload):
+        if self.headers.get_content_type() != "application/json":
+            self._error(400, 89)
+            return
+        vault = self.app.vault
+        with vault.lock:
+            try:
+                if path == "/api/vault/unlock":
+                    vault.unlock(payload.get("password"))
+                    try:
+                        workspace = Workspace.encrypted(vault.mount)
+                        vault.app = App(workspace, devices=(self.app.rocm, self.app.nvidia))
+                    except (OSError, ValueError, VaultError):
+                        vault.close()
+                        raise
+                else:
+                    if not self._vault_owner():
+                        raise VaultError(172)
+                    if vault.app.status()["job_running"]:
+                        raise VaultError(173)
+                    vault.close()
+            except VaultError as error:
+                self._error(409, error.message_id)
+                return
+            except (OSError, ValueError):
+                self._error(409, 169)
+                return
+            self._send(200, {"scope": vault.scope}, cookie=self._cookie(vault.token))
+
     def do_GET(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         path = parsed.path
+        vault = self.app.vault
+        scope = query.get("scope", [""])[0]
+        if path == "/api/status":
+            gpu = self.app.gpu_status(self._language())
+            normal = self.app.status()
+            with vault.lock:
+                authorized = self._vault_owner()
+                state = vault.app.status() if authorized else normal
+                if authorized and state["phase"] == "download":
+                    for field in ("step", "detail", "percent"):
+                        state[field] = normal[field] if normal["phase"] == "download" else None
+                self._send(200, {**state, **gpu, "model": normal["model"],
+                                 "vault_enabled": vault.path is not None,
+                                 "vault_scope": vault.scope if authorized else ""})
+            return
         if path == "/":
             page = page_bytes(
                 self.app.folders(), read_theme(), read_genres(), read_layout(),
@@ -1276,52 +1418,61 @@ class Handler(BaseHTTPRequestHandler):
             )
             self._send(200, page, "text/html; charset=utf-8")
             return
-        if path == "/api/status":
-            gpu = self.app.gpu_status(self._language())
-            self._send(200, {**self.app.status(), **gpu})
-            return
-        if path == "/api/folders":
-            self._send(200, self.app.folders())
-            return
-        if path == "/api/browse":
-            root = OUTPUT if query.get("root", ["output"])[0] == "output" else IMAGES
-            try:
-                self._send(200, browse_dir(root, query.get("path", [""])[0]))
-            except ValueError:
-                self._error(404, 86)
-            return
-        if path == "/api/recent":
-            try:
-                self._send(200, {"files": recent_tagged(query.get("folder", []))})
-            except ValueError:
-                self._error(404, 86)
-            return
-        if path == "/api/tagged":
-            self._send(200, {"files": images_with_tags(query.get("tag", []))})
-            return
-        if path == "/api/vocabulary":
-            try:
-                self._send(200, {"tags": tags_in_folders(query.get("folder", []))})
-            except ValueError:
-                self._error(404, 86)
-            return
-        if path == "/api/tags":
-            try:
-                self._send(200, read_info(query.get("path", [""])[0]))
-            except ValueError:
-                self._error(404, 87)
-            return
-        if path == "/api/file":
-            root = OUTPUT if query.get("root", ["images"])[0] == "output" else IMAGES
-            try:
-                file = resolve_under(root, query.get("path", [""])[0])
-            except ValueError:
-                self._error(404, 87)
+        with vault.lock if scope else nullcontext():
+            app = self._scoped_app(scope)
+            if app is None:
+                self._error(409, 172)
                 return
-            if not file.is_file() or file.suffix.lower() not in IMAGE_EXTS:
-                self._error(404, 87)
+            self._get_files(path, query, app)
+
+    def _get_files(self, path, query, app):
+        workspace = app.paths
+        rel = query.get("path", [""])[0]
+        directories = query.get("folder", [])
+        from_output = query.get("root", ["output" if path == "/api/browse" else "images"])[0] == "output"
+        root = workspace.output if from_output else workspace.images
+        excluded = None if from_output else workspace.excluded
+
+        try:
+            if path == "/api/folders":
+                self._send(200, app.folders())
                 return
-            self._send(200, file.read_bytes(), content_type(file))
+            if path == "/api/recent":
+                files = recent_tagged(directories, root=workspace.images, exclude=workspace.excluded)
+                self._send(200, {"files": files})
+                return
+            if path == "/api/tagged":
+                files = images_with_tags(query.get("tag", []), path=workspace.csv,
+                                         root=workspace.images, exclude=workspace.excluded)
+                self._send(200, {"files": files})
+                return
+            if path == "/api/vocabulary":
+                tags = tags_in_folders(directories, path=workspace.csv, root=workspace.images,
+                                       exclude=workspace.excluded)
+                self._send(200, {"tags": tags})
+                return
+            if path == "/api/browse":
+                if in_output(resolve_under(root, rel), excluded):
+                    raise ValueError(rel)
+                data = browse_dir(root, rel)
+                if excluded:
+                    data["items"] = [item for item in data["items"] if not in_output(Path(root) / item["path"], excluded)]
+                self._send(200, data)
+                return
+            if path == "/api/tags":
+                file = resolve_under(workspace.images, rel)
+                if in_output(file, workspace.excluded):
+                    raise ValueError(rel)
+                self._send(200, read_info(rel, root=workspace.images, csv=workspace.csv, encrypted=bool(workspace.excluded)))
+                return
+            if path == "/api/file":
+                file = resolve_under(root, rel)
+                if not file.is_file() or file.suffix.lower() not in IMAGE_EXTS or in_output(file, excluded):
+                    raise ValueError(rel)
+                self._send(200, file.read_bytes(), content_type(file))
+                return
+        except (OSError, ValueError):
+            self._error(404, 87 if path in {"/api/tags", "/api/file"} else 86)
             return
         self._error(404, 88)
 
@@ -1362,9 +1513,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, {"genres": read_genres()})
             return
+        if parsed.path in {"/api/vault/unlock", "/api/vault/lock"}:
+            self._vault_action(parsed.path, payload)
+            return
         if parsed.path == "/api/stop":
-            self.app.stop()
-            self._send(200, {"ok": True})
+            scope = parse_qs(parsed.query).get("scope", [""])[0]
+            with self.app.vault.lock if scope else nullcontext():
+                app = self._scoped_app(scope)
+                if app is None:
+                    self._error(409, 172)
+                    return
+                app.stop()
+                self._send(200, {"ok": True})
             return
         if parsed.path == "/api/download":
             if not self.app.retry_download():
@@ -1393,21 +1553,31 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path != "/api/job":
             self._error(404, 88)
             return
-        mode = payload.get("mode")
-        state = self.app.status()
-        language = self._language()
-        reason = reject_reason(state["model"], state["job_running"], mode, language=language)
-        if reason:
-            self._send(409, {"error": reason})
+        scope = payload.get("scope", "")
+        if not isinstance(scope, str):
+            self._error(400, 89)
             return
-        if reason := self.app.start(
-            mode, payload.get("folders") or [], language=language,
-            device=payload.get("device", "cpu"), architecture=payload.get("architecture", "auto"),
-            gpu=payload.get("gpu", "auto"),
-        ):
-            self._send(409, {"error": reason})
-            return
-        self._send(200, {"ok": True})
+        with self.app.vault.lock:
+            app = self._scoped_app(scope)
+            if app is None:
+                self._error(409, 172)
+                return
+            mode = payload.get("mode")
+            normal = self.app.status()
+            vault_app = self.app.vault.app
+            busy = normal["job_running"] or bool(vault_app and vault_app.status()["job_running"])
+            language = self._language()
+            reason = reject_reason(normal["model"], busy, mode, language=language)
+            if reason is None:
+                reason = app.start(
+                    mode, payload.get("folders") or [], language=language,
+                    device=payload.get("device", "cpu"), architecture=payload.get("architecture", "auto"),
+                    gpu=payload.get("gpu", "auto"), destination=payload.get("destination"),
+                )
+            if reason:
+                self._send(409, {"error": reason})
+                return
+            self._send(200, {"ok": True})
 
 
 def main():
@@ -1425,7 +1595,24 @@ def main():
         print(text(30), flush=True)
     else:
         print(text(31, count=len(names)), flush=True)
-    server.serve_forever()
+    def shutdown(_signum, _frame):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, shutdown)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        with app.vault.lock:
+            if opened := app.vault.app:
+                opened.stop()
+                deadline = time.monotonic() + 5
+                while opened.status()["job_running"] and time.monotonic() < deadline:
+                    time.sleep(0.05)
+            try:
+                app.vault.close()
+            except VaultError as error:
+                print(text(error.message_id), flush=True)
 
 
 if __name__ == "__main__":

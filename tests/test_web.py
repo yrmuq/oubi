@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from oubi_files import sidecar_path
 from oubi_web import (
     App,
     absolute_folders,
@@ -102,7 +103,8 @@ class WebTests(unittest.TestCase):
             folder.mkdir()
             image = folder / "a.jpg"
             image.write_bytes(b"jpg")
-            image.with_suffix(".txt").write_text("1girl", encoding="utf-8")
+            sidecar_path(image).parent.mkdir()
+            sidecar_path(image).write_text("1girl", encoding="utf-8")
             self.assertEqual(resolve_under(base, "pack"), folder.resolve())
             with self.assertRaises(ValueError):
                 resolve_under(base, "../outside")

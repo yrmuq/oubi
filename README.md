@@ -10,7 +10,7 @@
 ---
 
 > [!NOTE]
-> This project is in active development. Behavior can change and bugs may occur. A finished `tags.csv` can become outdated. Delete `tags.csv` and the `.txt` files next to the images, then run tagging again.
+> This project is in active development. Behavior can change and bugs may occur. A finished `tags.csv` can become outdated. Delete `tags.csv` and the saved `.txt` files under each source folder’s `tags/` directory, then run tagging again.
 
 ---
 
@@ -23,8 +23,9 @@
 ## Features
 
 - Select source folders, identify images, and preview saved tags in the browser.
-- Resume tagging from existing `.txt` sidecars. Set `OUBI_FORCE=1` to tag those images again.
+- Resume tagging from `tags/<image filename>.txt`, such as `tags/photo.jpg.txt`. Set `OUBI_FORCE=1` to tag those images again.
 - Plan a sort from `tags.csv`, then copy or move images. Numbered pages stay in their series and original art can be sorted by configured genres.
+- Open a Cryptomator vault and choose whether sorted images stay inside it or go to the usual output folder.
 - Filter the preview by tags, correct character genders through `genders.csv`, and customize the layout, theme, and language.
 
 ---
@@ -37,6 +38,8 @@
 | `Identify` | Tag images in the selected folders when the model is ready. |
 | `Tagging device` | In the header, choose CPU, AMD, or NVIDIA for the next tagging job. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
+| Lock icon | Unlock or lock the Cryptomator vault from the folder controls. |
+| `Sort destination` | With the vault open, choose the destination for both sorting and its plan. |
 | `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
 | `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
 | `OUBI_PORT` | Choose the host port. The container listens on `8080`. |
@@ -114,6 +117,19 @@ docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
 
 Choose `Auto` or a specific detected card. Oubi picks a PyTorch CUDA build using the card's compute capability and driver version. A downloaded build in `/data/nvidia` is shared by cards that use the same CUDA packages. Each selected card still runs its own GPU test.
 
+#### Cryptomator vaults
+
+Use the [Cryptomator Compose override](docker-compose.cryptomator.yml) and its [Dockerfile](Dockerfile.cryptomator) with the `dev` channel on a Linux x86_64 host with FUSE. Set `OUBI_CRYPT` in `.env` to the directory containing `vault.cryptomator`. The container user needs write access to that directory.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml build --pull
+docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml up -d
+```
+
+The override mounts encrypted files at `/crypt` and adds Cryptomator CLI to a local image. It grants `SYS_ADMIN` and selects `apparmor:unconfined` for FUSE mounting. Click the lock next to **Select all folders** and enter the password to switch to vault folders in the current browser session. Click it again after any active job finishes or stops to return to the ordinary source folders. Serve the web interface over authenticated HTTPS when accessing it remotely.
+
+Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, and gender overrides use the vault’s `.oubi/` folder.
+
 ---
 
 ## License & Attribution
@@ -126,3 +142,4 @@ The scripts and `Dockerfile` in this repository are licensed under `GPL-3.0-only
 | PyTorch | [pytorch/pytorch](https://github.com/pytorch/pytorch) | `BSD-3-Clause` | CPU build installed in the image. |
 | Transformers | [huggingface/transformers](https://github.com/huggingface/transformers) | `Apache-2.0` | Loads the tagger pipeline. |
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | `Apache-2.0` | Required by the tagger model code. |
+| Cryptomator CLI | [cryptomator/cli](https://github.com/cryptomator/cli) | `AGPL-3.0-only` | Optional Compose image unlocks and mounts vaults using FUSE. |

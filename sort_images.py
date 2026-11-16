@@ -24,6 +24,8 @@ import argparse, csv, os, re, shutil, sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from oubi_files import sidecar_path
+
 csv.field_size_limit(10**9)
 
 
@@ -132,7 +134,7 @@ def stick_character(row, tag):
 
 
 def stick_txt(path, tag):
-    txt = Path(path).with_suffix(".txt")
+    txt = sidecar_path(path)
     if not txt.is_file():
         return
     tags = [part.strip() for part in txt.read_text(encoding="utf-8", errors="replace").split(",") if part.strip()]
@@ -239,7 +241,8 @@ def main():
     ap.add_argument("--nsfw-from", choices=["q", "e"], default="q",
                     help="q: questionable и explicit = nsfw (по умолчанию); e: только explicit")
     ap.add_argument("--genders", help="CSV с ручными поправками пола: персонаж,f|m")
-    ap.add_argument("--copy-txt", action="store_true", help="переносить рядом и .txt с тегами")
+    ap.add_argument("--copy-txt", action="store_true", help="переносить .txt в подпапку tags")
+    ap.add_argument("--exclude")
     ap.add_argument("--only", nargs="*", default=[], help="раскладывать только файлы внутри этих папок")
     ap.add_argument("--genres", default="", help="жанры для copyright original, через запятую, по приоритету")
     ap.add_argument("--sorted-list", default="", help="дописывать путь после успешного копирования")
@@ -290,7 +293,8 @@ def main():
     counters = {}
     stats = Counter()
 
-    work = [r for r in rows if under_roots(r["file"], args.only)]
+    work = [r for r in rows if under_roots(r["file"], args.only)
+            and not (args.exclude and under_roots(r["file"], [args.exclude]))]
     series, stuck = series_targets(work, gender, nsfw_set, title_of, args.genres)
     for path, tag in stuck:
         print(say(72, path=path, tag=tag), flush=True)
@@ -358,9 +362,11 @@ def main():
             dst_dir.mkdir(parents=True, exist_ok=True)
             op = shutil.move if args.move else shutil.copy2
             op(str(src), str(dst))
-            txt = src.with_suffix(".txt")
-            if args.copy_txt and txt.exists():
-                op(str(txt), str(dst.with_suffix(".txt")))
+            txt = sidecar_path(src)
+            if args.copy_txt and txt.is_file():
+                destination = sidecar_path(dst)
+                destination.parent.mkdir(exist_ok=True)
+                op(str(txt), str(destination))
             if args.sorted_list:
                 with open(args.sorted_list, "a", encoding="utf-8") as mark:
                     mark.write(str(src.resolve()) + "\n")

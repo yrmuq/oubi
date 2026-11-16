@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Пакетная разметка папки с картинками через PixAI Tagger v1.0.
 Пример: python tag_folder.py /путь/к/картинкам --model ./pixai-tagger-v1.0
-Для каждой картинки рядом пишется .txt с тегами через запятую, плюс общий tags.csv.
+Для каждой картинки .txt с тегами пишется в подпапку tags, плюс общий tags.csv.
 Уже размеченные картинки (есть .txt) пропускаются, так что скрипт можно прерывать и запускать снова.
 """
 import argparse
@@ -11,12 +11,12 @@ import sys
 import time
 from pathlib import Path
 
+from oubi_files import image_files, sidecar_path
 from oubi_gpu import GpuError
 from oubi_nvidia import GPU_UUID, nvidia_device
 from oubi_rocm import amd_device
 
 # ===== SETTINGS =====
-EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 ORDER = ["rating", "character", "copyright", "style", "general", "meta"]
 DEFAULT_BATCH_SIZE = 1
 
@@ -325,7 +325,8 @@ def main():
     ap.add_argument("folder", nargs="+")
     ap.add_argument("--model", default="pixai-labs/pixai-tagger-v1.0")
     ap.add_argument("--csv", default="tags.csv")
-    ap.add_argument("--no-txt", action="store_true", help="не писать .txt рядом с картинками")
+    ap.add_argument("--no-txt", action="store_true", help="не писать .txt в подпапку tags")
+    ap.add_argument("--exclude")
     ap.add_argument("--force", action="store_true", help="переразметить уже размеченные")
     ap.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     ap.add_argument("--device", choices=("auto", "cpu", "amd", "nvidia"), default="auto")
@@ -360,15 +361,15 @@ def main():
     files = []
     seen = set()
     for folder in args.folder:
-        for path in Path(folder).rglob("*"):
-            if path.suffix.lower() not in EXTS or path in seen:
+        for path in image_files(folder, args.exclude):
+            if path in seen:
                 continue
             seen.add(path)
             files.append(path)
     files.sort()
     pending = []
     for index, path in enumerate(files, 1):
-        if path.with_suffix(".txt").exists() and not args.force:
+        if sidecar_path(path).is_file() and not args.force:
             continue
         pending.append((index, path))
     print(say(65, total=len(files), done=len(files) - len(pending), left=len(pending)), flush=True)
@@ -405,7 +406,9 @@ def main():
                     continue
                 cats = categories_of(result)
                 if not args.no_txt:
-                    path.with_suffix(".txt").write_text(
+                    sidecar = sidecar_path(path)
+                    sidecar.parent.mkdir(exist_ok=True)
+                    sidecar.write_text(
                         ", ".join(tag for name in ORDER for tag in cats[name]),
                         encoding="utf-8",
                     )

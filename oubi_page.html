@@ -74,7 +74,19 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .compute select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 6px; padding: 4px; min-width: 0; }
 #nvidia-card { max-width: 200px; }
 .compute button { padding: 5px 8px; }
-#all-folders { margin-left: auto; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
+.folder-actions { margin-inline-start: auto; display: flex; gap: 6px; }
+#vault-toggle { width: 32px; height: 32px; padding: 0; }
+#vault-toggle svg { width: 16px; height: 16px; display: block; margin: auto; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; }
+#vault-toggle[aria-pressed="true"] .shackle { transform: translate(4px, -1px); }
+#vault-toggle[aria-pressed="true"] { color: var(--pick); }
+#sort-target { box-sizing: border-box; width: 100%; background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+#vault-dialog { background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; width: min(320px, calc(100vw - 56px)); }
+#vault-dialog::backdrop { background: #0009; }
+#vault-form { display: grid; gap: 10px; }
+#vault-password { min-width: 0; padding: 6px 8px; font: inherit; border-radius: 6px; background: var(--bg); color: var(--text); border: 1px solid var(--line); }
+#vault-error { margin: 0; }
+.vault-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#all-folders { width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
 #all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
 #all-folders.on .box { background: currentColor; }
 button { font: inherit; color: #fff; background: var(--btn); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
@@ -244,7 +256,19 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <button id="plan" class="secondary">План сортировки</button>
         <button id="stop" class="danger" disabled>Остановить</button>
         <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
-        <button id="all-folders" class="secondary" type="button" title="Select all folders"><span class="box"></span></button>
+        <div class="folder-actions">
+          <button id="vault-toggle" class="secondary" type="button" aria-pressed="false" hidden>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path class="shackle" d="M6 8V6a4 4 0 0 1 8 0v2"/>
+              <rect x="4" y="8" width="12" height="9" rx="2"/>
+            </svg>
+          </button>
+          <button id="all-folders" class="secondary" type="button" title="Select all folders"><span class="box"></span></button>
+        </div>
+        <select id="sort-target" hidden>
+          <option value="vault">Sort into the vault</option>
+          <option value="output">Sort outside the vault</option>
+        </select>
       </div>
     </div>
     <div class="block grow" data-block="folders">
@@ -299,6 +323,17 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   </section>
 </div>
 <div id="suggest" hidden></div>
+<dialog id="vault-dialog" aria-labelledby="vault-title">
+  <form id="vault-form" autocomplete="off">
+    <label id="vault-title" for="vault-password">Cryptomator password</label>
+    <input id="vault-password" type="password" autocomplete="off" required autofocus>
+    <p id="vault-error" role="alert" hidden></p>
+    <div class="vault-dialog-actions">
+      <button id="vault-cancel" class="secondary" type="button">Cancel</button>
+      <button id="vault-unlock" type="submit">Unlock</button>
+    </div>
+  </form>
+</dialog>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
   <img id="zoom-img" alt="">
@@ -329,6 +364,14 @@ const rocmInstall = document.getElementById("rocm-install");
 const nvidiaCard = document.getElementById("nvidia-card");
 const nvidiaInstall = document.getElementById("nvidia-install");
 const terminalInput = document.getElementById("terminal-input");
+const vaultToggle = document.getElementById("vault-toggle");
+const vaultDialog = document.getElementById("vault-dialog");
+const vaultPassword = document.getElementById("vault-password");
+const vaultError = document.getElementById("vault-error");
+const vaultUnlock = document.getElementById("vault-unlock");
+const sortTarget = document.getElementById("sort-target");
+let vaultScope = "";
+let vaultBusy = false;
 let rocmState = null;
 let nvidiaState = null;
 let gpuPrompt = null;
@@ -378,6 +421,13 @@ function applyI18n() {
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("all-folders").title = t(83);
+  document.getElementById("vault-title").textContent = t(174);
+  document.getElementById("vault-cancel").textContent = t(175);
+  vaultUnlock.textContent = t(163);
+  sortTarget.setAttribute("aria-label", t(176));
+  sortTarget.options[0].textContent = t(177);
+  sortTarget.options[1].textContent = t(178);
+  renderVault();
   const language = document.getElementById("lang");
   language.setAttribute("aria-label", t(21));
   language.options[0].textContent = t(102);
@@ -448,9 +498,100 @@ function takeFolders(data) {
   renderFolders();
 }
 
+function workspaceUrl(path, scope = vaultScope) {
+  if (!scope) return path;
+  return path + (path.includes("?") ? "&" : "?") + "scope=" + encodeURIComponent(scope);
+}
+
+async function workspaceData(path) {
+  const scope = vaultScope;
+  const response = await fetch(workspaceUrl(path, scope));
+  if (!response.ok) return null;
+  const data = await response.json();
+  return scope === vaultScope ? data : null;
+}
+
+function renderVault() {
+  const opened = Boolean(vaultScope);
+  const label = t(opened ? 179 : 163);
+  vaultToggle.title = label;
+  vaultToggle.setAttribute("aria-label", label);
+  vaultToggle.setAttribute("aria-pressed", String(opened));
+  vaultToggle.disabled = vaultBusy;
+  vaultUnlock.disabled = vaultBusy;
+  vaultPassword.disabled = vaultBusy;
+  sortTarget.hidden = !opened;
+}
+
+function useVault(scope) {
+  if (scope === vaultScope) return;
+  vaultScope = scope;
+  showNotice();
+  selected.clear();
+  pinned = [];
+  vocab = [];
+  reel = [];
+  reelAt = -1;
+  follow = true;
+  sortTarget.value = "vault";
+  document.getElementById("filter-query").value = "";
+  document.getElementById("filter-ghost").replaceChildren();
+  hideSuggest();
+  closeZoom();
+  zoomImg.removeAttribute("src");
+  showEmpty();
+  document.getElementById("step").textContent = "";
+  document.getElementById("detail").textContent = "";
+  document.getElementById("log").textContent = "";
+  document.getElementById("fill").style.width = "0";
+  renderFilter();
+  refreshGenreGhosts();
+  takeFolders([]);
+  renderVault();
+  loadFolders();
+}
+
+async function changeVault(action, password) {
+  vaultBusy = true;
+  renderVault();
+  vaultError.hidden = true;
+  showNotice();
+  try {
+    const response = await fetch("/api/vault/" + action, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(action === "unlock" ? { password } : {}),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      if (action === "unlock") {
+        vaultError.textContent = data.error || t(169);
+        vaultError.hidden = false;
+      } else {
+        showNotice(data.error || t(170));
+      }
+      return;
+    }
+    if (vaultDialog.open) vaultDialog.close();
+    statusShown = ++statusRequest;
+    useVault(data.scope);
+  } catch {
+    if (action === "unlock") {
+      vaultError.textContent = t(169);
+      vaultError.hidden = false;
+    } else {
+      showNotice(t(170));
+    }
+  } finally {
+    vaultBusy = false;
+    renderVault();
+    if (vaultDialog.open) vaultPassword.focus();
+    tick();
+  }
+}
+
 async function loadFolders() {
   try {
-    const data = await (await fetch("/api/folders")).json();
+    const data = await workspaceData("/api/folders");
     if (!Array.isArray(data)) return;
     takeFolders(data);
   } catch (error) {
@@ -466,7 +607,8 @@ async function loadRecent() {
     return;
   }
   const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
-  const data = await (await fetch("/api/recent?" + query)).json();
+  const data = await workspaceData("/api/recent?" + query);
+  if (!data) return;
   reel = data.files || [];
   if (!reel.length) showEmpty();
   else if (follow && reel.length) showAt(reel.length - 1);
@@ -480,8 +622,8 @@ async function loadVocab() {
   }
   const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
   try {
-    const data = await (await fetch("/api/vocabulary?" + query)).json();
-    if ([...selected].sort().join("\n") !== key) return;
+    const data = await workspaceData("/api/vocabulary?" + query);
+    if (!data || [...selected].sort().join("\n") !== key) return;
     vocab = data.tags || [];
   } catch (error) {
     return;
@@ -543,7 +685,8 @@ async function applyFilter() {
     return;
   }
   const query = pinned.map((tag) => "tag=" + encodeURIComponent(tag)).join("&");
-  const data = await (await fetch("/api/tagged?" + query)).json();
+  const data = await workspaceData("/api/tagged?" + query);
+  if (!data) return;
   reel = data.files || [];
   follow = false;
   if (reel.length) showAt(0);
@@ -579,15 +722,17 @@ function showAt(index) {
 
 async function showImage(root, path) {
   if (!path) return;
-  shown = root + ":" + path;
-  document.getElementById("shot").src = "/api/file?root=" + root + "&path=" + encodeURIComponent(path);
+  const imageKey = root + ":" + path;
+  shown = imageKey;
+  document.getElementById("shot").src = workspaceUrl("/api/file?root=" + root + "&path=" + encodeURIComponent(path));
   document.getElementById("name").textContent = fileName(path);
   hasFile = true;
   document.getElementById("who").textContent = "";
   document.getElementById("tags").replaceChildren();
   tagText = "";
   if (root !== "images") return;
-  const data = await (await fetch("/api/tags?path=" + encodeURIComponent(path))).json();
+  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(path));
+  if (!data || shown !== imageKey) return;
   document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
   tagText = data.text || "";
   paintTags(tagText);
@@ -599,6 +744,8 @@ async function tick() {
   const data = await (await fetch("/api/status")).json();
   if (request < statusShown) return;
   statusShown = request;
+  vaultToggle.hidden = !data.vault_enabled;
+  useVault(data.vault_scope || "");
   rocmState = data.rocm;
   nvidiaState = data.nvidia;
   if (gpuPrompt?.id !== data.gpu_prompt?.id) {
@@ -773,7 +920,7 @@ async function start(mode) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode, folders: [...selected], device: deviceInput.value, architecture: rocmArch.value || "auto",
-        gpu: nvidiaCard.value,
+        gpu: nvidiaCard.value, scope: vaultScope, destination: vaultScope ? sortTarget.value : "output",
       }),
     });
     if (!response.ok) {
@@ -1358,7 +1505,25 @@ document.getElementById("filter-query").onkeydown = (event) => {
 };
 document.getElementById("filter-query").onblur = () => setTimeout(hideSuggest, 0);
 applyI18n();
-document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
+document.getElementById("stop").onclick = () => fetch(workspaceUrl("/api/stop"), { method: "POST" });
+vaultToggle.onclick = () => {
+  if (vaultScope) {
+    changeVault("lock");
+    return;
+  }
+  vaultPassword.value = "";
+  vaultError.hidden = true;
+  vaultDialog.showModal();
+};
+document.getElementById("vault-cancel").onclick = () => vaultDialog.close();
+vaultDialog.addEventListener("cancel", event => { if (vaultBusy) event.preventDefault(); });
+document.getElementById("vault-form").onsubmit = event => {
+  event.preventDefault();
+  if (vaultBusy) return;
+  const password = vaultPassword.value;
+  vaultPassword.value = "";
+  changeVault("unlock", password);
+};
 document.getElementById("all-folders").onclick = () => {
   const every = folders.length > 0 && folders.every((folder) => selected.has(folder.path));
   if (every) selected.clear();

@@ -1,0 +1,23 @@
+services:
+  oubi:
+    image: oubi:cryptomator
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile.cryptomator
+      args:
+        OUBI_CHANNEL: ${OUBI_CHANNEL:-dev}
+    init: true
+    tmpfs:
+      - /run/oubi-crypt:mode=1777
+    security_opt:
+      - apparmor:unconfined
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+    volumes:
+      - ${OUBI_CRYPT:?Set OUBI_CRYPT to the vault directory}:/crypt
+    environment:
+      OUBI_CRYPT: /crypt
+      OUBI_CRYPT_OUTPUT: ${OUBI_CRYPT_OUTPUT:-Sorted}
