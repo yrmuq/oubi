@@ -74,7 +74,8 @@ def normal_workspace():
     return Workspace(IMAGES, OUTPUT, CSV_PATH, SORTED_LIST, GENDERS_PATH)
 
 
-def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalogs=None, language_choice="auto"):
+def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalogs=None, language_choice="auto",
+               *, vault_enabled=False, vault_scope=""):
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
     chosen = theme if theme in THEMES else "auto"
     genre_payload = json.dumps(list(genres or [])[:MAX_GENRES], ensure_ascii=False).replace("<", "\\u003c")
@@ -83,6 +84,8 @@ def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalog
     language_choice = language_choice if language_choice in LANG_CHOICES else "auto"
     lang_payload = json.dumps(catalogs or {}, ensure_ascii=False).replace("<", "\\u003c")
     html = PAGE_PATH.read_text(encoding="utf-8")
+    html = html.replace("__OUBI_VAULT_HIDDEN__", "" if vault_enabled else " hidden", 1)
+    html = html.replace("__OUBI_VAULT_SCOPE__", json.dumps(vault_scope), 1)
     html = html.replace("FOLDERS_JSON", payload, 1).replace("__OUBI_THEME__", chosen, 1)
     html = html.replace("__OUBI_GENRES__", genre_payload, 1)
     html = html.replace("__OUBI_MAX_GENRES__", str(MAX_GENRES), 1)
@@ -558,19 +561,22 @@ def resolve_under(root, rel):
     return path
 
 
-def load_sorted_paths(path=SORTED_LIST):
+def load_sorted_paths(path=SORTED_LIST, *, cancelled=None):
     found = set()
     file = Path(path)
     if not file.is_file():
         return found
-    for line in file.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if line:
-            found.add(line)
+    with file.open(encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if cancelled and cancelled():
+                break
+            line = line.strip()
+            if line:
+                found.add(line)
     return found
 
 
-def load_csv_paths(path=CSV_PATH):
+def load_csv_paths(path=CSV_PATH, *, cancelled=None):
     found = set()
     file = Path(path)
     if not file.is_file():
@@ -583,6 +589,8 @@ def load_csv_paths(path=CSV_PATH):
         return found
     try:
         for row in csv.DictReader(handle):
+            if cancelled and cancelled():
+                break
             name = (row.get("file") or "").strip()
             if name:
                 found.add(name)
@@ -633,19 +641,23 @@ def path_keys(path, root=None):
     return keys
 
 
-def index_paths(paths, root=None):
+def index_paths(paths, root=None, *, cancelled=None):
     found = set()
     for name in paths:
+        if cancelled and cancelled():
+            break
         found.update(path_keys(name, root))
     return found
 
 
-def summarize_images(rel, images, csv_paths, sorted_paths, root=None):
+def summarize_images(rel, images, csv_paths, sorted_paths, root=None, *, cancelled=None):
     tagged = 0
     laid = 0
-    tagged_keys = index_paths(csv_paths, root)
-    sorted_keys = index_paths(sorted_paths, root)
+    tagged_keys = index_paths(csv_paths, root, cancelled=cancelled)
+    sorted_keys = index_paths(sorted_paths, root, cancelled=cancelled)
     for image in images:
+        if cancelled and cancelled():
+            break
         try:
             keys = path_keys(image, root)
             txt = sidecar_path(image)
@@ -671,28 +683,43 @@ def in_output(path, exclude):
     return bool(exclude and Path(path).resolve().is_relative_to(exclude))
 
 
-def images_under(folder, exclude=None):
-    return list(image_files(folder, exclude))
+def images_under(folder, exclude=None, *, cancelled=None):
+    return list(image_files(folder, exclude, cancelled=cancelled))
 
 
-def source_folders(root=IMAGES, *, csv=CSV_PATH, sorted_list=SORTED_LIST, exclude=None):
-    names = folder_names(root, exclude=exclude)
+def folder_paths(root, directory, exclude):
+    base = Path(root)
+    folder = resolve_under(base, directory) if directory else base
+    if directory:
+        rel = folder.relative_to(base.resolve())
+        if (not folder.is_dir() or in_output(folder, exclude)
+                or any(part.startswith(".") or part == "tags" for part in rel.parts)):
+            raise ValueError(directory)
+        directory = rel.as_posix() if rel.parts else ""
+    return ["/".join(part for part in (directory, name) if part)
+            for name in folder_names(folder, exclude=exclude)]
+
+
+def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTED_LIST, exclude=None, cancelled=None):
+    names = folder_paths(root, directory, exclude)
     if not names:
         return []
     try:
-        csv_paths = load_csv_paths(csv)
-        sorted_paths = load_sorted_paths(sorted_list)
+        csv_paths = load_csv_paths(csv, cancelled=cancelled)
+        sorted_paths = load_sorted_paths(sorted_list, cancelled=cancelled)
     except OSError:
         csv_paths, sorted_paths = set(), set()
     base = Path(root)
     found = []
     for name in names:
+        if cancelled and cancelled():
+            break
         folder = base if name == "" else base / name
         try:
-            images = images_under(folder, exclude)
+            images = images_under(folder, exclude, cancelled=cancelled)
         except OSError:
             images = []
-        found.append(summarize_images(name, images, csv_paths, sorted_paths, base))
+        found.append(summarize_images(name, images, csv_paths, sorted_paths, base, cancelled=cancelled))
     return found
 
 
@@ -976,8 +1003,7 @@ class App:
         self.preview_file = ""
         self.current_file = ""
         self.folder_cache = None
-        self.folder_cached_at = 0.0
-        self.folder_counting = False
+        self.folder_scan = None
 
     def _append_line(self, line):
         self.lines.append(line)
@@ -1108,55 +1134,66 @@ class App:
     def paths(self):
         return self.workspace or normal_workspace()
 
-    def folders(self):
-        self._ensure_count()
+    def folders(self, directory=""):
+        paths = self.paths
+        names = folder_paths(paths.images, directory, paths.excluded)
+        self._ensure_count(directory)
         with self.lock:
             cached = self.folder_cache
-        if cached is not None:
-            return cached
-        paths = self.paths
+        if cached is not None and cached[0] == directory:
+            summaries = {item["path"]: item for item in cached[1]}
+        else:
+            summaries = {}
         return [
-            {
+            summaries.get(name) or {
                 "path": name,
-                "name": text(84) if name == "" else name,
+                "name": text(84) if name == "" else Path(name).name,
                 "total": 0,
                 "tagged": 0,
                 "sorted": 0,
                 "scan": "none",
                 "sort": "none",
             }
-            for name in folder_names(paths.images, exclude=paths.excluded)
+            for name in names
         ]
 
-    def _ensure_count(self):
+    def _ensure_count(self, directory=""):
         with self.lock:
-            fresh = self.folder_cache is not None and time.monotonic() - self.folder_cached_at < 8
-            if fresh:
+            cached = self.folder_cache
+            fresh = cached and cached[0] == directory and time.monotonic() - cached[2] < 8
+            if fresh or self.folder_scan:
                 return
-            start = not self.folder_counting
-            if start:
-                self.folder_counting = True
-        if start:
-            self._count_folders()
-            return
-        while True:
-            with self.lock:
-                if not self.folder_counting:
-                    return
-            time.sleep(0.05)
+            cancel = threading.Event()
+            worker = threading.Thread(target=self._count_folders, args=(directory, cancel), daemon=True)
+            self.folder_scan = (cancel, worker)
+            worker.start()
 
-    def _count_folders(self):
+    def stop_folder_count(self):
+        with self.lock:
+            if not self.folder_scan:
+                return
+            cancel, worker = self.folder_scan
+            cancel.set()
+        worker.join(timeout=2)
+
+    def _invalidate_folders(self):
+        self.folder_cache = None
+        if self.folder_scan:
+            self.folder_scan[0].set()
+
+    def _count_folders(self, directory, cancel):
+        found = None
         try:
             paths = self.paths
-            found = source_folders(paths.images, csv=paths.csv, sorted_list=paths.sorted_list, exclude=paths.excluded)
+            found = source_folders(paths.images, directory=directory, csv=paths.csv, sorted_list=paths.sorted_list,
+                                   exclude=paths.excluded, cancelled=cancel.is_set)
         except (OSError, ValueError) as error:
             self.note(text(27, error=error))
-            found = None
-        with self.lock:
-            if found is not None:
-                self.folder_cache = found
-                self.folder_cached_at = time.monotonic()
-            self.folder_counting = False
+        finally:
+            with self.lock:
+                if found is not None and not cancel.is_set():
+                    self.folder_cache = (directory, found, time.monotonic())
+                self.folder_scan = None
 
     def status(self):
         with self.lock:
@@ -1252,7 +1289,7 @@ class App:
             self.detail = ""
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
             self.step = text(25, language=language)
-            self.folder_cache = None
+            self._invalidate_folders()
         options = {"output": output} if self.workspace else {}
         threading.Thread(target=self._run, args=(mode, paths, language, tagging), kwargs=options, daemon=True).start()
         return None
@@ -1291,7 +1328,7 @@ class App:
                 self.job_running = False
                 self.job_mode = None
                 self.proc = None
-                self.folder_cache = None
+                self._invalidate_folders()
             if code == 0:
                 self.note(text(80, language=language))
             elif code < 0:
@@ -1412,10 +1449,14 @@ class Handler(BaseHTTPRequestHandler):
                                  "vault_scope": vault.scope if authorized else ""})
             return
         if path == "/":
-            page = page_bytes(
-                self.app.folders(), read_theme(), read_genres(), read_layout(),
-                self._language(), load_catalogs(), read_language_choice(),
-            )
+            with vault.lock:
+                opened = self._vault_owner()
+                workspace = vault.app if opened else self.app
+                page = page_bytes(
+                    workspace.folders(), read_theme(), read_genres(), read_layout(),
+                    self._language(), load_catalogs(), read_language_choice(),
+                    vault_enabled=vault.path is not None, vault_scope=vault.scope if opened else "",
+                )
             self._send(200, page, "text/html; charset=utf-8")
             return
         with vault.lock if scope else nullcontext():
@@ -1435,7 +1476,7 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if path == "/api/folders":
-                self._send(200, app.folders())
+                self._send(200, app.folders(directories[0] if directories else ""))
                 return
             if path == "/api/recent":
                 files = recent_tagged(directories, root=workspace.images, exclude=workspace.excluded)
@@ -1586,7 +1627,7 @@ def main():
     port = int(os.environ.get("OUBI_LISTEN", "8080"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     threading.Thread(target=app.download, daemon=True).start()
-    threading.Thread(target=app._ensure_count, daemon=True).start()
+    app._ensure_count()
     print(text(28, port=port), flush=True)
     names = folder_names()
     if not names:

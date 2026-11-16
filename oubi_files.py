@@ -11,9 +11,11 @@ def sidecar_path(image):
     return image.parent / "tags" / (image.name + ".txt")
 
 
-def image_files(folder, exclude=None):
+def image_files(folder, exclude=None, *, cancelled=None):
     excluded = Path(exclude).resolve() if exclude else None
     for directory, subdirs, names in os.walk(folder):
+        if cancelled and cancelled():
+            return
         parent = Path(directory)
         if excluded and parent.resolve().is_relative_to(excluded):
             subdirs.clear()
@@ -21,6 +23,8 @@ def image_files(folder, exclude=None):
         subdirs[:] = [name for name in subdirs if name != "tags"
                       and not (excluded and (parent / name).resolve() == excluded)]
         for name in names:
+            if cancelled and cancelled():
+                return
             image = parent / name
             if image.suffix.lower() in IMAGE_EXTS and image.is_file() and not (excluded and image.is_symlink()):
                 yield image

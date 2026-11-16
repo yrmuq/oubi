@@ -1,6 +1,7 @@
 import csv
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -31,6 +32,40 @@ class VaultWorkspaceTests(unittest.TestCase):
             with self.subTest(path=invalid), patch.dict(os.environ, {"OUBI_CRYPT_OUTPUT": invalid}):
                 with self.assertRaisesRegex(VaultError, "168"):
                     Workspace.encrypted(self.root)
+
+    def test_vault_folders_appear_while_counting_runs_and_can_be_cancelled(self):
+        (self.root / "Album").mkdir()
+        app = App(Workspace.encrypted(self.root))
+        started = threading.Event()
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.addCleanup(app.stop_folder_count)
+
+        def slow_count(*args, cancelled, **kwargs):
+            started.set()
+            while not cancelled() and not release.wait(0.01):
+                continue
+            return []
+
+        with patch("oubi_web.source_folders", side_effect=slow_count):
+            self.assertEqual([folder["path"] for folder in app.folders()], ["Album"])
+            self.assertTrue(started.wait(1))
+            app.stop_folder_count()
+        self.assertIsNone(app.folder_scan)
+        self.assertIsNone(app.folder_cache)
+
+    def test_folder_navigation_lists_children_without_exposing_vault_output(self):
+        (self.root / "Album" / "Selected").mkdir(parents=True)
+        (self.root / "Album" / "Sorted").mkdir()
+        (self.root / "Album" / "tags").mkdir()
+        with patch.dict(os.environ, {"OUBI_CRYPT_OUTPUT": "Album/Sorted"}):
+            app = App(Workspace.encrypted(self.root))
+        self.addCleanup(app.stop_folder_count)
+        self.assertEqual([item["path"] for item in app.folders("Album")], ["Album/Selected"])
+        self.assertEqual([item["path"] for item in app.folders("Album/Selected")], ["Album/Selected"])
+        for path in ("Album/Sorted", "Album/tags", ".oubi", "../outside"):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                app.folders(path)
 
     def test_sort_plan_and_sort_share_destination_and_private_index(self):
         with patch.dict(os.environ, {"OUBI_CRYPT_OUTPUT": "Sorted"}):

@@ -86,6 +86,10 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #vault-password { min-width: 0; padding: 6px 8px; font: inherit; border-radius: 6px; background: var(--bg); color: var(--text); border: 1px solid var(--line); }
 #vault-error { margin: 0; }
 .vault-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#folder-navigation { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; min-width: 0; }
+#folder-navigation[hidden] { display: none; }
+#folder-up { height: 28px; padding: 0 8px; }
+#folder-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #all-folders { width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
 #all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
 #all-folders.on .box { background: currentColor; }
@@ -257,7 +261,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <button id="stop" class="danger" disabled>Остановить</button>
         <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
         <div class="folder-actions">
-          <button id="vault-toggle" class="secondary" type="button" aria-pressed="false" hidden>
+          <button id="vault-toggle" class="secondary" type="button" aria-pressed="false"__OUBI_VAULT_HIDDEN__>
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <path class="shackle" d="M6 8V6a4 4 0 0 1 8 0v2"/>
               <rect x="4" y="8" width="12" height="9" rx="2"/>
@@ -272,6 +276,10 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       </div>
     </div>
     <div class="block grow" data-block="folders">
+      <div id="folder-navigation" hidden>
+        <button id="folder-up" type="button" class="secondary" aria-label="Up one level">↑</button>
+        <span id="folder-location"></span>
+      </div>
       <div id="folders"></div>
     </div>
     <div class="block" data-block="progress">
@@ -370,7 +378,9 @@ const vaultPassword = document.getElementById("vault-password");
 const vaultError = document.getElementById("vault-error");
 const vaultUnlock = document.getElementById("vault-unlock");
 const sortTarget = document.getElementById("sort-target");
-let vaultScope = "";
+let vaultScope = __OUBI_VAULT_SCOPE__;
+let folderLocation = "";
+let folderSelectionTimer = null;
 let vaultBusy = false;
 let rocmState = null;
 let nvidiaState = null;
@@ -421,6 +431,9 @@ function applyI18n() {
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("all-folders").title = t(83);
+  const up = document.getElementById("folder-up");
+  up.title = t(180);
+  up.setAttribute("aria-label", t(180));
   document.getElementById("vault-title").textContent = t(174);
   document.getElementById("vault-cancel").textContent = t(175);
   vaultUnlock.textContent = t(163);
@@ -473,28 +486,46 @@ function renderFolders() {
     label.className = "name";
     label.textContent = folder.path === "" ? t(84) : folder.name;
     button.append(folderIcon(folder.scan, folder.sort), label);
+    button.title = t(181);
     button.onclick = () => {
       if (selected.has(folder.path)) selected.delete(folder.path);
       else selected.add(folder.path);
-      renderFolders();
-      loadRecent();
-      loadVocab();
+      button.classList.toggle("on", selected.has(folder.path));
+      updateSelectAll();
+      clearTimeout(folderSelectionTimer);
+      folderSelectionTimer = setTimeout(() => {
+        loadRecent();
+        loadVocab();
+      }, 250);
+    };
+    button.ondblclick = () => navigateFolders(folder.path);
+    button.onkeydown = event => {
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        navigateFolders(folder.path);
+      }
     };
     box.appendChild(button);
   }
+  updateSelectAll();
+}
+
+function updateSelectAll() {
   const all = document.getElementById("all-folders");
-  if (all) all.classList.toggle("on", folders.length > 0 && folders.every((folder) => selected.has(folder.path)));
+  all.classList.toggle("on", folders.length > 0 && folders.every(folder => selected.has(folder.path)));
 }
 
 function takeFolders(data) {
   const prev = new Map(folders.map((folder) => [folder.path, folder]));
-  folders = data.map((folder) => {
+  const updated = data.map((folder) => {
     if (!folder.scan && prev.has(folder.path) && prev.get(folder.path).scan) {
       const old = prev.get(folder.path);
       return Object.assign({}, folder, { scan: old.scan, sort: old.sort });
     }
     return folder;
   });
+  if (JSON.stringify(updated) === JSON.stringify(folders)) return;
+  folders = updated;
   renderFolders();
 }
 
@@ -523,30 +554,47 @@ function renderVault() {
   sortTarget.hidden = !opened;
 }
 
-function useVault(scope) {
-  if (scope === vaultScope) return;
-  vaultScope = scope;
-  showNotice();
+function selectFolderLocation(path) {
+  folderLocation = path;
+  clearTimeout(folderSelectionTimer);
   selected.clear();
   pinned = [];
   vocab = [];
   reel = [];
   reelAt = -1;
   follow = true;
-  sortTarget.value = "vault";
+  const caption = document.getElementById("folder-location");
+  caption.textContent = path;
+  caption.title = path;
+  document.getElementById("folder-navigation").hidden = !path;
   document.getElementById("filter-query").value = "";
   document.getElementById("filter-ghost").replaceChildren();
   hideSuggest();
   closeZoom();
   zoomImg.removeAttribute("src");
   showEmpty();
+  renderFilter();
+  refreshGenreGhosts();
+  takeFolders([]);
+}
+
+function navigateFolders(path) {
+  if (path === folderLocation) return;
+  selectFolderLocation(path);
+  loadFolders();
+  tick();
+}
+
+function useVault(scope) {
+  if (scope === vaultScope) return;
+  vaultScope = scope;
+  showNotice();
+  selectFolderLocation("");
+  sortTarget.value = "vault";
   document.getElementById("step").textContent = "";
   document.getElementById("detail").textContent = "";
   document.getElementById("log").textContent = "";
   document.getElementById("fill").style.width = "0";
-  renderFilter();
-  refreshGenreGhosts();
-  takeFolders([]);
   renderVault();
   loadFolders();
 }
@@ -591,8 +639,10 @@ async function changeVault(action, password) {
 
 async function loadFolders() {
   try {
-    const data = await workspaceData("/api/folders");
-    if (!Array.isArray(data)) return;
+    const directory = folderLocation;
+    const path = directory ? "/api/folders?folder=" + encodeURIComponent(directory) : "/api/folders";
+    const data = await workspaceData(path);
+    if (directory !== folderLocation || !Array.isArray(data)) return;
     takeFolders(data);
   } catch (error) {
     return;
@@ -606,9 +656,10 @@ async function loadRecent() {
     showEmpty();
     return;
   }
-  const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
+  const paths = [...selected];
+  const query = paths.map(folder => "folder=" + encodeURIComponent(folder)).join("&");
   const data = await workspaceData("/api/recent?" + query);
-  if (!data) return;
+  if (!data || pinned.length || paths.length !== selected.size || paths.some(path => !selected.has(path))) return;
   reel = data.files || [];
   if (!reel.length) showEmpty();
   else if (follow && reel.length) showAt(reel.length - 1);
@@ -684,9 +735,10 @@ async function applyFilter() {
     loadRecent();
     return;
   }
+  const tags = pinned.join("\n");
   const query = pinned.map((tag) => "tag=" + encodeURIComponent(tag)).join("&");
   const data = await workspaceData("/api/tagged?" + query);
-  if (!data) return;
+  if (!data || tags !== pinned.join("\n")) return;
   reel = data.files || [];
   follow = false;
   if (reel.length) showAt(0);
@@ -1524,7 +1576,11 @@ document.getElementById("vault-form").onsubmit = event => {
   vaultPassword.value = "";
   changeVault("unlock", password);
 };
+document.getElementById("folder-up").onclick = () => {
+  navigateFolders(folderLocation.split("/").slice(0, -1).join("/"));
+};
 document.getElementById("all-folders").onclick = () => {
+  clearTimeout(folderSelectionTimer);
   const every = folders.length > 0 && folders.every((folder) => selected.has(folder.path));
   if (every) selected.clear();
   else for (const folder of folders) selected.add(folder.path);

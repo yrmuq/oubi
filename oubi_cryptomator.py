@@ -113,6 +113,8 @@ class Vault:
             raise
 
     def close(self):
+        if self.app is not None:
+            self.app.stop_folder_count()
         if self.process is not None:
             self._unmount()
         self.token = self.scope = ""
