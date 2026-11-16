@@ -1394,7 +1394,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        query = parse_qs(parsed.query)
+        query = parse_qs(parsed.query, keep_blank_values=True)
         path = parsed.path
         vault = self.app.vault
         scope = query.get("scope", [""])[0]

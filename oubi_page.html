@@ -616,14 +616,14 @@ async function loadRecent() {
 
 async function loadVocab() {
   const key = [...selected].sort().join("\n");
-  if (!key) {
+  if (!selected.size) {
     vocab = [];
     return;
   }
   const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
   try {
     const data = await workspaceData("/api/vocabulary?" + query);
-    if (!data || [...selected].sort().join("\n") !== key) return;
+    if (!data || !selected.size || [...selected].sort().join("\n") !== key) return;
     vocab = data.tags || [];
   } catch (error) {
     return;
