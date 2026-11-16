@@ -36,6 +36,7 @@
 | Input | Action |
 | :--- | :--- |
 | Folder tile | Click to select a source folder. Double-click or press Right Arrow to open its subfolders. Use the up arrow to return to the parent folder. |
+| Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
 | `Identify` | Tag images in the selected folders when the model is ready. |
 | `Tagging device` | In the header, choose CPU, AMD, or NVIDIA for the next tagging job. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |

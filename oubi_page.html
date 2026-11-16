@@ -80,12 +80,14 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #vault-toggle[aria-pressed="true"] .shackle { transform: translate(4px, -1px); }
 #vault-toggle[aria-pressed="true"] { color: var(--pick); }
 #sort-target { box-sizing: border-box; width: 100%; background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
-#vault-dialog { background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; width: min(320px, calc(100vw - 56px)); }
-#vault-dialog::backdrop { background: #0009; }
+#vault-dialog, #delete-dialog { background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; width: min(320px, calc(100vw - 56px)); }
+#vault-dialog::backdrop, #delete-dialog::backdrop { background: #0009; }
 #vault-form { display: grid; gap: 10px; }
 #vault-password { min-width: 0; padding: 6px 8px; font: inherit; border-radius: 6px; background: var(--bg); color: var(--text); border: 1px solid var(--line); }
-#vault-error { margin: 0; }
-.vault-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#vault-error, #delete-error { margin: 0; }
+#delete-title { margin: 0 0 14px; overflow-wrap: anywhere; }
+#delete-error { margin-top: 10px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 #folder-navigation { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; min-width: 0; }
 #folder-navigation[hidden] { display: none; }
 #folder-up { height: 28px; padding: 0 8px; }
@@ -136,7 +138,11 @@ body.arrange .block * { pointer-events: none; }
 #arrange.on { background: var(--pick); color: #111; }
 #lang { height: 32px; padding: 0 8px; background: var(--btn-2); color: var(--text); }
 #preview { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-#shot { width: 100%; flex: 1 1 auto; min-height: 80px; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
+#shot-frame { position: relative; flex: 1 1 0; min-height: 80px; }
+#shot { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
+#delete-image { position: absolute; right: 8px; bottom: 8px; width: 32px; height: 32px; padding: 0; border: 1px solid #777; color: #fff; background: #161616e0; }
+#delete-image:not(:disabled):hover { background: var(--danger); }
+#delete-image svg { display: block; margin: auto; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 #switch { position: relative; width: 100%; height: 44px; flex: 0 0 44px; margin-bottom: 8px; }
 #prev, #next { position: absolute; top: 0; z-index: 2; height: 44px; margin: 0; padding: 0 10px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; line-height: 1; background: transparent; color: var(--text); font-size: 22px; }
 #prev { left: 0; }
@@ -300,7 +306,12 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   <section class="pane mid" id="mid">
     <div class="block grow" data-block="preview">
       <div id="preview">
-        <img id="shot" alt="">
+        <div id="shot-frame">
+          <img id="shot" alt="">
+          <button id="delete-image" type="button" aria-label="Delete image" hidden disabled>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14m-12 0 1 12h8l1-12M7 5V3h6v2M8 8v6m4-6v6"/></svg>
+          </button>
+        </div>
         <div id="switch">
           <button id="prev" type="button">❮</button>
           <span id="name">filename</span>
@@ -336,11 +347,19 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     <label id="vault-title" for="vault-password">Cryptomator password</label>
     <input id="vault-password" type="password" autocomplete="off" required autofocus>
     <p id="vault-error" role="alert" hidden></p>
-    <div class="vault-dialog-actions">
+    <div class="dialog-actions">
       <button id="vault-cancel" class="secondary" type="button">Cancel</button>
       <button id="vault-unlock" type="submit">Unlock</button>
     </div>
   </form>
+</dialog>
+<dialog id="delete-dialog" aria-labelledby="delete-title">
+  <p id="delete-title"></p>
+  <div class="dialog-actions">
+    <button id="delete-cancel" type="button" class="secondary" autofocus>Cancel</button>
+    <button id="delete-confirm" type="button" class="danger">Yes, delete</button>
+  </div>
+  <p id="delete-error" role="alert" hidden></p>
 </dialog>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
@@ -353,6 +372,8 @@ let reel = [];
 let reelAt = -1;
 let follow = true;
 let shown = "";
+let previewRevision = "";
+let workspaceMutation = 0;
 let genres = __OUBI_GENRES__;
 const maxGenres = __OUBI_MAX_GENRES__;
 let layout = __OUBI_LAYOUT__;
@@ -372,6 +393,13 @@ const rocmInstall = document.getElementById("rocm-install");
 const nvidiaCard = document.getElementById("nvidia-card");
 const nvidiaInstall = document.getElementById("nvidia-install");
 const terminalInput = document.getElementById("terminal-input");
+const deleteImage = document.getElementById("delete-image");
+const deleteDialog = document.getElementById("delete-dialog");
+const deleteConfirm = document.getElementById("delete-confirm");
+const deleteCancel = document.getElementById("delete-cancel");
+const deleteError = document.getElementById("delete-error");
+let deleteTarget = null;
+let deleteBusy = false;
 const vaultToggle = document.getElementById("vault-toggle");
 const vaultDialog = document.getElementById("vault-dialog");
 const vaultPassword = document.getElementById("vault-password");
@@ -404,6 +432,8 @@ function t(id) {
 function showEmpty() {
   hasFile = false;
   shown = "";
+  previewRevision = "";
+  renderDeleteControls();
   const shot = document.getElementById("shot");
   shot.removeAttribute("src");
   document.getElementById("name").textContent = t(11);
@@ -428,6 +458,10 @@ function applyI18n() {
   nvidiaInstall.textContent = t(157);
   terminalInput.setAttribute("aria-label", t(158));
   showTerminalInput();
+  deleteImage.setAttribute("aria-label", t(182));
+  deleteImage.title = t(182);
+  deleteConfirm.textContent = t(184);
+  deleteCancel.textContent = t(175);
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("all-folders").title = t(83);
@@ -536,10 +570,11 @@ function workspaceUrl(path, scope = vaultScope) {
 
 async function workspaceData(path) {
   const scope = vaultScope;
+  const mutation = workspaceMutation;
   const response = await fetch(workspaceUrl(path, scope));
   if (!response.ok) return null;
   const data = await response.json();
-  return scope === vaultScope ? data : null;
+  return scope === vaultScope && mutation === workspaceMutation ? data : null;
 }
 
 function renderVault() {
@@ -587,6 +622,7 @@ function navigateFolders(path) {
 
 function useVault(scope) {
   if (scope === vaultScope) return;
+  if (deleteDialog.open && !deleteBusy) deleteDialog.close();
   vaultScope = scope;
   showNotice();
   selectFolderLocation("");
@@ -776,9 +812,11 @@ async function showImage(root, path) {
   if (!path) return;
   const imageKey = root + ":" + path;
   shown = imageKey;
+  previewRevision = "";
   document.getElementById("shot").src = workspaceUrl("/api/file?root=" + root + "&path=" + encodeURIComponent(path));
   document.getElementById("name").textContent = fileName(path);
   hasFile = true;
+  renderDeleteControls();
   document.getElementById("who").textContent = "";
   document.getElementById("tags").replaceChildren();
   tagText = "";
@@ -787,8 +825,77 @@ async function showImage(root, path) {
   if (!data || shown !== imageKey) return;
   document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
   tagText = data.text || "";
+  previewRevision = data.revision || "";
+  renderDeleteControls();
   paintTags(tagText);
   refreshGenreGhosts();
+}
+
+function renderDeleteControls() {
+  const shot = document.getElementById("shot");
+  deleteImage.hidden = !hasFile;
+  deleteImage.disabled = !previewRevision || !shot.complete || !shot.naturalWidth || wasBusy || deleteBusy;
+  deleteConfirm.disabled = deleteBusy || wasBusy;
+  deleteCancel.disabled = deleteBusy;
+}
+
+function openDeleteDialog() {
+  if (deleteImage.disabled || !shown.startsWith("images:")) return;
+  deleteTarget = { path: shown.slice("images:".length), revision: previewRevision, scope: vaultScope };
+  document.getElementById("delete-title").textContent = t(183).replace("{name}", () => fileName(deleteTarget.path));
+  deleteError.hidden = true;
+  deleteDialog.showModal();
+}
+
+function discardDeletedImage(path) {
+  const activePath = reel[reelAt];
+  const index = reel.indexOf(path);
+  reel = reel.filter(item => item !== path);
+  if (shown === "images:" + path) {
+    follow = false;
+    if (reel.length) showAt(Math.min(index < 0 ? 0 : index, reel.length - 1));
+    else {
+      reelAt = -1;
+      showEmpty();
+    }
+  } else {
+    reelAt = reel.indexOf(activePath);
+  }
+}
+
+async function confirmDelete() {
+  if (!deleteTarget || deleteBusy || wasBusy) return;
+  const target = deleteTarget;
+  deleteBusy = true;
+  deleteError.hidden = true;
+  renderDeleteControls();
+  try {
+    const response = await fetch("/api/image/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(target),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      deleteError.textContent = data.error || t(186);
+      deleteError.hidden = false;
+      return;
+    }
+    deleteDialog.close();
+    if (target.scope === vaultScope) {
+      workspaceMutation++;
+      statusShown = ++statusRequest;
+      discardDeletedImage(target.path);
+      showNotice(data.warning || "");
+      loadFolders();
+      loadVocab();
+      tick();
+    }
+  } catch {
+    deleteError.textContent = t(186);
+    deleteError.hidden = false;
+  } finally {
+    deleteBusy = false;
+    renderDeleteControls();
+  }
 }
 
 async function tick() {
@@ -837,6 +944,7 @@ async function tick() {
   document.getElementById("retry").hidden = data.model !== "error";
   if (wasBusy && !busy) loadFolders();
   wasBusy = !!busy;
+  renderDeleteControls();
   if (follow && data.preview_file && data.preview_file !== (reel[reelAt] || "")) {
     if (!reel.includes(data.preview_file)) reel.push(data.preview_file);
     showAt(reel.indexOf(data.preview_file));
@@ -1557,6 +1665,12 @@ document.getElementById("filter-query").onkeydown = (event) => {
 };
 document.getElementById("filter-query").onblur = () => setTimeout(hideSuggest, 0);
 applyI18n();
+deleteImage.onclick = openDeleteDialog;
+deleteConfirm.onclick = confirmDelete;
+deleteCancel.onclick = () => deleteDialog.close();
+deleteDialog.addEventListener("cancel", event => { if (deleteBusy) event.preventDefault(); });
+document.getElementById("shot").addEventListener("load", renderDeleteControls);
+document.getElementById("shot").addEventListener("error", renderDeleteControls);
 document.getElementById("stop").onclick = () => fetch(workspaceUrl("/api/stop"), { method: "POST" });
 vaultToggle.onclick = () => {
   if (vaultScope) {

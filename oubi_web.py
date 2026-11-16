@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Страница oubi: при старте только скачивает модель, разметку и раскладку запускают кнопки."""
+import csv
 import json
 import os
 import re
@@ -18,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
-from oubi_files import IMAGE_EXTS, image_files, sidecar_path
+from oubi_files import IMAGE_EXTS, ImageChangedError, delete_source_image, image_files, image_revision, sidecar_path
 from oubi_gpu import GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
@@ -1181,6 +1182,19 @@ class App:
         if self.folder_scan:
             self.folder_scan[0].set()
 
+    def remove_image(self, relative, revision):
+        workspace = self.paths
+        cleanup_pending = delete_source_image(workspace.images, relative, revision, index=workspace.csv,
+                                              sorted_list=workspace.sorted_list, excluded=workspace.excluded)
+        removed = Path(workspace.images).resolve() / relative
+        with self.lock:
+            if Path(self.preview_file) == removed:
+                self.preview_file = ""
+            if Path(self.current_file) == removed:
+                self.current_file = ""
+            self._invalidate_folders()
+        return cleanup_pending
+
     def _count_folders(self, directory, cancel):
         found = None
         try:
@@ -1400,6 +1414,37 @@ class Handler(BaseHTTPRequestHandler):
             return vault.app
         return None
 
+    def _delete_image(self, payload):
+        scope = payload.get("scope")
+        path = payload.get("path")
+        revision = payload.get("revision")
+        if (self.headers.get_content_type() != "application/json"
+                or not isinstance(scope, str) or not isinstance(path, str) or not isinstance(revision, str)
+                or not revision or len(revision) > 160):
+            self._error(400, 89)
+            return
+        with self.app.vault.lock:
+            app = self._scoped_app(scope)
+            if app is None:
+                self._error(409, 172)
+                return
+            if app.status()["job_running"]:
+                self._error(409, 188)
+                return
+            try:
+                cleanup_pending = app.remove_image(path, revision)
+            except ImageChangedError:
+                self._error(409, 187)
+                return
+            except (OSError, UnicodeError, csv.Error):
+                self._error(500, 186)
+                return
+            except ValueError:
+                self._error(404, 87)
+                return
+            warning = text(189, language=self._language()) if cleanup_pending else ""
+            self._send(200, {"ok": True, "warning": warning})
+
     def _vault_action(self, path, payload):
         if self.headers.get_content_type() != "application/json":
             self._error(400, 89)
@@ -1504,7 +1549,10 @@ class Handler(BaseHTTPRequestHandler):
                 file = resolve_under(workspace.images, rel)
                 if in_output(file, workspace.excluded):
                     raise ValueError(rel)
-                self._send(200, read_info(rel, root=workspace.images, csv=workspace.csv, encrypted=bool(workspace.excluded)))
+                data = read_info(rel, root=workspace.images, csv=workspace.csv, encrypted=bool(workspace.excluded))
+                if file.suffix.lower() in IMAGE_EXTS and file.is_file():
+                    data["revision"] = image_revision(file)
+                self._send(200, data)
                 return
             if path == "/api/file":
                 file = resolve_under(root, rel)
@@ -1556,6 +1604,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path in {"/api/vault/unlock", "/api/vault/lock"}:
             self._vault_action(parsed.path, payload)
+            return
+        if parsed.path == "/api/image/delete":
+            self._delete_image(payload)
             return
         if parsed.path == "/api/stop":
             scope = parse_qs(parsed.query).get("scope", [""])[0]
