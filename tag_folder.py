@@ -6,6 +6,7 @@
 """
 import argparse
 import csv
+import json
 import os
 import sys
 import time
@@ -321,6 +322,9 @@ def load_tagger(model, device="auto", architecture=None):
 
 # ===== TAG THE FOLDER =====
 def main():
+    from oubi_web import TAG_PREVIEW_EVENT
+
+    report_preview = os.environ.get("OUBI_WEB_TAG_PREVIEW") == "1"
     ap = argparse.ArgumentParser()
     ap.add_argument("folder", nargs="+")
     ap.add_argument("--model", default="pixai-labs/pixai-tagger-v1.0")
@@ -399,6 +403,7 @@ def main():
             else:
                 print(say(69, start=loaded[0][0], end=loaded[-1][0], total=len(files)), flush=True)
             results = tag_images(tagger, [image for _, _, image in loaded])
+            last_tagged = None
             for (index, path, image), result in zip(loaded, results):
                 image.close()
                 if isinstance(result, Exception):
@@ -413,6 +418,7 @@ def main():
                         encoding="utf-8",
                     )
                 writer.writerow([str(path)] + [", ".join(cats[name]) for name in ORDER])
+                last_tagged = path
                 done += 1
                 if done % 50 == 0:
                     handle.flush()
@@ -431,6 +437,9 @@ def main():
                     ),
                     flush=True,
                 )
+            if report_preview and last_tagged is not None:
+                handle.flush()
+                print(TAG_PREVIEW_EVENT + json.dumps(str(last_tagged)), flush=True)
     print(say(71, count=done))
     return 0
 

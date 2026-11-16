@@ -74,7 +74,7 @@ class VaultWorkspaceTests(unittest.TestCase):
             ("checking", 1, 2), ("checking", 2, 2), ("done", 2, 2),
         ])
 
-    def test_vault_reuses_root_scan_for_descendants_until_files_change(self):
+    def test_vault_reuses_root_scan_after_deletion_until_manual_recount(self):
         workspace = Workspace.encrypted(self.root)
         tagged = self.root / "Album" / "Selected" / "Deep" / "tagged.jpg"
         untagged = self.root / "Album" / "Selected" / "untagged.jpg"
@@ -99,25 +99,39 @@ class VaultWorkspaceTests(unittest.TestCase):
 
         with patch("oubi_web.source_folders", wraps=source_folders) as scan:
             app.folders("Album")
-            self.assertEqual(finish_scan(), {"directory": "", "stage": "done", "done": 2, "total": 2})
-            with patch("oubi_web.time.monotonic", return_value=app.folder_cache[2] + 60):
-                for directory, child in (("", "Album"), ("Album", "Album/Selected")):
-                    with self.subTest(directory=directory):
-                        folder, = app.folders(directory)
-                        self.assertEqual((folder["path"], folder["total"], folder["scan"], folder["sort"]),
-                                         (child, 2, "part", "part"))
-                leaf, = app.folders("Album/Selected")
-                self.assertEqual((leaf["path"], leaf["total"], leaf["scan"], leaf["sort"]),
-                                 ("Album/Selected/Deep", 1, "done", "done"))
-                self.assertEqual(app.folders("Album/Selected/Deep"), [leaf])
+            completed = finish_scan()
+            self.assertEqual((completed["stage"], completed["done"], completed["total"]), ("done", 2, 2))
+            for directory, child in (("", "Album"), ("Album", "Album/Selected")):
+                with self.subTest(directory=directory):
+                    folder, = app.folders(directory)
+                    self.assertEqual((folder["path"], folder["total"], folder["scan"], folder["sort"]),
+                                     (child, 2, "part", "part"))
+            leaf, = app.folders("Album/Selected")
+            self.assertEqual((leaf["path"], leaf["total"], leaf["scan"], leaf["sort"]),
+                             ("Album/Selected/Deep", 1, "done", "done"))
+            self.assertEqual(app.folders("Album/Selected/Deep"), [leaf])
             self.assertEqual(scan.call_count, 1)
-            self.assertEqual(scan.call_args.kwargs["directory"], "")
 
             app.remove_image(str(tagged.relative_to(self.root)), image_revision(tagged))
-            app.folders("Album/Selected")
-            self.assertEqual(finish_scan()["total"], 1)
+            self.assertEqual(app.folders("Album/Selected"), [leaf])
+            self.assertEqual(scan.call_count, 1)
+            self.assertEqual(app.status()["scan_progress"], completed)
+            self.assertTrue(app._ensure_count(refresh=True))
+            refreshed = finish_scan()
+            self.assertEqual(refreshed["total"], 1)
+            self.assertNotEqual(refreshed["id"], completed["id"])
             self.assertEqual(app.folders("Album/Selected")[0]["scan"], "none")
             self.assertEqual(scan.call_count, 2)
+
+    def test_work_preview_uses_completed_tag_events(self):
+        app = App(Workspace.encrypted(self.root))
+        image = self.root / "Album" / " last.jpg"
+        app.note(f"Now: tagging {image} (1 of 2).")
+        self.assertEqual(app.status()["preview_file"], "")
+        app.note(f'OUBI_TAG_PREVIEW "{image}"')
+        app.note("Now: tagging batch 2–3 of 3.")
+        self.assertEqual(app.status()["preview_file"], "Album/ last.jpg")
+        self.assertNotIn("OUBI_TAG_PREVIEW", "\n".join(app.status()["log"]))
 
     def test_folder_navigation_lists_children_without_exposing_vault_output(self):
         (self.root / "Album" / "Selected").mkdir(parents=True)

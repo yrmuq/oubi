@@ -42,6 +42,7 @@ SORTED_LIST = "/data/sorted.txt"
 LANG_PATH = "/data/language"
 LANG_FILES = {"en": "English.ini", "ru": "Russian.ini"}
 LANG_CHOICES = {"auto", *LANG_FILES}
+TAG_PREVIEW_EVENT = "OUBI_TAG_PREVIEW "
 
 @dataclass(frozen=True)
 class Workspace:
@@ -392,7 +393,7 @@ def images_with_tag(tag, path=CSV_PATH, root=IMAGES):
     return images_with_tags([tag], path, root)
 
 
-def images_with_tags(tags, path=CSV_PATH, root=IMAGES, *, exclude=None):
+def images_with_tags(tags, path=CSV_PATH, root=IMAGES, *, exclude=None, folders=None):
     required = []
     seen_needles = set()
     for tag in tags or []:
@@ -405,6 +406,10 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES, *, exclude=None):
         return []
     needed = set(required)
     base = Path(root).resolve()
+    sources = [base] if folders is None else [resolve_under(base, folder) for folder in folders]
+    sources = [folder for folder in sources if folder.is_dir() and not in_output(folder, exclude)]
+    if not sources:
+        return []
     found = []
     seen = set()
     file = Path(path)
@@ -430,10 +435,12 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES, *, exclude=None):
                 if not image.is_absolute():
                     image = base / raw
                 try:
-                    rel = image.resolve().relative_to(base).as_posix()
+                    resolved = image.resolve()
+                    rel = resolved.relative_to(base).as_posix()
                 except (OSError, ValueError):
                     continue
-                if rel in seen or not image.is_file() or in_output(image, exclude):
+                if (rel in seen or not any(resolved.is_relative_to(folder) for folder in sources)
+                        or not image.is_file() or in_output(image, exclude)):
                     continue
                 seen.add(rel)
                 found.append(rel)
@@ -442,16 +449,19 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES, *, exclude=None):
         finally:
             handle.close()
         return found
-    if not base.is_dir():
-        return []
-    for image in images_under(base, exclude):
-        txt = sidecar_path(image)
-        if not txt.is_file():
-            continue
-        parts = [part.strip().casefold() for part in txt.read_text(encoding="utf-8", errors="replace").split(",")]
-        if not needed <= set(parts):
-            continue
-        found.append(image.resolve().relative_to(base).as_posix())
+    for source in sources:
+        for image in image_files(source, exclude):
+            resolved = image.resolve()
+            if not resolved.is_relative_to(base):
+                continue
+            rel = resolved.relative_to(base).as_posix()
+            txt = sidecar_path(image)
+            if rel in seen or not txt.is_file():
+                continue
+            parts = {part.strip().casefold() for part in txt.read_text(encoding="utf-8", errors="replace").split(",")}
+            if needed <= parts:
+                found.append(rel)
+                seen.add(rel)
     return found
 
 
@@ -841,17 +851,27 @@ def browse_dir(root, rel):
     return {"path": "" if path == base else str(path.relative_to(base)), "parent": parent, "items": items}
 
 
-def recent_tagged(rels, limit=40, *, root=IMAGES, exclude=None):
+def recent_tagged(rels, limit=40, *, root=IMAGES, exclude=None, csv=None):
     base = Path(root).resolve()
-    found = []
+    indexed = {os.path.normpath(base / path) for path in load_csv_paths(csv)} if csv else set()
+    found = {}
     for rel in rels:
         folder = resolve_under(base, rel)
-        for image in images_under(folder, exclude):
+        for image in image_files(folder, exclude):
             txt = sidecar_path(image)
-            if txt.is_file():
-                found.append((txt.stat().st_mtime, str(image.resolve().relative_to(base))))
-    found.sort()
-    return [item for _, item in found[-limit:]]
+            try:
+                if txt.is_file():
+                    modified = txt.stat().st_mtime
+                elif str(image) in indexed:
+                    modified = image.stat().st_mtime
+                else:
+                    continue
+                name = image.resolve().relative_to(base).as_posix()
+            except (OSError, ValueError):
+                continue
+            found[name] = modified
+    items = sorted(found, key=lambda item: (found[item], item))
+    return items if limit is None else items[-limit:]
 
 
 def first_character(value):
@@ -1066,13 +1086,13 @@ class App:
         self.job_running = False
         self.cancel_requested = False
         self.job_mode = None
+        self.job_id = ""
         self.phase = "download"
         self.step = text(22)
         self.detail = ""
         self.percent = None
         self.proc = None
         self.preview_file = ""
-        self.current_file = ""
         self.folder_cache = None
         self.folder_scan = None
         self.scan_progress = None
@@ -1086,6 +1106,14 @@ class App:
         if not text:
             return
         with self.lock:
+            if text.startswith(TAG_PREVIEW_EVENT):
+                try:
+                    path = json.loads(text.removeprefix(TAG_PREVIEW_EVENT))
+                except ValueError:
+                    return
+                if isinstance(path, str) and Path(path).is_absolute():
+                    self.preview_file = path
+                return
             self._append_line(text)
             parsed = parse_progress(text)
             if "percent" in parsed:
@@ -1096,16 +1124,6 @@ class App:
                 self.step = parsed["step"]
             if "kind" in parsed:
                 self.phase = parsed["kind"]
-            found = re.search(r"(?:Сейчас: размечаю|Now: tagging) (.+) \(\d+ (?:из|of) \d+\)\.?$", text)
-            if found:
-                path = found.group(1).strip()
-                if self.current_file:
-                    self.preview_file = self.current_file
-                self.current_file = path
-                if not self.preview_file:
-                    self.preview_file = path
-            elif text.startswith(("Готово", "Done")) and self.current_file:
-                self.preview_file = self.current_file
         if echo and self.workspace is None:
             print(text, flush=True)
 
@@ -1209,32 +1227,24 @@ class App:
     def folders(self, directory=""):
         paths = self.paths
         names = folder_paths(paths.images, directory, paths.excluded)
-        self._ensure_count(directory)
+        self._ensure_count()
         with self.lock:
-            cached = self.folder_cache
-        if cached is not None and (self.workspace is not None or cached[0] == directory):
-            summaries = cached[1]
-        else:
-            summaries = {}
+            summaries = self.folder_cache or {}
         return [summaries.get(name) or _folder_summary(name) for name in names]
 
-    def _ensure_count(self, directory=""):
+    def _ensure_count(self, *, refresh=False):
         with self.lock:
-            cached = self.folder_cache
-            if self.folder_scan:
-                return
-            report_progress = self.workspace is not None
-            if report_progress:
-                if cached is not None or (self.job_running and self.job_mode != "plan"):
-                    return
-                directory = ""
-                self.scan_progress = {"directory": directory, "stage": "discover", "done": 0, "total": None}
-            elif cached and cached[0] == directory and time.monotonic() - cached[2] < 8:
-                return
+            if self.job_running and self.job_mode != "plan":
+                return False
+            if self.folder_scan or (self.folder_cache is not None and not refresh):
+                return True
             cancel = threading.Event()
-            worker = threading.Thread(target=self._count_folders, args=(directory, cancel, report_progress), daemon=True)
+            scan_id = uuid4().hex
+            self.scan_progress = {"id": scan_id, "stage": "discover", "done": 0, "total": None}
+            worker = threading.Thread(target=self._count_folders, args=(cancel, scan_id), daemon=True)
             self.folder_scan = (cancel, worker)
             worker.start()
+            return True
 
     def stop_folder_count(self):
         with self.lock:
@@ -1258,12 +1268,9 @@ class App:
         with self.lock:
             if Path(self.preview_file) == removed:
                 self.preview_file = ""
-            if Path(self.current_file) == removed:
-                self.current_file = ""
-            self._invalidate_folders()
         return cleanup_pending
 
-    def _count_folders(self, directory, cancel, report_progress):
+    def _count_folders(self, cancel, scan_id):
         found = None
         last_stage = None
         last_report = 0.0
@@ -1277,25 +1284,24 @@ class App:
                 return
             with self.lock:
                 if not cancel.is_set():
-                    self.scan_progress = {"directory": directory, "stage": stage, "done": done, "total": total}
+                    self.scan_progress = {"id": scan_id, "stage": stage, "done": done, "total": total}
                     last_stage, last_report = stage, now
 
         try:
             paths = self.paths
-            found = source_folders(paths.images, directory=directory, csv=paths.csv, sorted_list=paths.sorted_list,
-                                   exclude=paths.excluded, cancelled=cancel.is_set,
-                                   progress=report if report_progress else None, include_descendants=report_progress)
+            found = source_folders(paths.images, csv=paths.csv, sorted_list=paths.sorted_list,
+                                   exclude=paths.excluded, cancelled=cancel.is_set, progress=report,
+                                   include_descendants=True)
         except (OSError, ValueError) as error:
             self.note(text(27, error=error))
         finally:
             with self.lock:
                 if found is not None and not cancel.is_set():
                     summaries = {item["path"]: item for item in found}
-                    self.folder_cache = (directory, summaries, time.monotonic())
-                    if report_progress:
-                        total = summaries[""]["total"] if "" in summaries else 0
-                        self.scan_progress = {"directory": directory, "stage": "done", "done": total, "total": total}
-                elif report_progress:
+                    self.folder_cache = summaries
+                    total = summaries[""]["total"] if "" in summaries else 0
+                    self.scan_progress = {"id": scan_id, "stage": "done", "done": total, "total": total}
+                else:
                     self.scan_progress = None
                 self.folder_scan = None
 
@@ -1306,6 +1312,7 @@ class App:
                 "model": self.model_state,
                 "job_running": self.job_running,
                 "job_mode": self.job_mode,
+                "job_id": self.job_id,
                 "phase": self.phase,
                 "step": self.step,
                 "detail": self.detail,
@@ -1390,11 +1397,12 @@ class App:
             self.job_running = True
             self.cancel_requested = False
             self.job_mode = mode
+            self.job_id = uuid4().hex
             self.percent = None
             self.detail = ""
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
             self.step = text(25, language=language)
-            if not self.workspace or mode != "plan":
+            if mode != "plan":
                 self._invalidate_folders()
         options = {"output": output} if self.workspace else {}
         threading.Thread(target=self._run, args=(mode, paths, language, tagging), kwargs=options, daemon=True).start()
@@ -1406,7 +1414,7 @@ class App:
         if mode in {"sort", "plan", "all"}:
             commands.append(sort_command(plan=mode == "plan", folders=folders, workspace=workspace, output=output))
         code = 0
-        env = dict(os.environ, OUBI_JOB_LANGUAGE=language or read_lang(), PYTHONNOUSERSITE="1")
+        env = dict(os.environ, OUBI_JOB_LANGUAGE=language or read_lang(), PYTHONNOUSERSITE="1", OUBI_WEB_TAG_PREVIEW="1")
         try:
             for command in commands:
                 with self.lock:
@@ -1434,7 +1442,7 @@ class App:
                 self.job_running = False
                 self.job_mode = None
                 self.proc = None
-                if not self.workspace or mode != "plan":
+                if mode != "plan":
                     self._invalidate_folders()
             if code == 0:
                 self.note(text(80, language=language))
@@ -1624,12 +1632,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, app.folders(directories[0] if directories else ""))
                 return
             if path == "/api/recent":
-                files = recent_tagged(directories, root=workspace.images, exclude=workspace.excluded)
+                files = recent_tagged(directories, limit=None, root=workspace.images, exclude=workspace.excluded,
+                                      csv=workspace.csv)
                 self._send(200, {"files": files})
                 return
             if path == "/api/tagged":
                 files = images_with_tags(query.get("tag", []), path=workspace.csv,
-                                         root=workspace.images, exclude=workspace.excluded)
+                                         root=workspace.images, exclude=workspace.excluded, folders=query.get("folder"))
                 self._send(200, {"files": files})
                 return
             if path == "/api/vocabulary":
@@ -1708,6 +1717,20 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/image/delete":
             self._delete_image(payload)
             return
+        if parsed.path == "/api/folders/recount":
+            scope = payload.get("scope", "")
+            if self.headers.get_content_type() != "application/json" or not isinstance(scope, str):
+                self._error(400, 89)
+                return
+            with self.app.vault.lock if scope else nullcontext():
+                app = self._scoped_app(scope)
+                if app is None:
+                    self._error(409, 172)
+                elif app._ensure_count(refresh=True):
+                    self._send(202, {"ok": True})
+                else:
+                    self._error(409, 33)
+            return
         if parsed.path == "/api/stop":
             scope = parse_qs(parsed.query).get("scope", [""])[0]
             with self.app.vault.lock if scope else nullcontext():
@@ -1769,7 +1792,7 @@ class Handler(BaseHTTPRequestHandler):
             if reason:
                 self._send(409, {"error": reason})
                 return
-            self._send(200, {"ok": True})
+            self._send(200, {"ok": True, "job_id": app.status()["job_id"]})
 
 
 def main():

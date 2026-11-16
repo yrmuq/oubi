@@ -29,6 +29,7 @@ from oubi_web import (
     write_layout,
     images_with_tag,
     images_with_tags,
+    recent_tagged,
     tags_in_folders,
     detect_lang,
     read_lang,
@@ -212,7 +213,8 @@ class LayoutTests(unittest.TestCase):
             root.mkdir()
             picture = root / "a.jpg"
             picture.write_bytes(b"x")
-            other = root / "b.jpg"
+            other = root / "other" / "b.jpg"
+            other.parent.mkdir()
             other.write_bytes(b"x")
             csv_path = Path(tmp) / "tags.csv"
             csv_path.write_text(
@@ -225,6 +227,9 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(images_with_tag("missing", csv_path, root), [])
             self.assertEqual(images_with_tags(["comic", "1girl"], csv_path, root), ["a.jpg"])
             self.assertEqual(images_with_tags(["comic", "portrait"], csv_path, root), [])
+            self.assertEqual(images_with_tags(["comic"], csv_path, root, folders=["other"]), [])
+            self.assertEqual(images_with_tags(["1girl"], csv_path, root, folders=["other"]), ["other/b.jpg"])
+            self.assertEqual(recent_tagged(["other"], root=root, csv=csv_path), ["other/b.jpg"])
 
     def test_vocabulary_comes_from_selected_folders(self):
         import tempfile

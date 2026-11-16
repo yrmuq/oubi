@@ -37,6 +37,8 @@
 | :--- | :--- |
 | Folder tile | Click to select a source folder. Double-click or press Right Arrow to open its subfolders. Use the up arrow to return to the parent folder. |
 | Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
+| Recount icon | Refresh the image counts and status badges for the active workspace. Folder counts can be refreshed manually after deleting images. |
+| Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
 | `Identify` | Tag images in the selected folders when the model is ready. |
 | `Tagging device` | In the header, choose CPU, AMD, or NVIDIA for the next tagging job. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
@@ -128,7 +130,7 @@ docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml pull
 docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml up -d
 ```
 
-The standard Oubi image includes Cryptomator CLI and `fuse3`. The override mounts encrypted files at `/crypt` and enables FUSE access. It grants `SYS_ADMIN` and selects `apparmor:unconfined` for FUSE mounting. Click the lock next to **Select all folders** and enter the password to switch to vault folders in the current browser session. The terminal shows unlocking and the folder scan progress while the tagger and sorter are idle. Oubi scans from the vault root and reuses the counts as you browse. It refreshes the counts after tagging, sorting, or deleting images. Click the lock again after any active job finishes or stops to return to the ordinary source folders. Serve the web interface over authenticated HTTPS when accessing it remotely.
+The standard Oubi image includes Cryptomator CLI and `fuse3`. The override mounts encrypted files at `/crypt` and enables FUSE access. It grants `SYS_ADMIN` and selects `apparmor:unconfined` for FUSE mounting. Click the lock in the folder controls and enter the password to switch to vault folders in the current browser session. The terminal shows unlocking and the folder scan progress while the tagger and sorter are idle. Oubi scans from the vault root and reuses the counts as you browse. It refreshes the counts after tagging or sorting. Click the lock again after any active job finishes or stops to return to the ordinary source folders. Serve the web interface over authenticated HTTPS when accessing it remotely.
 
 Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, and gender overrides use the vault’s `.oubi/` folder.
 

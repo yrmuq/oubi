@@ -75,8 +75,9 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #nvidia-card { max-width: 200px; }
 .compute button { padding: 5px 8px; }
 .folder-actions { margin-inline-start: auto; display: flex; gap: 6px; }
-#vault-toggle { width: 32px; height: 32px; padding: 0; }
-#vault-toggle svg { width: 16px; height: 16px; display: block; margin: auto; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; }
+#vault-toggle, #recount-folders { width: 32px; height: 32px; padding: 0; }
+#vault-toggle svg, #recount-folders svg { width: 16px; height: 16px; display: block; margin: auto; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#recount-folders svg { transform: scaleX(-1); }
 #vault-toggle[aria-pressed="true"] .shackle { transform: translate(4px, -1px); }
 #vault-toggle[aria-pressed="true"] { color: var(--pick); }
 #sort-target { box-sizing: border-box; width: 100%; background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
@@ -140,9 +141,13 @@ body.arrange .block * { pointer-events: none; }
 #preview { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 #shot-frame { position: relative; flex: 1 1 0; min-height: 80px; }
 #shot { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
-#delete-image { position: absolute; right: 8px; bottom: 8px; width: 32px; height: 32px; padding: 0; border: 1px solid #777; color: #fff; background: #161616e0; }
+#delete-image, #preview-mode { position: absolute; bottom: 8px; width: 32px; height: 32px; padding: 0; border: 1px solid #777; color: #fff; background: #161616e0; }
+#delete-image { right: 8px; }
+#preview-mode { left: 8px; }
+#preview-mode:hover, #preview-mode[aria-pressed="true"] { color: var(--pick); }
+#preview-mode[aria-pressed="true"] .gallery-icon, #preview-mode[aria-pressed="false"] .work-icon { display: none; }
 #delete-image:not(:disabled):hover { background: var(--danger); }
-#delete-image svg { display: block; margin: auto; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#delete-image svg, #preview-mode svg { display: block; margin: auto; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 #switch { position: relative; width: 100%; height: 44px; flex: 0 0 44px; margin-bottom: 8px; }
 #prev, #next { position: absolute; top: 0; z-index: 2; height: 44px; margin: 0; padding: 0 10px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; line-height: 1; background: transparent; color: var(--text); font-size: 22px; }
 #prev { left: 0; }
@@ -273,6 +278,9 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
               <rect x="4" y="8" width="12" height="9" rx="2"/>
             </svg>
           </button>
+          <button id="recount-folders" class="secondary" type="button">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6 6 0 1 0 .1 4M16 3v5h-5"/></svg>
+          </button>
           <button id="all-folders" class="secondary" type="button" title="Select all folders"><span class="box"></span></button>
         </div>
         <select id="sort-target" hidden>
@@ -308,6 +316,10 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <div id="preview">
         <div id="shot-frame">
           <img id="shot" alt="">
+          <button id="preview-mode" type="button" aria-pressed="false">
+            <svg class="gallery-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h14v12H3zM3 13l4-4 4 4 2-2 4 4M12 7h1"/></svg>
+            <svg class="work-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>
+          </button>
           <button id="delete-image" type="button" aria-label="Delete image" hidden disabled>
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14m-12 0 1 12h8l1-12M7 5V3h6v2M8 8v6m4-6v6"/></svg>
           </button>
@@ -370,7 +382,11 @@ const selected = new Set();
 let folders = FOLDERS_JSON;
 let reel = [];
 let reelAt = -1;
-let follow = true;
+let workPreview = false;
+let workFile = "";
+let lastJob = null;
+let galleryEmpty = false;
+let galleryRequest = 0;
 let shown = "";
 let previewRevision = "";
 let workspaceMutation = 0;
@@ -401,6 +417,8 @@ const deleteError = document.getElementById("delete-error");
 let deleteTarget = null;
 let deleteBusy = false;
 const vaultToggle = document.getElementById("vault-toggle");
+const recountFolders = document.getElementById("recount-folders");
+const previewMode = document.getElementById("preview-mode");
 const vaultDialog = document.getElementById("vault-dialog");
 const vaultPassword = document.getElementById("vault-password");
 const vaultError = document.getElementById("vault-error");
@@ -413,6 +431,7 @@ let vaultBusy = false;
 let vaultOpening = false;
 let terminalHistory = [];
 let folderScan = null;
+let recountPending = false;
 let rocmState = null;
 let nvidiaState = null;
 let gpuPrompt = null;
@@ -442,7 +461,7 @@ function showEmpty() {
   document.getElementById("name").textContent = t(11);
   document.getElementById("who").textContent = "";
   tagText = "";
-  document.getElementById("tags").textContent = t(12);
+  document.getElementById("tags").textContent = t(!workPreview && galleryEmpty ? 195 : 12);
 }
 
 function applyI18n() {
@@ -468,6 +487,9 @@ function applyI18n() {
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   document.getElementById("all-folders").title = t(83);
+  recountFolders.title = t(194);
+  recountFolders.setAttribute("aria-label", t(194));
+  renderPreviewMode();
   const up = document.getElementById("folder-up");
   up.title = t(180);
   up.setAttribute("aria-label", t(180));
@@ -531,7 +553,7 @@ function renderFolders() {
       updateSelectAll();
       clearTimeout(folderSelectionTimer);
       folderSelectionTimer = setTimeout(() => {
-        loadRecent();
+        loadGallery(true);
         loadVocab();
       }, 250);
     };
@@ -601,7 +623,8 @@ function selectFolderLocation(path) {
   vocab = [];
   reel = [];
   reelAt = -1;
-  follow = true;
+  galleryEmpty = false;
+  galleryRequest++;
   const caption = document.getElementById("folder-location");
   caption.textContent = path;
   caption.title = path;
@@ -611,7 +634,7 @@ function selectFolderLocation(path) {
   hideSuggest();
   closeZoom();
   zoomImg.removeAttribute("src");
-  showEmpty();
+  if (!workPreview) showEmpty();
   renderFilter();
   refreshGenreGhosts();
   takeFolders([]);
@@ -629,6 +652,11 @@ function useVault(scope) {
   if (scope === vaultScope) return;
   if (deleteDialog.open && !deleteBusy) deleteDialog.close();
   vaultScope = scope;
+  workPreview = false;
+  workFile = "";
+  lastJob = null;
+  wasBusy = false;
+  renderPreviewMode();
   showNotice();
   selectFolderLocation("");
   sortTarget.value = "vault";
@@ -696,20 +724,32 @@ async function loadFolders() {
   }
 }
 
-async function loadRecent() {
-  if (pinned.length) return;
-  if (!selected.size) {
+async function loadGallery(reset = false) {
+  const request = ++galleryRequest;
+  if (reset || !selected.size) {
     reel = [];
-    showEmpty();
+    reelAt = -1;
+    galleryEmpty = !selected.size && pinned.length > 0;
+    if (!workPreview) showEmpty();
+  }
+  if (!selected.size) return;
+  const paths = [...selected];
+  const tags = [...pinned];
+  const query = new URLSearchParams();
+  paths.forEach(path => query.append("folder", path));
+  tags.forEach(tag => query.append("tag", tag));
+  try {
+    const data = await workspaceData((tags.length ? "/api/tagged?" : "/api/recent?") + query);
+    if (!data || request !== galleryRequest || paths.length !== selected.size || paths.some(path => !selected.has(path))) return;
+    const current = reel[reelAt];
+    reel = data.files || [];
+    galleryEmpty = tags.length > 0 && !reel.length;
+    reelAt = reel.indexOf(current);
+    if (reelAt < 0 && reel.length) reelAt = tags.length ? 0 : reel.length - 1;
+    if (!workPreview) renderGallery();
+  } catch {
     return;
   }
-  const paths = [...selected];
-  const query = paths.map(folder => "folder=" + encodeURIComponent(folder)).join("&");
-  const data = await workspaceData("/api/recent?" + query);
-  if (!data || pinned.length || paths.length !== selected.size || paths.some(path => !selected.has(path))) return;
-  reel = data.files || [];
-  if (!reel.length) showEmpty();
-  else if (follow && reel.length) showAt(reel.length - 1);
 }
 
 async function loadVocab() {
@@ -776,20 +816,9 @@ function togglePin(tag) {
   applyFilter();
 }
 
-async function applyFilter() {
-  if (!pinned.length) {
-    follow = true;
-    loadRecent();
-    return;
-  }
-  const tags = pinned.join("\n");
-  const query = pinned.map((tag) => "tag=" + encodeURIComponent(tag)).join("&");
-  const data = await workspaceData("/api/tagged?" + query);
-  if (!data || tags !== pinned.join("\n")) return;
-  reel = data.files || [];
-  follow = false;
-  if (reel.length) showAt(0);
-  else showEmpty();
+function applyFilter() {
+  setPreviewMode(false);
+  loadGallery(true);
 }
 function paintTags(text) {
   const box = document.getElementById("tags");
@@ -814,9 +843,36 @@ function paintTags(text) {
 }
 
 function showAt(index) {
-  if (!reel.length) return;
+  if (workPreview || !reel.length) return;
   reelAt = (index + reel.length) % reel.length;
   showImage("images", reel[reelAt]);
+}
+
+function renderGallery() {
+  if (!reel.length) showEmpty();
+  else if (shown !== "images:" + reel[reelAt]) showAt(reelAt);
+}
+
+function renderWorkPreview() {
+  if (!workFile) showEmpty();
+  else if (shown !== "images:" + workFile) showImage("images", workFile);
+}
+
+function renderPreviewMode() {
+  previewMode.setAttribute("aria-pressed", String(workPreview));
+  previewMode.setAttribute("aria-label", t(196));
+  previewMode.title = t(workPreview ? 197 : 198);
+  document.getElementById("prev").disabled = workPreview;
+  document.getElementById("next").disabled = workPreview;
+}
+
+function setPreviewMode(work) {
+  if (workPreview === work) return;
+  workPreview = work;
+  closeZoom();
+  renderPreviewMode();
+  if (work) renderWorkPreview();
+  else renderGallery();
 }
 
 async function showImage(root, path) {
@@ -862,16 +918,11 @@ function discardDeletedImage(path) {
   const activePath = reel[reelAt];
   const index = reel.indexOf(path);
   reel = reel.filter(item => item !== path);
-  if (shown === "images:" + path) {
-    follow = false;
-    if (reel.length) showAt(Math.min(index < 0 ? 0 : index, reel.length - 1));
-    else {
-      reelAt = -1;
-      showEmpty();
-    }
-  } else {
-    reelAt = reel.indexOf(activePath);
-  }
+  if (workFile === path) workFile = "";
+  reelAt = activePath === path ? Math.min(index, reel.length - 1) : reel.indexOf(activePath);
+  if (pinned.length && index >= 0 && !reel.length) galleryEmpty = true;
+  if (workPreview) renderWorkPreview();
+  else renderGallery();
 }
 
 async function confirmDelete() {
@@ -894,10 +945,8 @@ async function confirmDelete() {
     if (target.scope === vaultScope) {
       workspaceMutation++;
       statusShown = ++statusRequest;
-      folderScan = null;
       discardDeletedImage(target.path);
       showNotice(data.warning || "");
-      loadFolders();
       loadVocab();
       tick();
     }
@@ -965,9 +1014,11 @@ async function tick() {
   document.getElementById("fill").style.width = (gpuProgress?.percent ?? data.percent ?? 0) + "%";
   terminalHistory = data.log || [];
   const scan = data.scan_progress || null;
-  const scanFinished = scan?.stage === "done" && folderScan?.stage !== "done";
+  const scanFinished = scan?.stage === "done" && (scan.id !== folderScan?.id || folderScan?.stage !== "done");
   folderScan = scan;
   const busy = data.job_running;
+  const jobChanged = data.job_id && data.job_id !== lastJob;
+  const jobFinished = !busy && (wasBusy || (jobChanged && lastJob !== null));
   const ready = data.model === "ready";
   const picked = selected.size > 0;
   for (const id of ["tag", "sort", "plan"]) {
@@ -976,14 +1027,16 @@ async function tick() {
   }
   document.getElementById("stop").disabled = !busy;
   document.getElementById("retry").hidden = data.model !== "error";
-  if ((wasBusy && !busy) || scanFinished) loadFolders();
+  if (jobFinished || scanFinished) loadFolders();
+  if (jobFinished && !workPreview && !jobChanged) loadGallery();
+  recountFolders.disabled = recountPending || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
   wasBusy = !!busy;
+  workFile = data.preview_file || "";
+  if (jobChanged && (busy || lastJob !== null)) setPreviewMode(true);
+  lastJob = data.job_id;
   renderTerminal();
   renderDeleteControls();
-  if (follow && data.preview_file && data.preview_file !== (reel[reelAt] || "")) {
-    if (!reel.includes(data.preview_file)) reel.push(data.preview_file);
-    showAt(reel.indexOf(data.preview_file));
-  }
+  if (workPreview && (workFile || hasFile)) renderWorkPreview();
 }
 
 function showTerminalInput() {
@@ -1109,25 +1162,53 @@ function showNotice(message = "") {
 
 async function start(mode) {
   showNotice();
+  const scope = vaultScope;
   try {
     const response = await fetch("/api/job", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode, folders: [...selected], device: deviceInput.value, architecture: rocmArch.value || "auto",
-        gpu: nvidiaCard.value, scope: vaultScope, destination: vaultScope ? sortTarget.value : "output",
+        gpu: nvidiaCard.value, scope, destination: scope ? sortTarget.value : "output",
       }),
     });
     if (!response.ok) {
       showNotice((await response.json()).error || t(100));
       return;
     }
-    follow = true;
+    const data = await response.json();
+    if (scope === vaultScope) {
+      if (data.job_id !== lastJob) {
+        statusShown = ++statusRequest;
+        lastJob = data.job_id;
+        setPreviewMode(true);
+        wasBusy = true;
+      }
+    }
     tick();
   } catch {
     showNotice(t(100));
   }
 }
+
+recountFolders.onclick = async () => {
+  const scope = vaultScope;
+  recountPending = true;
+  recountFolders.disabled = true;
+  showNotice();
+  try {
+    const response = await fetch("/api/folders/recount", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope }),
+    });
+    if (scope !== vaultScope) return;
+    if (!response.ok) showNotice((await response.json()).error || t(199));
+  } catch {
+    if (scope === vaultScope) showNotice(t(199));
+  } finally {
+    recountPending = false;
+    tick();
+  }
+};
 
 function paintPanes() {
   const top = document.querySelector(".top");
@@ -1734,12 +1815,16 @@ document.getElementById("all-folders").onclick = () => {
   if (every) selected.clear();
   else for (const folder of folders) selected.add(folder.path);
   renderFolders();
-  loadRecent();
+  loadGallery(true);
   loadVocab();
 };
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
-document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };
-document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
+previewMode.onclick = () => {
+  setPreviewMode(!workPreview);
+  if (!workPreview) loadGallery();
+};
+document.getElementById("prev").onclick = () => showAt(reelAt - 1);
+document.getElementById("next").onclick = () => showAt(reelAt + 1);
 document.getElementById("split-left").onpointerdown = (event) => dragSplit("left", event);
 document.getElementById("split-mid").onpointerdown = (event) => dragSplit("mid", event);
 const zoom = document.getElementById("zoom");
@@ -1769,8 +1854,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeZoom();
   if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
     event.preventDefault();
-    if (!reel.length) return;
-    follow = false;
+    if (workPreview || !reel.length) return;
     showAt(reelAt + (event.key === "ArrowRight" ? 1 : -1));
     zoomImg.src = document.getElementById("shot").src;
     view.scale = 1;
@@ -1806,7 +1890,6 @@ loadFolders();
 renderFolders();
 tick();
 setInterval(tick, 1000);
-setInterval(loadFolders, 8000);
 </script>
 </body>
 </html>
