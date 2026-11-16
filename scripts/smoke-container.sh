@@ -9,6 +9,7 @@ container=$(docker run --detach --platform "$platform" -e OUBI_MODEL=/opt/oubi "
 trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
 if ! docker exec -i "$container" python - <<'PY'
 import json
+import subprocess
 import time
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -32,6 +33,10 @@ assert status["rocm"]["install"]["state"] == "idle"
 assert status["nvidia"]["gpus"] == []
 assert status["nvidia"]["installed"] == {}
 assert status["nvidia"]["install"]["state"] == "idle"
+assert not status["vault_enabled"]
+
+subprocess.run(["cryptomator-cli", "--version"], check=True)
+subprocess.run(["fusermount3", "--version"], check=True)
 
 with urlopen(Request(base, headers={"Accept-Language": "en"}), timeout=2) as response:
     page = response.read()

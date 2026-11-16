@@ -1,12 +1,5 @@
 services:
   oubi:
-    image: oubi:cryptomator
-    pull_policy: build
-    build:
-      context: .
-      dockerfile: Dockerfile.cryptomator
-      args:
-        OUBI_CHANNEL: ${OUBI_CHANNEL:-dev}
     init: true
     tmpfs:
       - /run/oubi-crypt:mode=1777

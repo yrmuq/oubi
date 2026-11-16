@@ -13,6 +13,7 @@
 - Read and write image tag sidecars only in the image directory's `tags/` subfolder, using the full image filename plus `.txt` to distinguish images with the same stem.
 - Keep Cryptomator indexes, sort history, and generated metadata inside the vault; expose the unlocked workspace only to the browser session that unlocked it.
 - Resolve the internal sort destination relative to the Cryptomator mount and exclude its subtree from vault source operations.
+- Ship Cryptomator in the shared Oubi image so operators can install or update vault-enabled deployments with Compose pulls.
 
 ## Compatibility Workarounds
 

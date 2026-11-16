@@ -119,14 +119,14 @@ Choose `Auto` or a specific detected card. Oubi picks a PyTorch CUDA build using
 
 #### Cryptomator vaults
 
-Use the [Cryptomator Compose override](docker-compose.cryptomator.yml) and its [Dockerfile](Dockerfile.cryptomator) with the `dev` channel on a Linux x86_64 host with FUSE. Set `OUBI_CRYPT` in `.env` to the directory containing `vault.cryptomator`. The container user needs write access to that directory.
+Use the [Cryptomator Compose override](docker-compose.cryptomator.yml) with the `dev` channel on a Linux x86_64 host with FUSE. Set `OUBI_CRYPT` in `.env` to the directory containing `vault.cryptomator`. The container user needs write access to that directory.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml build --pull
+docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml pull
 docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml up -d
 ```
 
-The override mounts encrypted files at `/crypt` and adds Cryptomator CLI to a local image. It grants `SYS_ADMIN` and selects `apparmor:unconfined` for FUSE mounting. Click the lock next to **Select all folders** and enter the password to switch to vault folders in the current browser session. Click it again after any active job finishes or stops to return to the ordinary source folders. Serve the web interface over authenticated HTTPS when accessing it remotely.
+The standard Oubi image includes Cryptomator CLI and `fuse3`. The override mounts encrypted files at `/crypt` and enables FUSE access. It grants `SYS_ADMIN` and selects `apparmor:unconfined` for FUSE mounting. Click the lock next to **Select all folders** and enter the password to switch to vault folders in the current browser session. Click it again after any active job finishes or stops to return to the ordinary source folders. Serve the web interface over authenticated HTTPS when accessing it remotely.
 
 Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, and gender overrides use the vault’s `.oubi/` folder.
 
@@ -142,4 +142,4 @@ The scripts and `Dockerfile` in this repository are licensed under `GPL-3.0-only
 | PyTorch | [pytorch/pytorch](https://github.com/pytorch/pytorch) | `BSD-3-Clause` | CPU build installed in the image. |
 | Transformers | [huggingface/transformers](https://github.com/huggingface/transformers) | `Apache-2.0` | Loads the tagger pipeline. |
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | `Apache-2.0` | Required by the tagger model code. |
-| Cryptomator CLI | [cryptomator/cli](https://github.com/cryptomator/cli) | `AGPL-3.0-only` | Optional Compose image unlocks and mounts vaults using FUSE. |
+| Cryptomator CLI | [Cryptomator CLI 0.6.2 source](https://github.com/cryptomator/cli/tree/0.6.2) | `AGPL-3.0-only` | The upstream Linux x86_64 binary and its license ship with Oubi. The vault override enables mounting via FUSE. |
