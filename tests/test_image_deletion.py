@@ -38,6 +38,10 @@ class PreviewDeletionTests(unittest.TestCase):
         other.write_bytes(b"other")
         sidecar_path(other).write_text("rain", encoding="utf-8")
         self.write_indexes(other)
+        with self.index.open("a", encoding="utf-8", newline="") as handle:
+            csv.writer(handle).writerow([" photo.jpg", "leading space"])
+        with self.sorted_list.open("a", encoding="utf-8") as handle:
+            handle.write(" photo.jpg\n")
 
         self.assertFalse(self.delete())
         self.assertFalse(self.image.exists())
@@ -45,8 +49,10 @@ class PreviewDeletionTests(unittest.TestCase):
         self.assertEqual(other.read_bytes(), b"other")
         self.assertEqual(sidecar_path(other).read_text(), "rain")
         with self.index.open(newline="", encoding="utf-8") as handle:
-            self.assertEqual(list(csv.reader(handle)), [["file", "general"], [str(other), "rain, night"]])
-        self.assertEqual(self.sorted_list.read_text(), str(other) + "\n")
+            self.assertEqual(list(csv.reader(handle)), [
+                ["file", "general"], [str(other), "rain, night"], [" photo.jpg", "leading space"],
+            ])
+        self.assertEqual(self.sorted_list.read_text(), f"{other}\n photo.jpg\n")
         self.assertEqual(list(self.root.rglob(".oubi-*")), [])
 
     def test_rejects_modified_image_and_accepts_missing_sidecar(self):

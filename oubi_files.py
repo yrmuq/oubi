@@ -59,7 +59,7 @@ def _updated_index(index, root, image, *, table, cleanup):
     removed = False
 
     def matches(raw):
-        return bool(raw) and Path(os.path.normpath(root / raw.strip())) == image
+        return bool(raw) and Path(os.path.normpath(root / raw)) == image
 
     with index.open(encoding="utf-8", newline="") as source, updated.open("w", encoding="utf-8", newline="") as output:
         if table:
@@ -78,7 +78,7 @@ def _updated_index(index, root, image, *, table, cleanup):
                     writer.writerow(row)
         else:
             for line in source:
-                if matches(line):
+                if matches(line.rstrip("\r\n")):
                     removed = True
                 else:
                     output.write(line)
