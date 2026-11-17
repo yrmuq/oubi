@@ -40,7 +40,7 @@
 | Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
-| `Identify` | Tag images in the selected folders when the model is ready. |
+| `Identify` | Show the live count of images found in the selected folders, then the progress of checking existing tags and tagging the remaining images. |
 | `Tagging device` | Choose CPU, AMD, or NVIDIA. Oubi selects an available installed GPU when the page opens. |
 | `Install` / `Uninstall` | Install or remove components for the selected GPU. Confirm with `y` or cancel with `n` in the terminal. Shared CUDA packages stay available while another configured card uses them. |
 | `Sorting` / `Gallery` | Switch between genre settings and favorite tag filters. Gallery hides the sorting controls and sorting badges. Returning to Sorting clears the active filters. |

@@ -2,6 +2,8 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -10,6 +12,7 @@ from tag_folder import (
     apply_gfx_override,
     byte_progress,
     chunked,
+    find_pending_images,
     format_bytes,
     model_status_line,
     progress_line,
@@ -20,6 +23,27 @@ from tag_folder import (
 
 
 class TagBatchTests(unittest.TestCase):
+    def test_identify_reports_unique_images_and_checks_all_existing_tags(self):
+        with TemporaryDirectory() as directory:
+            folder = Path(directory)
+            nested = folder / "album"
+            nested.mkdir()
+            (nested / "1.jpg").touch()
+            (nested / "2.jpg").touch()
+            (nested / "tags").mkdir()
+            (nested / "tags" / "1.jpg.txt").touch()
+            reports = []
+            with patch("tag_folder.time.monotonic", side_effect=range(10)):
+                total, pending = find_pending_images(
+                    [folder, nested], None, False, lambda *entry: reports.append(entry),
+                )
+            self.assertEqual(total, 2)
+            self.assertEqual(pending, [(2, nested / "2.jpg")])
+            self.assertEqual(reports, [
+                ("discover", 0, None), ("discover", 1, None), ("discover", 2, None),
+                ("checking", 0, 2), ("checking", 1, 2), ("checking", 2, 2),
+            ])
+
     def test_chunked_splits_the_tail(self):
         self.assertEqual(list(chunked([1, 2, 3, 4, 5], 2)), [[1, 2], [3, 4], [5]])
 

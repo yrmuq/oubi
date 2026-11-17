@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from oubi_files import sidecar_path
 from oubi_web import (
     App,
+    TAG_SCAN_EVENT,
     absolute_folders,
     first_character,
     flag_on,
@@ -45,6 +46,20 @@ from sort_images import under_roots
 
 
 class WebTests(unittest.TestCase):
+    def test_identify_scan_progress_keeps_phase_time_and_stays_out_of_history(self):
+        app = App()
+        with patch("oubi_web.time.monotonic", side_effect=[2, 7, 8, 10]):
+            app.note(TAG_SCAN_EVENT + '["discover", 0, null]', echo=False)
+            app.note(TAG_SCAN_EVENT + '["discover", 120, null]', echo=False)
+            self.assertEqual(app.status()["tag_scan"],
+                             {"stage": "discover", "done": 120, "total": None, "elapsed": 5})
+            app.note(TAG_SCAN_EVENT + '["checking", 18, 120]', echo=False)
+            self.assertEqual(app.status()["tag_scan"],
+                             {"stage": "checking", "done": 18, "total": 120, "elapsed": 2})
+        app.note(TAG_SCAN_EVENT + '[null, 0, null]', echo=False)
+        self.assertNotIn("tag_scan", app.status())
+        self.assertEqual(app.status()["log"], [])
+
     def test_parse_download_tag_and_sort(self):
         self.assertEqual(parse_progress("Скачивание: 25% (1.0 КБ из 4.0 КБ), сейчас 1.0 КБ/с")["percent"], 25)
         self.assertEqual(parse_progress("Разметка: 10% (2 из 20), 0.20 карт./с, осталось ~1.0 ч")["kind"], "tag")

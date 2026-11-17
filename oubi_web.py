@@ -47,6 +47,7 @@ LANG_PATH = "/data/language"
 LANG_FILES = {"en": "English.ini", "ru": "Russian.ini"}
 LANG_CHOICES = {"auto", *LANG_FILES}
 TAG_PREVIEW_EVENT = "OUBI_TAG_PREVIEW "
+TAG_SCAN_EVENT = "OUBI_TAG_SCAN "
 FAVORITES_NAME = "favorites.json"
 FAVORITE_GROUPS = ("character", "event")
 
@@ -1176,6 +1177,7 @@ class App:
         self.percent = None
         self.proc = None
         self.preview_file = ""
+        self.tag_scan = None
         self.character_cache = {}
         self.folder_cache = None
         self.catalog = None
@@ -1218,6 +1220,20 @@ class App:
                     return
                 if isinstance(path, str) and Path(path).is_absolute():
                     self.preview_file = path
+                return
+            if text.startswith(TAG_SCAN_EVENT):
+                try:
+                    stage, done, total = json.loads(text.removeprefix(TAG_SCAN_EVENT))
+                except (TypeError, ValueError):
+                    return
+                if stage is None:
+                    self.tag_scan = None
+                elif (type(done) is int and done >= 0 and
+                      ((stage == "discover" and total is None) or
+                       (stage == "checking" and type(total) is int and 0 <= done <= total and total > 0))):
+                    started = (self.tag_scan["started"] if self.tag_scan and self.tag_scan["stage"] == stage
+                               else time.monotonic())
+                    self.tag_scan = {"stage": stage, "done": done, "total": total, "started": started}
                 return
             self._append_line(text)
             parsed = parse_progress(text)
@@ -1577,6 +1593,7 @@ class App:
     def status(self):
         with self.lock:
             preview = self.preview_file
+            tag_scan = self.tag_scan
             payload = {
                 "model": self.model_state,
                 "job_running": self.job_running,
@@ -1590,6 +1607,9 @@ class App:
                 "scan_progress": self.scan_progress,
                 "log": self.lines[-80:],
             }
+        if tag_scan:
+            payload["tag_scan"] = {"stage": tag_scan["stage"], "done": tag_scan["done"], "total": tag_scan["total"],
+                                   "elapsed": int(time.monotonic() - tag_scan["started"])}
         if preview:
             try:
                 payload["preview_file"] = str(Path(preview).relative_to(self.paths.images))
@@ -1671,6 +1691,7 @@ class App:
             self.job_id = uuid4().hex
             self.percent = None
             self.detail = ""
+            self.tag_scan = None
             self.phase = "sort" if mode in {"sort", "plan"} else "tag"
             self.step = text(25, language=language)
             if mode != "plan":
@@ -1747,6 +1768,7 @@ class App:
             with self.lock:
                 self.job_running = False
                 self.job_mode = None
+                self.tag_scan = None
                 self.proc = None
                 if mode != "plan" and self.catalog is None:
                     self._invalidate_folders()

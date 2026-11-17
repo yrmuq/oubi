@@ -26,6 +26,7 @@
 - Keep the preview mode switch in both Sorting and Gallery so users can browse images during a tagging job.
 - Merge imported favorites into the active workspace without case-insensitive duplicates and preserve any existing tag's group.
 - Show paths relative to the library root in the tagging progress label while keeping absolute paths in image metadata.
+- Report images found during the Identify walk and tag checks against the final count before tagging begins, independently of the vault index scan.
 - Order folder names by symbols, numbers, then letters by default, comparing digit sequences numerically.
 - Put tags from the CSV character column under Characters and all remaining favorites under Events.
 - Display the decoded preview and its filename together before requesting image tags so metadata reads do not delay the current frame.

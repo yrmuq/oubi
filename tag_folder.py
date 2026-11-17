@@ -322,10 +322,47 @@ def load_tagger(model, device="auto", architecture=None):
 
 
 # ===== TAG THE FOLDER =====
+def find_pending_images(folders, exclude, force, report=None):
+    last_report = float("-inf")
+
+    def update(stage, done, total=None, *, immediate=False):
+        nonlocal last_report
+        if report is None:
+            return
+        now = time.monotonic()
+        if immediate or now - last_report >= 0.5:
+            report(stage, done, total)
+            last_report = now
+
+    update("discover", 0, immediate=True)
+    files = set()
+    for folder in folders:
+        for path in image_files(folder, exclude):
+            if path not in files:
+                files.add(path)
+                update("discover", len(files))
+    ordered = sorted(files)
+    total = len(ordered)
+    if force or not total:
+        return total, list(enumerate(ordered, 1))
+
+    update("checking", 0, total, immediate=True)
+    pending = []
+    for index, path in enumerate(ordered, 1):
+        if not sidecar_path(path).is_file():
+            pending.append((index, path))
+        update("checking", index, total, immediate=index == total)
+    return total, pending
+
+
 def main():
-    from oubi_web import TAG_PREVIEW_EVENT
+    from oubi_web import TAG_PREVIEW_EVENT, TAG_SCAN_EVENT
 
     report_preview = os.environ.get("OUBI_WEB_TAG_PREVIEW") == "1"
+
+    def report_scan(stage, done, total):
+        print(TAG_SCAN_EVENT + json.dumps([stage, done, total]), flush=True)
+
     ap = argparse.ArgumentParser()
     ap.add_argument("folder", nargs="+")
     ap.add_argument("--model", default="pixai-labs/pixai-tagger-v1.0")
@@ -362,22 +399,12 @@ def main():
         return 1
     from PIL import Image
 
-    print(say(64), flush=True)
-    files = []
-    seen = set()
-    for folder in args.folder:
-        for path in image_files(folder, args.exclude):
-            if path in seen:
-                continue
-            seen.add(path)
-            files.append(path)
-    files.sort()
-    pending = []
-    for index, path in enumerate(files, 1):
-        if sidecar_path(path).is_file() and not args.force:
-            continue
-        pending.append((index, path))
-    print(say(65, total=len(files), done=len(files) - len(pending), left=len(pending)), flush=True)
+    if not report_preview:
+        print(say(64), flush=True)
+    total, pending = find_pending_images(args.folder, args.exclude, args.force, report_scan if report_preview else None)
+    print(say(65, total=total, done=total - len(pending), left=len(pending)), flush=True)
+    if report_preview:
+        report_scan(None, 0, None)
     if not pending:
         print(say(66), flush=True)
 
@@ -403,9 +430,9 @@ def main():
                 index, path, _image = loaded[0]
                 display_path = ("/" + path.relative_to(progress_root).as_posix()
                                 if progress_root and path.is_relative_to(progress_root) else path)
-                print(say(68, path=display_path, index=index, total=len(files)), flush=True)
+                print(say(68, path=display_path, index=index, total=total), flush=True)
             else:
-                print(say(69, start=loaded[0][0], end=loaded[-1][0], total=len(files)), flush=True)
+                print(say(69, start=loaded[0][0], end=loaded[-1][0], total=total), flush=True)
             results = tag_images(tagger, [image for _, _, image in loaded])
             report_changes(path for (_, path, _), result in zip(loaded, results) if not isinstance(result, Exception))
             last_tagged = None

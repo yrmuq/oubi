@@ -144,6 +144,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 .step { margin: 0; }
 .bar { height: 10px; background: var(--bar); border-radius: 99px; overflow: hidden; }
 .bar > div { height: 100%; width: 0; background: var(--fill); }
+.bar > .searching { animation: scan-progress 1.8s linear infinite; }
+@keyframes scan-progress { from { transform: translateX(-100%); } to { transform: translateX(286%); } }
+@media (prefers-reduced-motion: reduce) { .bar > .searching { animation: none; } }
 .detail { color: var(--muted); min-height: 1.2em; overflow-wrap: anywhere; }
 .mid { position: relative; text-align: center; gap: 0; display: flex; flex-direction: column; }
 .block { min-width: 0; min-height: 0; position: relative; }
@@ -514,6 +517,7 @@ let vaultBusy = false;
 let vaultOpening = false;
 let terminalHistory = [];
 let folderScan = null;
+let tagScanMessage = "";
 let recountPending = false;
 let rocmState = null;
 let nvidiaState = null;
@@ -842,8 +846,10 @@ function useVault(scope) {
   document.getElementById("detail").textContent = "";
   terminalHistory = [];
   folderScan = null;
+  tagScanMessage = "";
   renderTerminal();
   document.getElementById("fill").style.width = "0";
+  document.getElementById("fill").classList.remove("searching");
   renderVault();
   loadFolders();
 }
@@ -1300,6 +1306,8 @@ function renderTerminal() {
   if (gpuPrompt && !lines.includes(gpuPrompt.message)) lines.push(gpuPrompt.message);
   if (vaultOpening) {
     lines.push(t(190));
+  } else if (tagScanMessage) {
+    lines.push(tagScanMessage);
   } else if (!wasBusy && !gpuProgress && !gpuPrompt && folderScan) {
     const { stage, done, total } = folderScan;
     const number = new Intl.NumberFormat(lang);
@@ -1319,6 +1327,27 @@ function renderTerminal() {
     log.textContent = contents;
     log.scrollTop = log.scrollHeight;
   }
+}
+
+function scanDuration(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const rest = String(seconds % 60).padStart(2, "0");
+  if (minutes < 60) return minutes + ":" + rest;
+  return Math.floor(minutes / 60) + ":" + String(minutes % 60).padStart(2, "0") + ":" + rest;
+}
+
+function tagScanDisplay(scan) {
+  const { stage, done, total, elapsed } = scan;
+  const number = new Intl.NumberFormat(lang);
+  const percent = stage === "checking" ? Math.floor(100 * done / total) : null;
+  const step = percent === null
+    ? t(191).replace("{count}", number.format(done))
+    : t(240).replace("{done}", number.format(done)).replace("{total}", number.format(total))
+      .replace("{percent}", number.format(percent));
+  const hasEstimate = percent !== null && elapsed >= 2 && done > 0 && done < total;
+  let detail = t(hasEstimate ? 242 : 241).replace("{elapsed}", scanDuration(elapsed));
+  if (hasEstimate) detail = detail.replace("{remaining}", scanDuration(Math.ceil(elapsed * (total - done) / done)));
+  return { step, detail, percent };
 }
 
 async function tick() {
@@ -1344,9 +1373,14 @@ async function tick() {
     if (data.model === "ready") step = t(23);
     if (data.model === "downloading" && !data.detail) step = t(22);
   }
-  document.getElementById("step").textContent = gpuProgress?.step || step;
-  document.getElementById("detail").textContent = (gpuProgress?.detail ?? data.detail) || "";
-  document.getElementById("fill").style.width = (gpuProgress?.percent ?? data.percent ?? 0) + "%";
+  const tagScan = data.tag_scan ? tagScanDisplay(data.tag_scan) : null;
+  tagScanMessage = tagScan ? tagScan.step + " " + tagScan.detail : "";
+  const searching = !gpuProgress && tagScan?.percent === null;
+  document.getElementById("step").textContent = gpuProgress?.step || tagScan?.step || step;
+  document.getElementById("detail").textContent = (gpuProgress?.detail ?? tagScan?.detail ?? data.detail) || "";
+  const fill = document.getElementById("fill");
+  fill.classList.toggle("searching", searching);
+  fill.style.width = (searching ? 35 : (gpuProgress?.percent ?? tagScan?.percent ?? data.percent ?? 0)) + "%";
   terminalHistory = data.log || [];
   const scan = data.scan_progress || null;
   const scanFinished = scan?.stage === "done" && (scan.id !== folderScan?.id || folderScan?.stage !== "done");
