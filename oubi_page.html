@@ -458,6 +458,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   <img id="zoom-img" alt="">
 </div>
 <script>
+const initialVaultFolder = __OUBI_VAULT_FOLDER__;
 const selected = new Set();
 let folders = FOLDERS_JSON;
 let reel = [];
@@ -918,7 +919,7 @@ function navigateFolders(path) {
   tick();
 }
 
-function useVault(scope) {
+function useVault(scope, folder) {
   if (scope === vaultScope) return;
   if (deleteDialog.open && !deleteBusy) deleteDialog.close();
   vaultScope = scope;
@@ -931,8 +932,8 @@ function useVault(scope) {
   lastJob = null;
   wasBusy = false;
   renderPreviewMode();
-  showNotice();
-  selectFolderLocation("");
+  selectFolderLocation(scope ? folder || "" : "");
+  showNotice(scope && folder === null ? t(257) : "");
   sortTarget.value = "vault";
   document.getElementById("step").textContent = "";
   document.getElementById("detail").textContent = "";
@@ -970,7 +971,7 @@ async function changeVault(action, password) {
     }
     if (vaultDialog.open) vaultDialog.close();
     statusShown = ++statusRequest;
-    useVault(data.scope);
+    useVault(data.scope, data.folder);
   } catch {
     if (action === "unlock") {
       vaultError.textContent = t(250);
@@ -1495,7 +1496,7 @@ async function tick() {
   if (request < statusShown) return;
   statusShown = request;
   vaultToggle.hidden = !data.vault_enabled;
-  useVault(data.vault_scope || "");
+  useVault(data.vault_scope || "", data.vault_folder);
   rocmState = data.rocm;
   nvidiaState = data.nvidia;
   if (gpuPrompt?.id !== data.gpu_prompt?.id) {
@@ -2555,6 +2556,8 @@ window.addEventListener("mousemove", (event) => {
   paintZoom();
 });
 window.addEventListener("mouseup", () => { view.drag = null; });
+if (initialVaultFolder) selectFolderLocation(initialVaultFolder);
+if (initialVaultFolder === null) showNotice(t(257));
 loadFolders();
 loadFavorites();
 renderFolders();

@@ -13,3 +13,4 @@ services:
       - ${OUBI_CRYPT:?Set OUBI_CRYPT to the vault directory}:/crypt
     environment:
       OUBI_CRYPT_OUTPUT: ${OUBI_CRYPT_OUTPUT:-Sorted}
+      OUBI_CRYPT_FOLDER: "${OUBI_CRYPT_FOLDER:-}"

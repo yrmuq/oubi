@@ -35,6 +35,7 @@
 - Put tags from the CSV character column under Characters and all remaining favorites under Events.
 - Display the decoded preview and its filename together before requesting image tags so metadata reads do not delay the current frame.
 - Keep Cryptomator indexes, sort history, and generated metadata inside the vault; expose the unlocked workspace only to the browser session that unlocked it.
+- Use the configured Cryptomator start folder as the initial browser location without changing the vault scan root, output paths, or folder selection for jobs.
 - Resolve the internal sort destination relative to the Cryptomator mount and exclude its subtree from vault source operations.
 - Ship Cryptomator in the shared Oubi image so operators can install or update vault-enabled deployments with Compose pulls.
 - Enable vault controls at startup when `/crypt/vault.cryptomator` is present. The container path is fixed so operators only configure the host bind mount.

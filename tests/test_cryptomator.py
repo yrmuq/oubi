@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
 from oubi_files import VAULT_METADATA_ROOT, image_revision, sidecar_path
 from oubi_index import VaultIndex, folder_sidecars
-from oubi_web import App, Handler, Workspace, images_under, read_favorites, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
+from oubi_web import App, Handler, Workspace, images_under, page_bytes, read_favorites, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
 from sort_images import main as sort_main
 
 
@@ -30,6 +30,27 @@ class VaultWorkspaceTests(unittest.TestCase):
             self.assertEqual(Vault().path, self.root)
             with patch.object(Path, "is_file", side_effect=PermissionError):
                 self.assertIsNone(Vault().path)
+
+    def test_vault_start_folder_is_relative_to_the_unlocked_root(self):
+        folder = "Фото/Рабочий архив/Входящие"
+        (self.root / folder).mkdir(parents=True)
+        (self.root / "Sorted").mkdir()
+        (self.root / "tags").mkdir()
+        (self.root / "file.jpg").touch()
+        with tempfile.TemporaryDirectory() as outside:
+            (self.root / "outside").symlink_to(outside, target_is_directory=True)
+            cases = (("", ""), (folder + "/", folder), ("/" + folder, None), ("../" + self.root.name, None),
+                     ("Sorted", None), ("tags", None), (".oubi", None), ("outside", None),
+                     ("missing", None), ("file.jpg", None))
+            for value, expected in cases:
+                with self.subTest(value=value), patch.dict(os.environ, {
+                    "OUBI_CRYPT_FOLDER": value, "OUBI_CRYPT_OUTPUT": "Sorted",
+                }):
+                    workspace = Workspace.encrypted(self.root)
+                    self.assertEqual(workspace.start_folder, expected)
+                    self.assertEqual(workspace.images, str(self.root))
+        html = page_bytes([], vault_folder="Archive/</script>").decode()
+        self.assertIn('const initialVaultFolder = "Archive/\\u003c/script>";', html)
 
     def test_previous_vault_paths_work_for_gallery_sorting_and_deletion(self):
         album = self.root / "Album"

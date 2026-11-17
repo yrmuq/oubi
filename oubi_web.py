@@ -66,6 +66,7 @@ class Workspace:
     genders: str
     excluded: str | None = None
     data: str | None = None
+    start_folder: str | None = ""
 
     @classmethod
     def encrypted(cls, root):
@@ -82,8 +83,17 @@ class Workspace:
         for name in ("tags.csv", "sorted.txt", "genders.csv", "unknown_genders.txt", INDEX_NAME, DIRTY_NAME, FAVORITES_NAME):
             if (data / name).is_symlink():
                 raise VaultError(168)
+        start_folder = os.environ.get("OUBI_CRYPT_FOLDER", "")
+        if start_folder:
+            requested = Path(start_folder)
+            try:
+                if requested.is_absolute() or ".." in requested.parts:
+                    raise ValueError(start_folder)
+                _, start_folder = resolve_source_folder(root, start_folder, output)
+            except (OSError, ValueError, RuntimeError):
+                start_folder = None
         return cls(str(root), str(output), str(data / "tags.csv"), str(data / "sorted.txt"),
-                   str(data / "genders.csv"), str(output), str(data))
+                   str(data / "genders.csv"), str(output), str(data), start_folder=start_folder)
 
 
 def normal_workspace():
@@ -91,7 +101,7 @@ def normal_workspace():
 
 
 def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalogs=None, language_choice="auto",
-               *, vault_enabled=False, vault_scope=""):
+               *, vault_enabled=False, vault_scope="", vault_folder=""):
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
     chosen = theme if theme in THEMES else "auto"
     genre_payload = json.dumps(list(genres or [])[:MAX_GENRES], ensure_ascii=False).replace("<", "\\u003c")
@@ -109,7 +119,7 @@ def page_bytes(items, theme="auto", genres=None, layout=None, lang="en", catalog
     html = html.replace("__OUBI_LANG__", lang_code)
     html = html.replace("__OUBI_LANGUAGE_CHOICE__", language_choice, 1)
     html = html.replace("__OUBI_LANGS__", lang_payload, 1)
-    return html.encode()
+    return html.replace("__OUBI_VAULT_FOLDER__", json.dumps(vault_folder).replace("<", "\\u003c"), 1).encode()
 
 
 def parse_catalog(text):
@@ -1943,7 +1953,8 @@ class Handler(BaseHTTPRequestHandler):
                 message = text(169 if path == "/api/vault/unlock" else 170, language=self._language())
                 self._send(409, {"error": message + "\n" + str(error)})
                 return
-            self._send(200, {"scope": vault.scope}, cookie=self._cookie(vault.token))
+            folder = vault.app.paths.start_folder if vault.app is not None else ""
+            self._send(200, {"scope": vault.scope, "folder": folder}, cookie=self._cookie(vault.token))
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -1976,16 +1987,18 @@ class Handler(BaseHTTPRequestHandler):
                             state[field] = normal[field] if normal["phase"] == "download" else None
             self._send(200, {**state, **gpu, "model": normal["model"],
                              "vault_enabled": vault.path is not None,
-                             "vault_scope": scope if authorized else ""})
+                             "vault_scope": scope if authorized else "",
+                             "vault_folder": opened_app.paths.start_folder if authorized else ""})
             return
         if path == "/":
             with vault.lock:
                 opened = self._vault_owner()
                 workspace = vault.app if opened else self.app
+                folder = workspace.paths.start_folder
                 page = page_bytes(
-                    workspace.folders(), read_theme(), read_genres(), read_layout(),
+                    [] if folder else workspace.folders(), read_theme(), read_genres(), read_layout(),
                     self._language(), load_catalogs(), read_language_choice(),
-                    vault_enabled=vault.path is not None, vault_scope=vault.scope if opened else "",
+                    vault_enabled=vault.path is not None, vault_scope=vault.scope if opened else "", vault_folder=folder,
                 )
             self._send(200, page, "text/html; charset=utf-8")
             return
