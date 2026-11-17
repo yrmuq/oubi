@@ -44,6 +44,18 @@ with urlopen(Request(base, headers={"Accept-Language": "en"}), timeout=2) as res
     page = response.read()
 assert b'<html lang="en">' in page
 assert b'id="tag"' in page
+assert b'href="/assets/oubi.svg"' in page
+
+with urlopen(base + "/assets/oubi.svg", timeout=2) as response:
+    assert response.headers.get_content_type() == "image/svg+xml"
+    assert b"<svg" in response.read()
+with urlopen(base + "/assets/oubi.webmanifest", timeout=2) as response:
+    assert response.headers.get_content_type() == "application/manifest+json"
+    icons = json.load(response)["icons"]
+for icon in icons:
+    with urlopen(base + "/assets/" + icon["src"], timeout=2) as response:
+        assert response.headers.get_content_type() == "image/png"
+        assert response.read(8) == b"\x89PNG\r\n\x1a\n"
 
 with sqlite3.connect(":memory:") as catalog:
     catalog.execute("CREATE TABLE smoke(path TEXT)")

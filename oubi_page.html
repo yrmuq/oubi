@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>oubi</title>
+<link rel="icon" href="/assets/oubi-192.png" type="image/png" sizes="192x192">
+<link rel="icon" href="/assets/oubi.svg" type="image/svg+xml" sizes="any">
+<link rel="apple-touch-icon" href="/assets/oubi-192.png">
+<link rel="manifest" href="/assets/oubi.webmanifest">
 <style>
 :root {
   color-scheme: light;
@@ -71,7 +75,7 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
   #app-mode { grid-column: 2; }
   .head-tools { grid-column: 1 / -1; }
 }
-.brand { font-size: 18px; font-weight: 650; }
+.brand { display: inline-flex; align-items: center; gap: 6px; font-size: 18px; font-weight: 650; }
 #theme { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
 .top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
 .pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
@@ -273,7 +277,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
 <body>
 <header class="topbar">
   <div class="head-compute">
-    <span class="brand">oubi</span>
+    <span class="brand"><img src="/assets/oubi.svg" width="26" height="26" alt="">oubi</span>
     <div class="compute">
       <select id="compute-device" aria-label="Tagging device">
         <option value="cpu">CPU</option>
@@ -391,8 +395,13 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         </div>
       </div>
     </div>
-    <div class="block grow" data-block="genres">
-      <div id="genre-row"></div>
+    <div class="block" data-block="filter">
+      <div class="genre-field filter-find">
+        <span id="filter-ghost" class="genre-ghost"></span>
+        <input id="filter-query" spellcheck="false" autocomplete="off">
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.2 15.2 L21 21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </div>
+      <div id="filter"></div>
     </div>
   </section>
   <div class="split split-v" id="split-mid"></div>
@@ -403,13 +412,8 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <p id="tags">Select a folder to see tagged images</p>
       </div>
     </div>
-    <div class="block" data-block="filter">
-      <div class="genre-field filter-find">
-        <span id="filter-ghost" class="genre-ghost"></span>
-        <input id="filter-query" spellcheck="false" autocomplete="off">
-        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.2 15.2 L21 21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      </div>
-      <div id="filter"></div>
+    <div class="block grow" data-block="genres">
+      <div id="genre-row"></div>
     </div>
     <aside id="favorites" aria-labelledby="favorites-title" hidden>
       <h2 id="favorites-title"></h2>

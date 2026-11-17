@@ -24,6 +24,7 @@
 - Keep the gallery selection separate from the latest completed tagging result so switching preview modes leaves the running job and gallery position intact.
 - Clear active tag filters on return from Gallery to Sorting, keeping favorite tags persistent per workspace and inside Cryptomator for an encrypted workspace.
 - Keep the preview mode switch in both Sorting and Gallery so users can browse images during a tagging job.
+- Keep the tag search and active filters beneath the preview in the default layout, with genre tags or favorites beneath the current image tags according to the active mode.
 - Merge imported favorites into the active workspace without case-insensitive duplicates and preserve any existing tag's group.
 - Show paths relative to the library root in the tagging progress label while keeping absolute paths in image metadata.
 - Report images found during the Identify walk and tag checks against the final count before tagging begins, independently of the vault index scan.

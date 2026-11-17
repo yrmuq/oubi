@@ -42,6 +42,12 @@ MAX_GENRES = 20
 THEMES = {"light", "dark", "auto"}
 MODES = {"all", "tag", "sort", "plan"}
 PAGE_PATH = HERE / "oubi_page.html"
+APP_ASSETS = {
+    "/assets/oubi.svg": "image/svg+xml",
+    "/assets/oubi-192.png": "image/png",
+    "/assets/oubi-512.png": "image/png",
+    "/assets/oubi.webmanifest": "application/manifest+json",
+}
 SORTED_LIST = "/data/sorted.txt"
 LANG_PATH = "/data/language"
 LANG_FILES = {"en": "English.ini", "ru": "Russian.ini"}
@@ -301,8 +307,14 @@ def write_theme(value, path=THEME_PATH):
 
 
 LAYOUT_KEYS = ("left", "mid", "right", "preview", "genres", "info", "log")
+LAYOUT_VERSION = 2
 BLOCK_NAMES = ("buttons", "folders", "progress", "preview", "genres", "info", "filter", "log")
 PANEL_NAMES = ("left", "mid", "right")
+LEGACY_DEFAULT_BLOCKS = {
+    "left": ["buttons", "folders", "progress", "log"],
+    "mid": ["preview", "genres"],
+    "right": ["info", "filter"],
+}
 
 
 def clean_blocks(value):
@@ -362,6 +374,9 @@ def read_layout(path=LAYOUT_PATH):
             clean[key] = int(value)
     blocks = clean_blocks(data.get("blocks"))
     if blocks:
+        if data.get("version", 1) == 1 and blocks == LEGACY_DEFAULT_BLOCKS:
+            blocks["mid"] = ["preview", "filter"]
+            blocks["right"] = ["info", "genres"]
         clean["blocks"] = blocks
     heights = clean_heights(data.get("heights")) if isinstance(data.get("heights"), dict) else None
     if heights:
@@ -394,7 +409,7 @@ def write_layout(values, path=LAYOUT_PATH, *, replace=False):
         current["heights"] = heights
     file = Path(path)
     file.parent.mkdir(parents=True, exist_ok=True)
-    write_json_file(file, current)
+    write_json_file(file, {**current, "version": LAYOUT_VERSION})
     return True
 
 
@@ -1914,6 +1929,14 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query, keep_blank_values=True)
         path = parsed.path
+        if path in APP_ASSETS:
+            try:
+                asset = (HERE / path.lstrip("/")).read_bytes()
+            except OSError:
+                self._error(404, 88)
+            else:
+                self._send(200, asset, APP_ASSETS[path])
+            return
         vault = self.app.vault
         scope = query.get("scope", [""])[0]
         if path == "/api/status":

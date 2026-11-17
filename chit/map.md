@@ -4,6 +4,7 @@
 
 - [oubi_web.py](../oubi_web.py) serves the browser page and JSON API using Python `http.server`. `Handler` routes requests and `App` manages model download, folder counts, job subprocesses, GPU installation confirmation, and progress. `tag_command` and `sort_command` connect the API to the CLI scripts.
 - [oubi_page.html](../oubi_page.html) contains the HTML, CSS, and JavaScript for folder selection, image preview, tag filters, job controls, panel layout, and JSON import and export. It receives startup state from `page_bytes` and uses the `/api/*` routes to refresh or save it.
+- [assets/](../assets/) contains the shared Oubi bell logo and shortcut icons served with the web interface.
 - [oubi_cryptomator.py](../oubi_cryptomator.py) runs Cryptomator CLI, detects the FUSE mount, and owns the browser session that opened it. `Workspace` in [oubi_web.py](../oubi_web.py) selects image, index, and output paths for that session.
 - [oubi_index.py](../oubi_index.py) stores vault folders, images, and searchable tags in a SQLite snapshot inside the vault. The tagger and sorter report affected paths to the web process so it can refresh the corresponding entries.
 - [oubi_thumbnails.py](../oubi_thumbnails.py) encodes versioned WebP previews and removes their encrypted cache entries when source files disappear.

@@ -1,0 +1,10 @@
+{
+  "name": "Oubi",
+  "short_name": "Oubi",
+  "start_url": "/",
+  "display": "standalone",
+  "icons": [
+    { "src": "oubi-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "oubi-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

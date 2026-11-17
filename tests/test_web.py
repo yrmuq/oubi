@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -194,6 +195,22 @@ class WebTests(unittest.TestCase):
 
 
 class LayoutTests(unittest.TestCase):
+    def test_layout_moves_only_the_legacy_default_and_keeps_saved_sizes(self):
+        import tempfile
+        old = {"left": ["buttons", "folders", "progress", "log"], "mid": ["preview", "genres"],
+               "right": ["info", "filter"]}
+        new = {**old, "mid": ["preview", "filter"], "right": ["info", "genres"]}
+        custom = {**old, "left": ["folders", "buttons", "progress", "log"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layout.json"
+            sizes = {"left": 300, "mid": 400, "right": 500, "heights": {"genres": 160}}
+            path.write_text(json.dumps({**sizes, "blocks": old}), encoding="utf-8")
+            self.assertEqual(read_layout(path), {**sizes, "blocks": new})
+            path.write_text(json.dumps({**sizes, "blocks": custom}), encoding="utf-8")
+            self.assertEqual(read_layout(path), {**sizes, "blocks": custom})
+            self.assertTrue(write_layout({**sizes, "blocks": old}, path, replace=True))
+            self.assertEqual(read_layout(path), {**sizes, "blocks": old})
+
     def test_layout_is_kept_on_disk(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
