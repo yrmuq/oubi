@@ -25,7 +25,7 @@ from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
-from oubi_files import sidecar_path
+from oubi_files import indexed_image_path, sidecar_path, stored_image_path
 from oubi_index import report_changes
 
 csv.field_size_limit(10**9)
@@ -53,7 +53,7 @@ def sort_history(path):
                 return
             if handle is None:
                 handle = resources.enter_context(open(path, "a", encoding="utf-8"))
-            handle.write(str(source.resolve()) + "\n")
+            handle.write(str(stored_image_path(source.resolve())) + "\n")
             pending += 1
             if pending == SORT_HISTORY_BATCH:
                 handle.flush()
@@ -256,7 +256,7 @@ def write_tags(path, fieldnames, rows):
         writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow({name: row.get(name, "") for name in fieldnames})
+            writer.writerow({**row, "file": row.get("_stored_file", row.get("file", ""))})
 
 def girl_count(general):
     n = 0
@@ -275,6 +275,7 @@ def main():
     ap.add_argument("--genders", help="CSV с ручными поправками пола: персонаж,f|m")
     ap.add_argument("--copy-txt", action="store_true", help="переносить .txt в подпапку tags")
     ap.add_argument("--exclude")
+    ap.add_argument("--source-root", type=Path)
     ap.add_argument("--only", nargs="*", default=[], help="раскладывать только файлы внутри этих папок")
     ap.add_argument("--genres", default="", help="жанры для copyright original, через запятую, по приоритету")
     ap.add_argument("--sorted-list", default="", help="дописывать путь после успешного копирования")
@@ -289,6 +290,9 @@ def sort_files(args, record):
         fieldnames = list(reader.fieldnames or [])
         rows = list(reader)
     for r in rows:
+        if args.source_root is not None and r.get("file"):
+            r["_stored_file"] = r["file"]
+            r["file"] = str(indexed_image_path(r["file"], args.source_root))
         r["_chars"] = split(r.get("character", ""))
         r["_copy"] = split(r.get("copyright", ""))
         r["_gen"] = set(split(r.get("general", "")))

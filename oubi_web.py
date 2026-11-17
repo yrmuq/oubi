@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
-from oubi_files import IMAGE_EXTS, ImageChangedError, delete_source_image, image_files, image_revision, sidecar_path
+from oubi_files import IMAGE_EXTS, ImageChangedError, delete_source_image, image_files, image_revision, indexed_image_path, sidecar_path
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
 from oubi_gpu import GPU_BUSY_STATES, GpuError
 from oubi_nvidia import NvidiaRuntime
@@ -455,9 +455,7 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES, *, exclude=None, folders=
                 raw = (row.get("file") or "").strip()
                 if not raw:
                     continue
-                image = Path(raw)
-                if not image.is_absolute():
-                    image = base / raw
+                image = indexed_image_path(raw, base)
                 try:
                     resolved = image.resolve()
                     rel = resolved.relative_to(base).as_posix()
@@ -522,19 +520,7 @@ def tags_in_folders(rels, path=CSV_PATH, root=IMAGES, *, exclude=None):
         return False
 
     def relative_file(raw):
-        text = str(raw or "").strip().replace("\\", "/")
-        if not text:
-            return ""
-        image = Path(text)
-        if image.is_absolute():
-            prefix = base.as_posix().rstrip("/") + "/"
-            full = image.as_posix()
-            if full == base.as_posix():
-                return ""
-            if not full.startswith(prefix):
-                return ""
-            return full[len(prefix):]
-        return image.as_posix().lstrip("/")
+        return relative_path(str(raw or "").strip().replace("\\", "/"), base) or ""
 
     columns = ("rating", "character", "copyright", "style", "general", "meta")
     if file.is_file():
@@ -663,8 +649,8 @@ def path_keys(path, root=None):
         return keys
     keys.add(raw)
     file = Path(raw)
-    if root is not None and not file.is_absolute():
-        file = Path(root) / raw
+    if root is not None:
+        file = indexed_image_path(raw, Path(root))
         keys.add(str(file))
     try:
         resolved = file.resolve()
@@ -893,7 +879,7 @@ def browse_dir(root, rel):
 
 def recent_tagged(rels, limit=40, *, root=IMAGES, exclude=None, csv=None):
     base = Path(root).resolve()
-    indexed = {os.path.normpath(base / path) for path in load_csv_paths(csv)} if csv else set()
+    indexed = {os.path.normpath(indexed_image_path(path, base)) for path in load_csv_paths(csv)} if csv else set()
     found = {}
     for rel in rels:
         folder = resolve_under(base, rel)
@@ -994,7 +980,7 @@ def character_index(path=CSV_PATH, root=IMAGES, *, cache=None, encrypted=False):
             character = row.get("character") or ""
             if base is not None:
                 # The vault tagger indexes paths without file symlinks.
-                rows[os.path.normpath(base / name)] = character
+                rows[os.path.normpath(indexed_image_path(name, base))] = character
             else:
                 for key in path_keys(name, root):
                     rows[key] = character
@@ -1131,7 +1117,7 @@ def sort_command(plan=False, folders=None, *, workspace=None, output=None):
         os.environ.get("OUBI_NSFW_FROM", "q"),
     ]
     if workspace.excluded:
-        command.extend(["--exclude", workspace.excluded])
+        command.extend(["--exclude", workspace.excluded, "--source-root", workspace.images])
     if os.path.isfile(workspace.genders):
         command.extend(["--genders", workspace.genders])
     if folders:

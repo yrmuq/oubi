@@ -10,9 +10,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
-from oubi_files import image_revision, sidecar_path
+from oubi_files import VAULT_METADATA_ROOT, image_revision, sidecar_path
 from oubi_index import folder_sidecars
 from oubi_web import App, Handler, Workspace, images_under, read_favorites, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
+from sort_images import main as sort_main
 
 
 class VaultWorkspaceTests(unittest.TestCase):
@@ -24,10 +25,42 @@ class VaultWorkspaceTests(unittest.TestCase):
     def test_default_vault_replaces_the_container_environment_setting(self):
         with patch("oubi_cryptomator.VAULT_PATH", self.root):
             self.assertIsNone(Vault().path)
+            self.assertEqual(Vault().mount, Path("/mnt/oubi-crypt/mount"))
             (self.root / "vault.cryptomator").touch()
             self.assertEqual(Vault().path, self.root)
             with patch.object(Path, "is_file", side_effect=PermissionError):
                 self.assertIsNone(Vault().path)
+
+    def test_previous_vault_paths_work_for_gallery_sorting_and_deletion(self):
+        album = self.root / "Album"
+        album.mkdir()
+        image = album / "example.jpg"
+        image.touch()
+        stored = str(VAULT_METADATA_ROOT / "Album" / image.name)
+        with patch("oubi_files.VAULT_MOUNT", self.root), patch.dict(os.environ, {"OUBI_CRYPT_OUTPUT": "Sorted"}):
+            workspace = Workspace.encrypted(self.root)
+            with open(workspace.csv, "w", encoding="utf-8", newline="") as handle:
+                csv.writer(handle).writerows([
+                    ("file", "rating", "character", "copyright", "general", "style"),
+                    (stored, "rating:g", "", "original", "scenery", ""),
+                ])
+            app = App(workspace)
+            self.addCleanup(app.close_catalog)
+            self.assertEqual(app.gallery(["Album"]), {"files": ["Album/example.jpg"]})
+            self.assertEqual(app.gallery(["Album"], ["scenery"]), {"files": ["Album/example.jpg"]})
+            self.assertIn("scenery", tags_in_folders(["Album"], path=workspace.csv, root=self.root))
+
+            command = sort_command(folders=[str(album)], workspace=workspace)
+            with patch.object(sys, "argv", command[1:]):
+                sort_main()
+            self.assertEqual(len(list(Path(workspace.output).rglob("*.jpg"))), 1)
+            self.assertEqual(Path(workspace.sorted_list).read_text().splitlines(), [stored])
+
+            app._count_folders(threading.Event(), "moved")
+            self.assertEqual(app.folders()[0]["sorted"], 1)
+            app.remove_image("Album/example.jpg", image_revision(image))
+            self.assertNotIn(stored, Path(workspace.csv).read_text())
+            self.assertEqual(Path(workspace.sorted_list).read_text(), "")
 
     def test_unlock_reports_fuse_error_and_redacts_password_in_response(self):
         (self.root / "vault.cryptomator").touch()

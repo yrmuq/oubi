@@ -44,3 +44,5 @@
 ## External Compatibility Constraints
 
 - Keep a named account for the default Compose UID in the image because `fusermount3` resolves the numeric UID before mounting the vault.
+- Mount the unlocked vault under `/mnt` inside the container because Ubuntu's `fusermount3` profile permits FUSE mounts there.
+- Write vault metadata using the original absolute prefix `/run/oubi-crypt/mount` so deployments on older Oubi images can read the same vault.

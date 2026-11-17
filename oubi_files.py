@@ -9,6 +9,22 @@ from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+VAULT_MOUNT = Path("/mnt/oubi-crypt/mount")
+VAULT_METADATA_ROOT = Path("/run/oubi-crypt/mount")
+
+
+def indexed_image_path(value, root):
+    path = Path(value)
+    if root == VAULT_MOUNT and path.is_relative_to(VAULT_METADATA_ROOT):
+        path = path.relative_to(VAULT_METADATA_ROOT)
+    return root / path
+
+
+def stored_image_path(path):
+    # Keep metadata readable by containers that still mount the vault at the old path.
+    if path.is_relative_to(VAULT_MOUNT):
+        return VAULT_METADATA_ROOT / path.relative_to(VAULT_MOUNT)
+    return path
 
 
 def sidecar_path(image):
@@ -62,7 +78,7 @@ def _updated_index(index, root, image, *, table, cleanup):
     removed = False
 
     def matches(raw):
-        return bool(raw) and Path(os.path.normpath(root / raw)) == image
+        return bool(raw) and Path(os.path.normpath(indexed_image_path(raw, root))) == image
 
     with index.open(encoding="utf-8", newline="") as source, updated.open("w", encoding="utf-8", newline="") as output:
         if table:

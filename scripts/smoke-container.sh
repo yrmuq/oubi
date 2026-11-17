@@ -40,6 +40,14 @@ subprocess.run(["id", "-un"], check=True)
 subprocess.run(["cryptomator-cli", "--version"], check=True)
 subprocess.run(["fusermount3", "--version"], check=True)
 
+from pathlib import Path
+from stat import S_IMODE
+
+mount = Path("/mnt/oubi-crypt/mount")
+assert S_IMODE(mount.parent.stat().st_mode) == 0o1777
+mount.mkdir(mode=0o711)
+mount.rmdir()
+
 with urlopen(Request(base, headers={"Accept-Language": "en"}), timeout=2) as response:
     page = response.read()
 assert b'<html lang="en">' in page

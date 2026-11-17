@@ -173,6 +173,8 @@ Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/S
 
 If opening fails, the password dialog identifies the failed step and shows the relevant error from Cryptomator or FUSE when available. Use that message when reporting a vault problem.
 
+Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
+
 Oubi saves gallery thumbnails on demand in `.oubi/thumbnails/`. Open a preview to load the original image. Deletion through Oubi removes the corresponding thumbnail, and a recount removes cached thumbnails whose originals were deleted elsewhere.
 
 ---

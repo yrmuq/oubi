@@ -8,7 +8,7 @@ import stat
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from oubi_files import sidecar_path
+from oubi_files import indexed_image_path, sidecar_path
 
 CHANGE_EVENT = "OUBI_INDEX_CHANGES "
 INDEX_NAME = "index.sqlite3"
@@ -26,7 +26,7 @@ def relative_path(value, root):
     if not value:
         return None
     try:
-        return Path(os.path.normpath(root / value)).relative_to(root).as_posix()
+        return Path(os.path.normpath(indexed_image_path(value, root))).relative_to(root).as_posix()
     except ValueError:
         return None
 

@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-from oubi_files import image_files, sidecar_path
+from oubi_files import image_files, sidecar_path, stored_image_path
 from oubi_gpu import GpuError
 from oubi_index import report_changes
 from oubi_nvidia import GPU_UUID, nvidia_device
@@ -449,7 +449,7 @@ def main():
                         ", ".join(tag for name in ORDER for tag in cats[name]),
                         encoding="utf-8",
                     )
-                writer.writerow([str(path)] + [", ".join(cats[name]) for name in ORDER])
+                writer.writerow([str(stored_image_path(path))] + [", ".join(cats[name]) for name in ORDER])
                 last_tagged = path
                 done += 1
                 if done % 50 == 0:

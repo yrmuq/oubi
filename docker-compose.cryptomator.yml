@@ -2,7 +2,7 @@ services:
   oubi:
     init: true
     tmpfs:
-      - /run/oubi-crypt:mode=1777
+      - /mnt/oubi-crypt:mode=1777
     security_opt:
       - apparmor:unconfined
     cap_add:

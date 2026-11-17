@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 
 COPY --from=cryptomator /opt/cryptomator-cli /opt/cryptomator-cli
 RUN ln -s /opt/cryptomator-cli/bin/cryptomator-cli /usr/local/bin/cryptomator-cli
+RUN install -d -m 1777 /mnt/oubi-crypt
 
 # fusermount3 resolves the default Compose UID through the user database.
 RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 oubi; fi \

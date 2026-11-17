@@ -10,6 +10,8 @@ import time
 from os import SEEK_END
 from pathlib import Path
 
+from oubi_files import VAULT_MOUNT
+
 FUSE_MOUNTER = "org.cryptomator.frontend.fuse.mount.LinuxFuseMountProvider"
 COOKIE_NAME = "oubi_vault"
 VAULT_PATH = Path("/crypt")
@@ -44,7 +46,7 @@ def mount_diagnostic(log, password):
 
 
 class Vault:
-    def __init__(self, path=None, mount="/run/oubi-crypt/mount"):
+    def __init__(self, path=None, mount=VAULT_MOUNT):
         self.path = default_vault_path() if path is None else Path(path)
         self.mount = Path(mount)
         self.lock = threading.RLock()
@@ -110,7 +112,7 @@ class Vault:
         except OSError as error:
             raise VaultError(243, str(error)) from error
         try:
-            self.mount.mkdir(mode=0o700, exist_ok=True)
+            self.mount.mkdir(mode=0o711, exist_ok=True)
             if any(self.mount.iterdir()):
                 raise VaultError(245, path=self.mount)
         except OSError as error:
