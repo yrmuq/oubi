@@ -77,13 +77,32 @@ with sqlite3.connect(":memory:") as catalog:
 from io import BytesIO
 from PIL import Image
 from sys import path
+from pathlib import Path
+from tempfile import TemporaryDirectory
 path.insert(0, "/opt/oubi")
-from oubi_thumbnails import render_thumbnail
+from oubi_files import open_image
+from oubi_thumbnails import render_jpeg_xl_for_browser, render_thumbnail
+from tag_folder import find_pending_images
 original = BytesIO()
 Image.new("RGB", (2048, 1536)).save(original, "PNG")
 preview = render_thumbnail(original.getvalue())
 with Image.open(BytesIO(preview)) as image:
     assert image.format == "WEBP" and image.size == (1024, 768)
+
+import pillow_jxl
+with TemporaryDirectory() as directory:
+    folder = Path(directory)
+    file = folder / "picture.JXL"
+    Image.new("RGBA", (1200, 900), (32, 64, 96, 127)).save(file, "JXL", lossless=True)
+    assert find_pending_images([folder], None, False) == (1, [(1, file)])
+    with open_image(file, jpeg_xl=True) as image:
+        assert image.convert("RGB").getpixel((0, 0)) == (32, 64, 96)
+    with Image.open(BytesIO(render_thumbnail(file.read_bytes(), jpeg_xl=True))) as image:
+        assert image.format == "WEBP" and image.size == (1024, 768)
+        assert image.getpixel((0, 0))[3] == 127
+    with Image.open(BytesIO(render_jpeg_xl_for_browser(file.read_bytes()))) as image:
+        assert image.format == "PNG" and image.size == (1200, 900)
+        assert image.getpixel((0, 0)) == (32, 64, 96, 127)
 
 import torch
 assert not torch.cuda.is_available(), "CPU image loaded CUDA"

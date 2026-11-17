@@ -8,7 +8,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+JPEG_XL_SUFFIX = ".jxl"
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", JPEG_XL_SUFFIX}
 VAULT_MOUNT = Path("/mnt/oubi-crypt/mount")
 VAULT_METADATA_ROOT = Path("/run/oubi-crypt/mount")
 
@@ -30,6 +31,17 @@ def stored_image_path(path):
 def sidecar_path(image):
     image = Path(image)
     return image.parent / "tags" / (image.name + ".txt")
+
+
+def open_image(source, *, jpeg_xl=False):
+    from PIL import Image
+
+    if jpeg_xl:
+        try:
+            import pillow_jxl  # Registers the JPEG XL Pillow plugin.
+        except ImportError as error:
+            raise OSError("JPEG XL decoder is unavailable") from error
+    return Image.open(source)
 
 
 def direct_image_files(folder):

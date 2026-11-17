@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-from oubi_files import image_files, sidecar_path, stored_image_path
+from oubi_files import JPEG_XL_SUFFIX, image_files, open_image, sidecar_path, stored_image_path
 from oubi_gpu import GpuError
 from oubi_index import report_changes
 from oubi_nvidia import GPU_UUID, nvidia_device
@@ -397,8 +397,6 @@ def main():
     except GpuError as error:
         print(say(error.message_id), file=sys.stderr, flush=True)
         return 1
-    from PIL import Image
-
     if not report_preview:
         print(say(64), flush=True)
     total, pending = find_pending_images(args.folder, args.exclude, args.force, report_scan if report_preview else None)
@@ -421,7 +419,8 @@ def main():
             loaded = []
             for index, path in batch:
                 try:
-                    loaded.append((index, path, Image.open(path).convert("RGB")))
+                    with open_image(path, jpeg_xl=path.suffix.lower() == JPEG_XL_SUFFIX) as image:
+                        loaded.append((index, path, image.convert("RGB")))
                 except Exception as error:
                     print(say(67, path=path, error=error), file=sys.stderr)
             if not loaded:

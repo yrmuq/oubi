@@ -210,14 +210,14 @@ class VaultWorkspaceTests(unittest.TestCase):
         handler._scoped_app = Mock(return_value=app)
         cache_dir = self.root / ".oubi" / "thumbnails"
 
-        with patch("oubi_web.render_thumbnail", side_effect=lambda data: b"preview of " + data) as render:
+        with patch("oubi_web.render_thumbnail", side_effect=lambda data, **options: b"preview of " + data) as render:
             def preview(path):
                 return handler._thumbnail_response(path.relative_to(self.root).as_posix(), "scope")
 
             result = (200, b"preview of first", "image/webp")
             self.assertEqual(preview(first), result)
             self.assertEqual(preview(first), result)
-            render.assert_called_once_with(b"first")
+            render.assert_called_once_with(b"first", jpeg_xl=False)
             first.write_bytes(b"updated source")
             self.assertEqual(preview(first)[1], b"preview of updated source")
             self.assertEqual(len(list(cache_dir.rglob("*.webp"))), 1)
@@ -230,7 +230,7 @@ class VaultWorkspaceTests(unittest.TestCase):
         self.assertEqual(list(cache_dir.rglob("*.webp")), [])
         first.write_bytes(b"concurrent deletion")
 
-        def remove_during_render(_):
+        def remove_during_render(_, *, jpeg_xl):
             self.assertFalse(lock.locked())
             app.remove_image("Album/a.jpg", image_revision(first))
             return b"expired preview"
@@ -239,6 +239,25 @@ class VaultWorkspaceTests(unittest.TestCase):
             self.assertEqual(handler._thumbnail_response("Album/a.jpg", "scope")[0], 404)
         self.assertEqual(list(cache_dir.rglob("*.webp")), [])
         app.close_catalog()
+
+    def test_vault_rescans_legacy_index_once_to_include_jpeg_xl(self):
+        workspace = Workspace.encrypted(self.root)
+        legacy = VaultIndex(workspace).initialize()
+        legacy.add_folder("")
+        legacy.db.execute("PRAGMA user_version = 2")
+        legacy.save()
+        legacy.db.close()
+        image = self.root / "picture.JXL"
+        image.touch()
+        app = App(workspace)
+        self.addCleanup(app.close_catalog)
+        self.assertTrue(app.catalog.needs_format_scan())
+        self.assertEqual(app.folder_images(), {"files": []})
+        app._count_folders(threading.Event(), "upgrade")
+        self.assertEqual(app.folder_images(), {"files": [{"path": image.name, "tagged": False}]})
+        reopened = App(workspace)
+        self.addCleanup(reopened.close_catalog)
+        self.assertFalse(reopened.catalog.needs_format_scan())
 
     def test_vault_scan_lists_sidecars_once_per_image_folder(self):
         workspace = Workspace.encrypted(self.root)

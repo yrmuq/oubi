@@ -22,12 +22,12 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
-from oubi_files import IMAGE_EXTS, ImageChangedError, delete_source_image, direct_image_files, image_files, image_revision, indexed_image_path, sidecar_path
+from oubi_files import IMAGE_EXTS, JPEG_XL_SUFFIX, ImageChangedError, delete_source_image, direct_image_files, image_files, image_revision, indexed_image_path, sidecar_path
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
 from oubi_gpu import GPU_BUSY_STATES, GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
-from oubi_thumbnails import VaultThumbnails, render_thumbnail
+from oubi_thumbnails import VaultThumbnails, render_jpeg_xl_for_browser, render_thumbnail
 
 # ===== SETTINGS =====
 HERE = Path(__file__).resolve().parent
@@ -870,6 +870,7 @@ def content_type(path):
         ".png": "image/png",
         ".webp": "image/webp",
         ".gif": "image/gif",
+        JPEG_XL_SUFFIX: "image/jxl",
         ".bmp": "image/bmp",
     }.get(Path(path).suffix.lower(), "application/octet-stream")
 
@@ -1607,6 +1608,7 @@ class App:
                         except OSError:
                             self.note(text(209))
                         self._save_catalog(catalog)
+                        self.close_catalog()
                         self.catalog = catalog
                         total, _, _ = catalog.totals("")
                         found = [{"path": "", "total": total}]
@@ -1945,7 +1947,11 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         workspace = Workspace.encrypted(vault.mount)
                         vault.app = App(workspace, devices=(self.app.rocm, self.app.nvidia), index_guard=vault.lock)
-                        vault.app._ensure_count()
+                        catalog = vault.app.catalog
+                        refresh = catalog is not None and catalog.needs_format_scan()
+                        if refresh:
+                            vault.app.note(text(263))
+                        vault.app._ensure_count(refresh=refresh)
                     except (OSError, ValueError, VaultError) as error:
                         vault.close()
                         if isinstance(error, VaultError):
@@ -2025,6 +2031,14 @@ class Handler(BaseHTTPRequestHandler):
                 response = self._error_response(409, 172)
             else:
                 response = self._file_response(path, query, app)
+        if path == "/api/file" and response[0] == 200 and response[2] == "image/jxl" and query.get("display") == ["1"]:
+            accepted = self.headers.get("Accept", "").split(",")
+            if not any(media.strip() == "image/jxl" for media in accepted):
+                display = render_jpeg_xl_for_browser(response[1])
+                if scope and self._scoped_app(scope) is not app:
+                    response = self._error_response(409, 172)
+                else:
+                    response = (200, display, "image/png") if display else self._error_response(404, 87)
         self._send(*response)
 
     def _thumbnail_response(self, relative, scope):
@@ -2050,7 +2064,7 @@ class Handler(BaseHTTPRequestHandler):
                     return 200, cached, "image/webp"
                 original = file.read_bytes()
 
-            preview = render_thumbnail(original)
+            preview = render_thumbnail(original, jpeg_xl=file.suffix.lower() == JPEG_XL_SUFFIX)
             with vault.lock:
                 if self._scoped_app(scope) is not app:
                     return self._error_response(409, 172)

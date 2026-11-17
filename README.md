@@ -24,7 +24,7 @@
 ## Features
 
 - Select source folders, identify images, and preview saved tags in the browser.
-- Resume tagging from `tags/<image filename>.txt`, such as `tags/photo.jpg.txt`. Set `OUBI_FORCE=1` to tag those images again.
+- Tag JPEG, PNG, WebP, BMP, GIF, and JPEG XL images. Resume from `tags/<image filename>.txt`, such as `tags/photo.jpg.txt`. Set `OUBI_FORCE=1` to tag those images again.
 - Plan a sort from `tags.csv`, then copy or move images. Numbered pages stay in their series and original art can be sorted by configured genres.
 - Open a Cryptomator vault and choose whether sorted images stay inside it or go to the usual output folder.
 - Filter the preview by tags, correct character genders through `genders.csv`, and customize the layout, theme, and language.
@@ -179,7 +179,7 @@ If opening fails, the password dialog identifies the failed step and shows the r
 
 Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
 
-Oubi saves gallery thumbnails on demand in `.oubi/thumbnails/`. Open a preview to load the original image. Deletion through Oubi removes the corresponding thumbnail, and a recount removes cached thumbnails whose originals were deleted elsewhere.
+Oubi saves gallery thumbnails on demand in `.oubi/thumbnails/`. Open a preview to load the full-size image. For JPEG XL, Oubi serves a PNG rendition if the browser lacks native JPEG XL support. Existing vault indexes refresh once to discover JPEG XL files. Deletion through Oubi removes the corresponding thumbnail, and a recount removes cached thumbnails whose originals were deleted elsewhere.
 
 ---
 
@@ -193,4 +193,5 @@ The scripts and `Dockerfile` in this repository are licensed under `GPL-3.0-only
 | PyTorch | [pytorch/pytorch](https://github.com/pytorch/pytorch) | `BSD-3-Clause` | CPU build installed in the image. |
 | Transformers | [huggingface/transformers](https://github.com/huggingface/transformers) | `Apache-2.0` | Loads the tagger pipeline. |
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | `Apache-2.0` | Required by the tagger model code. |
+| Pillow JPEG XL plugin | [Isotr0py/pillow-jpegxl-plugin](https://github.com/Isotr0py/pillow-jpegxl-plugin) | `GPL-3.0-or-later` | Shared decoder with a bundled license and [matching source distribution](https://pypi.org/project/pillow-jxl-plugin/1.3.8/#files). |
 | Cryptomator CLI | [Cryptomator CLI 0.6.2 source](https://github.com/cryptomator/cli/tree/0.6.2) | `AGPL-3.0-only` | The upstream Linux x86_64 binary and its license ship with Oubi. The vault override enables mounting via FUSE. |

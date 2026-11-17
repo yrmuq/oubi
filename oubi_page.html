@@ -1309,7 +1309,7 @@ async function showImage(root, path) {
   if (image !== previous) {
     if (!hasFile) document.getElementById("tags").textContent = t(205);
     const query = "path=" + encodeURIComponent(path);
-    image.dataset.original = workspaceUrl("/api/file?root=" + root + "&" + query);
+    image.dataset.original = workspaceUrl("/api/file?display=1&root=" + root + "&" + query);
     image.src = vaultScope && root === "images" ? workspaceUrl("/api/thumbnail?" + query) : image.dataset.original;
     let timeout;
     const deadline = new Promise((_, reject) => {

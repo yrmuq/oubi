@@ -13,7 +13,7 @@ from oubi_files import direct_image_files, indexed_image_path, sidecar_path
 CHANGE_EVENT = "OUBI_INDEX_CHANGES "
 INDEX_NAME = "index.sqlite3"
 DIRTY_NAME = "index.dirty"
-VERSION = 2
+VERSION = 3
 TAG_COLUMNS = ("rating", "character", "copyright", "style", "general", "meta")
 
 
@@ -149,7 +149,7 @@ class VaultIndex:
             return "missing"
         self.db.deserialize(saved)
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (1, VERSION):
+        if version not in (1, 2, VERSION):
             return "invalid"
         if self.db.execute("SELECT excluded FROM config").fetchone() != (self.excluded,):
             return "destination"
@@ -157,10 +157,13 @@ class VaultIndex:
             return "invalid"
         return None
 
+    def needs_format_scan(self):
+        return self.db.execute("PRAGMA user_version").fetchone()[0] < VERSION
+
     def add_missing_root_images(self, workspace):
-        if self.db.execute("PRAGMA user_version").fetchone() == (VERSION,):
+        if self.db.execute("PRAGMA user_version").fetchone() != (1,):
             return
-        self.db.execute(f"PRAGMA user_version = {VERSION}")
+        self.db.execute("PRAGMA user_version = 2")
         if self.db.execute("SELECT 1 FROM folders WHERE parent = '' LIMIT 1").fetchone() is None:
             return
         # Earlier scans started at the top-level subfolders when any were present.

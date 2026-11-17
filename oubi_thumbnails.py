@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from oubi_files import open_image
+
 DIRECTORY = "thumbnails"
 PREVIEW_SIZE = 1024
 CACHE_FORMAT = "webp-1024-q82-v1"
@@ -15,22 +17,33 @@ def digest(value):
     return hashlib.sha256(value.encode("utf-8", errors="surrogateescape")).hexdigest()
 
 
-def render_thumbnail(source):
+def render_thumbnail(source, *, jpeg_xl=False):
+    return _render_image(source, "WEBP", jpeg_xl=jpeg_xl)
+
+
+def render_jpeg_xl_for_browser(source):
+    return _render_image(source, "PNG", jpeg_xl=True)
+
+
+def _render_image(source, format_, *, jpeg_xl):
     from PIL import Image, ImageOps
 
     try:
-        with Image.open(io.BytesIO(source)) as original:
-            if getattr(original, "is_animated", False):
+        with open_image(io.BytesIO(source), jpeg_xl=jpeg_xl) as original:
+            if not jpeg_xl and getattr(original, "is_animated", False):
                 return None
             # Apply the camera orientation before encoding the preview.
             image = ImageOps.exif_transpose(original)
-            image.thumbnail((PREVIEW_SIZE, PREVIEW_SIZE))
-            if image.mode not in ("RGB", "RGBA"):
+            if format_ == "WEBP":
+                image.thumbnail((PREVIEW_SIZE, PREVIEW_SIZE))
+            modes = ("RGB", "RGBA") if format_ == "WEBP" else ("RGB", "RGBA", "L", "LA", "I;16")
+            if image.mode not in modes:
                 image = image.convert("RGBA" if "A" in image.getbands() or "transparency" in image.info else "RGB")
             output = io.BytesIO()
-            image.save(output, "WEBP", quality=82)
+            options = {"quality": 82} if format_ == "WEBP" else {}
+            image.save(output, format_, **options)
             return output.getvalue()
-    except (OSError, ValueError, Image.DecompressionBombError):
+    except (OSError, ValueError, RuntimeError, Image.DecompressionBombError):
         return None
 
 

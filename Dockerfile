@@ -24,6 +24,9 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
         torchvision==0.29.1+cpu \
     && pip install --no-cache-dir -r /opt/oubi/requirements.txt
 
+# The tagger loads the shared codec from its script directory in CPU and GPU environments.
+RUN pip install --no-cache-dir --no-deps --only-binary=:all: --target /opt/oubi pillow-jxl-plugin==1.3.8
+
 COPY --from=cryptomator /opt/cryptomator-cli /opt/cryptomator-cli
 RUN ln -s /opt/cryptomator-cli/bin/cryptomator-cli /usr/local/bin/cryptomator-cli
 RUN install -d -m 1777 /mnt/oubi-crypt
