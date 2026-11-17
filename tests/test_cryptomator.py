@@ -481,6 +481,26 @@ with open(sys.argv[2], 'w') as out:
         self.assertEqual(app.status()["preview_file"], "Album/ last.jpg")
         self.assertNotIn("OUBI_TAG_PREVIEW", "\n".join(app.status()["log"]))
 
+    def test_unsupported_extensions_do_not_affect_folder_tagging_counts(self):
+        workspace = Workspace.encrypted(self.root)
+        folder = self.root / "Album"
+        folder.mkdir()
+        first, second = folder / "first.jpg", folder / "second.png"
+        for file in (first, second, folder / "ignored.tiff"):
+            file.touch()
+        with open(workspace.csv, "w", encoding="utf-8", newline="") as handle:
+            csv.writer(handle).writerows([("file", "general"), (first, "moon"), (second, "sun")])
+        Path(workspace.sorted_list).write_text(f"{first}\n")
+        app = App(workspace)
+        self.addCleanup(app.close_catalog)
+        app._count_folders(threading.Event(), "initial")
+
+        summary, = app.folders()
+        self.assertEqual((summary["total"], summary["tagged"], summary["sorted"]), (2, 2, 1))
+        self.assertEqual((summary["scan"], summary["sort"]), ("done", "part"))
+        self.assertEqual({file["path"]: file["tagged"] for file in app.folder_images("Album")["files"]},
+                         {"Album/first.jpg": True, "Album/second.png": True})
+
     def test_folder_navigation_lists_children_without_exposing_vault_output(self):
         (self.root / "Album" / "Selected").mkdir(parents=True)
         (self.root / "Album" / "Sorted").mkdir()

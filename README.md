@@ -36,7 +36,8 @@
 
 | Input | Action |
 | :--- | :--- |
-| Folder tile | Click to select a source folder. Double-click or press Right Arrow to open it and see its subfolders and images. A green badge marks a tagged image and a white badge marks an untagged image. Use the up arrow to return to the parent folder. |
+| Folder tile | Click to select a source folder. Double-click or press Right Arrow to open it and see its subfolders and images. Hover over the folder badges to see the tagging and sorting counts. A green badge marks a tagged image and a white badge marks an untagged image. Use the up arrow to return to the parent folder. |
+| Square selection button | Select all visible folders or select the current folder when it has no subfolders. |
 | Tile size and order | Resize tiles with the slider. Folders always come first. The order button switches between name order and untagged images first. Both modes compare names by symbols, numbers, then letters. |
 | Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |

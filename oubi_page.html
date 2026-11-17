@@ -519,6 +519,7 @@ const folderBox = document.getElementById("folders");
 const folderSize = document.getElementById("folder-size");
 const folderOrder = document.getElementById("folder-order");
 const folderUp = document.getElementById("folder-up");
+const allFolders = document.getElementById("all-folders");
 let untaggedFirst = readPreference("oubi.folder-order") === "untagged";
 const fileTileBatch = 200;
 let visibleFileTiles = fileTileBatch;
@@ -643,7 +644,6 @@ function applyI18n() {
   exportSettings.textContent = t(224);
   settingsMenu.querySelector('[data-settings="favorites"]').textContent = t(212);
   settingsMenu.querySelector('[data-settings="layout"]').textContent = t(225);
-  document.getElementById("all-folders").title = t(83);
   recountFolders.title = t(194);
   recountFolders.setAttribute("aria-label", t(194));
   renderPreviewMode();
@@ -674,21 +674,19 @@ function applyI18n() {
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
 }
 
-function badge(kind, state, file = false) {
-  const title = file ? t(state === "done" ? 252 : 251) : {
-    scan: { none: t(13), part: t(14), done: t(15) },
-    sort: { none: t(16), part: t(17), done: t(18) },
-  }[kind][state] || "";
-  if (!title) return "";
+function badge(kind, state, title) {
   const shape = {
     none: '<circle cx="7" cy="7" r="2" fill="currentColor"/>',
     part: '<path d="M7 2.5a4.5 4.5 0 1 1-4.5 4.5"/>',
     done: '<path d="m3 7 2.5 2.5L11 4"/>',
   }[state];
+  if (!shape) return "";
   return `<span class="badge ${kind} ${state}" title="${title}"><svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${shape}</svg></span>`;
 }
 
-function folderIcon(scan, sort) {
+function folderIcon(folder) {
+  const { scan, sort, tagged, sorted, total } = folder;
+  const count = (label, done) => t(label).replace("{done}", done).replace("{total}", total);
   const icon = document.createElement("div");
   icon.className = "icon";
   icon.innerHTML = `<svg class="folder-art" viewBox="0 0 72 56" aria-hidden="true">
@@ -696,7 +694,7 @@ function folderIcon(scan, sort) {
     <path fill="var(--folder-front)" stroke="var(--folder-edge)" stroke-width="1.25" d="M7 22h57a4 4 0 0 1 4 4.8l-4 18a6 6 0 0 1-6 5H13a6 6 0 0 1-6-5l-3.5-18A4 4 0 0 1 7 22z"/>
     <path fill="var(--folder)" d="M8 37h56l-2 8a5 5 0 0 1-5 4H14a5 5 0 0 1-5-4z" opacity=".48"/>
     <path d="M10 26h51" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".53"/>
-  </svg>` + badge("scan", scan) + badge("sort", sort);
+  </svg>` + badge("scan", scan, count(255, tagged)) + badge("sort", sort, count(256, sorted));
   return icon;
 }
 
@@ -723,10 +721,8 @@ function renderFolders() {
   const collator = new Intl.Collator(lang, { numeric: true, sensitivity: "base" });
   const parts = name => name.normalize().match(/\p{Nd}+|[\p{L}\p{M}]\p{M}*|./gsu) || [];
   const compare = (a, b) => compareFolderNames(a, b, collator);
-  const tiles = folders.map(folder => {
-    const name = folder.path === "" ? t(84) : folder.name;
-    return { folder, name, parts: parts(name) };
-  }).sort(compare);
+  const tiles = folders.filter(folder => folder.path !== folderLocation)
+    .map(folder => ({ folder, name: folder.name, parts: parts(folder.name) })).sort(compare);
   folderBox.replaceChildren();
   for (const { folder, name } of tiles) {
     const button = document.createElement("button");
@@ -735,7 +731,7 @@ function renderFolders() {
     const label = document.createElement("span");
     label.className = "name";
     label.textContent = name;
-    button.append(folderIcon(folder.scan, folder.sort), label);
+    button.append(folderIcon(folder), label);
     button.title = t(181);
     button.onclick = () => {
       if (selected.has(folder.path)) selected.delete(folder.path);
@@ -776,7 +772,7 @@ function appendFileTiles(files, start) {
       <rect x="10" y="7" width="52" height="42" rx="5" fill="var(--pane)" stroke="currentColor" stroke-width="2"/>
       <circle cx="46" cy="20" r="4" fill="currentColor"/>
       <path d="m16 39 13-14 9 10 6-6 12 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-    </svg>` + badge("scan", tagged ? "done" : "none", true);
+    </svg>` + badge("scan", tagged ? "done" : "none", t(tagged ? 252 : 251));
     const label = document.createElement("span");
     label.className = "name";
     label.textContent = name;
@@ -811,8 +807,13 @@ function takeFolderFiles(files) {
 }
 
 function updateSelectAll() {
-  const all = document.getElementById("all-folders");
-  all.classList.toggle("on", folders.length > 0 && folders.every(folder => selected.has(folder.path)));
+  const currentOnly = folders.length === 1 && folders[0].path === folderLocation;
+  const label = t(currentOnly ? 254 : 83);
+  const active = folders.length > 0 && folders.every(folder => selected.has(folder.path));
+  allFolders.title = label;
+  allFolders.setAttribute("aria-label", label);
+  allFolders.setAttribute("aria-pressed", String(active));
+  allFolders.classList.toggle("on", active);
 }
 
 function takeFolders(data) {
@@ -2398,7 +2399,7 @@ folderOrder.onclick = () => {
   renderFolders();
   folderBox.scrollTop = 0;
 };
-document.getElementById("all-folders").onclick = () => {
+allFolders.onclick = () => {
   clearTimeout(folderSelectionTimer);
   const every = folders.length > 0 && folders.every((folder) => selected.has(folder.path));
   if (every) selected.clear();

@@ -29,6 +29,7 @@
 - Show paths relative to the library root in the tagging progress label while keeping absolute paths in image metadata.
 - Report images found during the Identify walk and tag checks against the final count before tagging begins, independently of the vault index scan.
 - Keep folders before files in both browser order modes, comparing names by symbols, numbers, then letters and comparing digit sequences numerically.
+- A folder with no subfolders remains selectable with the square selection button while the grid shows only its image files.
 - Show only the current folder's image files in the browser and use the open vault's index to display their tagging status without loading image data.
 - Put tags from the CSV character column under Characters and all remaining favorites under Events.
 - Display the decoded preview and its filename together before requesting image tags so metadata reads do not delay the current frame.
