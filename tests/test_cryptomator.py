@@ -4,6 +4,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -27,6 +28,61 @@ class VaultWorkspaceTests(unittest.TestCase):
             self.assertEqual(Vault().path, self.root)
             with patch.object(Path, "is_file", side_effect=PermissionError):
                 self.assertIsNone(Vault().path)
+
+    def test_unlock_reports_fuse_error_and_redacts_password_in_response(self):
+        (self.root / "vault.cryptomator").touch()
+        vault = Vault(self.root, self.root / "mount")
+        password = "fixture-password"
+
+        def fail_to_mount(command, **options):
+            self.assertNotIn(password, command)
+            output = options["stdout"]
+            output.write(b"fusermount3: mount failed: Operation not permitted (fixture-password)\n")
+            output.write(b"Caused by: org.example.MountException: fuse_mount failed\n")
+            output.flush()
+            return SimpleNamespace(poll=lambda: 1, stdin=BytesIO())
+
+        handler = Handler.__new__(Handler)
+        handler.headers = Mock()
+        handler.headers.get_content_type.return_value = "application/json"
+        handler.app = SimpleNamespace(vault=vault)
+        handler._language = Mock(return_value="en")
+        handler._send = Mock()
+        with patch("oubi_cryptomator.subprocess.Popen", side_effect=fail_to_mount):
+            handler._vault_action("/api/vault/unlock", {"password": password})
+        code, payload = handler._send.call_args.args
+        self.assertEqual(code, 409)
+        self.assertIn("Cryptomator exited with code 1 before mounting", payload["error"])
+        self.assertIn("fusermount3: mount failed: Operation not permitted", payload["error"])
+        self.assertNotIn(password, payload["error"])
+        self.assertIsNone(vault.process)
+
+    def test_unlock_reports_a_nonempty_mount_directory(self):
+        (self.root / "vault.cryptomator").touch()
+        mount = self.root / "mount"
+        mount.mkdir()
+        (mount / "leftover").touch()
+        with self.assertRaises(VaultError) as failure:
+            Vault(self.root, mount).unlock("fixture")
+        self.assertEqual(failure.exception.message_id, 245)
+        self.assertEqual(failure.exception.values["path"], mount)
+
+    def test_unlock_distinguishes_data_permissions_from_a_fuse_failure(self):
+        mount = self.root / "mount"
+        vault = SimpleNamespace(lock=threading.Lock(), mount=mount, unlock=Mock(), close=Mock())
+        handler = Handler.__new__(Handler)
+        handler.headers = Mock()
+        handler.headers.get_content_type.return_value = "application/json"
+        handler.app = SimpleNamespace(vault=vault)
+        handler._language = Mock(return_value="en")
+        handler._send = Mock()
+        with patch.object(Workspace, "encrypted", side_effect=PermissionError("cannot create .oubi")):
+            handler._vault_action("/api/vault/unlock", {"password": "fixture"})
+        code, payload = handler._send.call_args.args
+        self.assertEqual(code, 409)
+        self.assertIn("The vault mounted, but Oubi could not prepare its data directory", payload["error"])
+        self.assertIn("cannot create .oubi", payload["error"])
+        vault.close.assert_called_once()
 
     def test_favorites_use_all_csv_characters_and_stay_in_the_vault(self):
         workspace = Workspace.encrypted(self.root)

@@ -1908,9 +1908,11 @@ class Handler(BaseHTTPRequestHandler):
                         workspace = Workspace.encrypted(vault.mount)
                         vault.app = App(workspace, devices=(self.app.rocm, self.app.nvidia), index_guard=vault.lock)
                         vault.app._ensure_count()
-                    except (OSError, ValueError, VaultError):
+                    except (OSError, ValueError, VaultError) as error:
                         vault.close()
-                        raise
+                        if isinstance(error, VaultError):
+                            raise
+                        raise VaultError(249, str(error), path=vault.mount / ".oubi") from error
                 else:
                     if not self._vault_owner():
                         raise VaultError(172)
@@ -1918,10 +1920,14 @@ class Handler(BaseHTTPRequestHandler):
                         raise VaultError(173)
                     vault.close()
             except VaultError as error:
-                self._error(409, error.message_id)
+                message = text(error.message_id, language=self._language(), **error.values)
+                if error.detail:
+                    message += "\n" + error.detail
+                self._send(409, {"error": message})
                 return
-            except (OSError, ValueError):
-                self._error(409, 169)
+            except (OSError, ValueError) as error:
+                message = text(169 if path == "/api/vault/unlock" else 170, language=self._language())
+                self._send(409, {"error": message + "\n" + str(error)})
                 return
             self._send(200, {"scope": vault.scope}, cookie=self._cookie(vault.token))
 
@@ -2250,7 +2256,8 @@ def main():
             try:
                 app.vault.close()
             except VaultError as error:
-                print(text(error.message_id), flush=True)
+                message = text(error.message_id, **error.values)
+                print(message + ("\n" + error.detail if error.detail else ""), flush=True)
 
 
 if __name__ == "__main__":

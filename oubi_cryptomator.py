@@ -1,17 +1,20 @@
 """Mount the Cryptomator vault for the browser that unlocked it."""
 
+import re
 import secrets
 import signal
 import subprocess
 import tempfile
 import threading
 import time
+from os import SEEK_END
 from pathlib import Path
 
 FUSE_MOUNTER = "org.cryptomator.frontend.fuse.mount.LinuxFuseMountProvider"
 COOKIE_NAME = "oubi_vault"
 VAULT_PATH = Path("/crypt")
 VAULT_CONFIG = "vault.cryptomator"
+MOUNT_TIMEOUT = 20
 
 
 def default_vault_path():
@@ -22,9 +25,22 @@ def default_vault_path():
 
 
 class VaultError(Exception):
-    def __init__(self, message_id):
+    def __init__(self, message_id, detail="", **values):
         self.message_id = message_id
+        self.detail = detail
+        self.values = values
         super().__init__(message_id)
+
+
+def mount_diagnostic(log, password):
+    lines = [line.strip() for line in log.replace(password, "[redacted]").splitlines() if line.strip()]
+    fuse = next((line for line in reversed(lines)
+                 if re.search(r"(?:^|\s)(?:fusermount\d*|fuse|libfuse):", line, re.IGNORECASE)), "")
+    causes = [line.removeprefix("Caused by: ") for line in lines if line.startswith("Caused by: ")]
+    errors = [line for line in lines if re.search(r"(?:Exception|Error):|\b(?:error|failed|denied|not permitted)\b",
+                                                 line, re.IGNORECASE)]
+    detail = fuse or (causes or errors or [""])[-1]
+    return detail[:1000]
 
 
 class Vault:
@@ -53,6 +69,7 @@ class Vault:
 
     def _unmount(self):
         process = self.process
+        detail = str(self.mount)
         if process and process.poll() is None:
             try:
                 process.send_signal(signal.SIGINT)
@@ -61,12 +78,13 @@ class Vault:
                 pass
         if self.is_mounted():
             try:
-                subprocess.run(["fusermount3", "-u", str(self.mount)], timeout=5,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except (OSError, subprocess.TimeoutExpired):
-                pass
+                result = subprocess.run(["fusermount3", "-u", str(self.mount)], timeout=5,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace")
+                detail = result.stderr.strip()[:1000] or detail
+            except (OSError, subprocess.TimeoutExpired) as error:
+                detail = str(error)
         if self.is_mounted():
-            raise VaultError(170)
+            raise VaultError(170, detail)
         if process and process.poll() is None:
             process.kill()
             process.wait()
@@ -85,12 +103,20 @@ class Vault:
         if len(encoded) > 4096:
             raise VaultError(165)
         self.close()
-        if not (self.path / VAULT_CONFIG).is_file():
-            raise VaultError(166)
+        config = self.path / VAULT_CONFIG
+        try:
+            if not config.is_file():
+                raise VaultError(166, str(config))
+        except OSError as error:
+            raise VaultError(243, str(error)) from error
         try:
             self.mount.mkdir(mode=0o700, exist_ok=True)
             if any(self.mount.iterdir()):
-                raise VaultError(169)
+                raise VaultError(245, path=self.mount)
+        except OSError as error:
+            raise VaultError(244, str(error), path=self.mount) from error
+
+        try:
             command = [
                 "cryptomator-cli", "unlock", "--password:stdin", "--mounter=" + FUSE_MOUNTER,
                 "--mountPoint=" + str(self.mount), str(self.path),
@@ -103,20 +129,26 @@ class Vault:
                         stdin.write(encoded + b"\n")
                 except BrokenPipeError:
                     pass
-                expires = time.monotonic() + 20
+                expires = time.monotonic() + MOUNT_TIMEOUT
                 while self.process.poll() is None and time.monotonic() < expires:
                     if self.is_mounted():
                         self.token = secrets.token_urlsafe(32)
                         self.scope = secrets.token_hex(16)
                         return
                     time.sleep(0.05)
-                output.seek(0)
-                error_log = output.read(65536).lower()
-                wrong_password = b"invalidpassphrase" in error_log or b"invalid passphrase" in error_log
-                raise VaultError(164 if wrong_password else 169)
+                size = output.seek(0, SEEK_END)
+                output.seek(max(0, size - 65536))
+                log = output.read(65536).decode("utf-8", errors="replace")
+                if re.search(r"invalid\s*passphrase", log, re.IGNORECASE):
+                    raise VaultError(164)
+                detail = mount_diagnostic(log, password)
+                code = self.process.poll()
+                if code is None:
+                    raise VaultError(247, detail, path=self.mount, seconds=MOUNT_TIMEOUT)
+                raise VaultError(248, detail, code=code, path=self.mount)
         except OSError as error:
             self.close()
-            raise VaultError(169) from error
+            raise VaultError(246, str(error)) from error
         except VaultError:
             self.close()
             raise

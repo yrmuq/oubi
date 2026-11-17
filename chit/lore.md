@@ -35,6 +35,7 @@
 - Resolve the internal sort destination relative to the Cryptomator mount and exclude its subtree from vault source operations.
 - Ship Cryptomator in the shared Oubi image so operators can install or update vault-enabled deployments with Compose pulls.
 - Enable vault controls at startup when `/crypt/vault.cryptomator` is present. The container path is fixed so operators only configure the host bind mount.
+- Return vault unlock errors to the requesting browser with the failed stage and a concise Cryptomator or FUSE diagnostic, redacting the submitted password.
 
 ## Compatibility Workarounds
 

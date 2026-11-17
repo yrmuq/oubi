@@ -171,6 +171,8 @@ The standard Oubi image includes Cryptomator CLI and `fuse3`. The override mount
 
 Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, favorite tags, and gender overrides use the vault’s `.oubi/` folder.
 
+If opening fails, the password dialog identifies the failed step and shows the relevant error from Cryptomator or FUSE when available. Use that message when reporting a vault problem.
+
 Oubi saves gallery thumbnails on demand in `.oubi/thumbnails/`. Open a preview to load the original image. Deletion through Oubi removes the corresponding thumbnail, and a recount removes cached thumbnails whose originals were deleted elsewhere.
 
 ---

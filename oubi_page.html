@@ -98,6 +98,7 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #vault-form { display: grid; gap: 10px; }
 #vault-password { min-width: 0; padding: 6px 8px; font: inherit; border-radius: 6px; background: var(--bg); color: var(--text); border: 1px solid var(--line); }
 #vault-error, #delete-error { margin: 0; }
+#vault-error { white-space: pre-line; overflow-wrap: anywhere; }
 #delete-title { margin: 0 0 14px; overflow-wrap: anywhere; }
 #delete-error { margin-top: 10px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
@@ -885,7 +886,7 @@ async function changeVault(action, password) {
     useVault(data.scope);
   } catch {
     if (action === "unlock") {
-      vaultError.textContent = t(169);
+      vaultError.textContent = t(250);
       vaultError.hidden = false;
     } else {
       showNotice(t(170));
