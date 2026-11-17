@@ -40,6 +40,7 @@
 - Ship Cryptomator in the shared Oubi image so operators can install or update vault-enabled deployments with Compose pulls.
 - Enable vault controls at startup when `/crypt/vault.cryptomator` is present. The container path is fixed so operators only configure the host bind mount.
 - Return vault unlock errors to the requesting browser with the failed stage and a concise Cryptomator or FUSE diagnostic, redacting the submitted password.
+- Open the Cryptomator password form outside the native modal top layer so browser password managers can display their inline autofill controls.
 
 ## Compatibility Workarounds
 

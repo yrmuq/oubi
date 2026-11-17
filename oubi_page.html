@@ -94,7 +94,10 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #vault-toggle[aria-pressed="true"] { color: var(--pick); }
 #sort-target { box-sizing: border-box; width: 100%; background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
 #vault-dialog, #delete-dialog { background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; width: min(320px, calc(100vw - 56px)); }
-#vault-dialog::backdrop, #delete-dialog::backdrop { background: #0009; }
+#delete-dialog::backdrop { background: #0009; }
+#vault-dialog { position: fixed; inset: 0; height: fit-content; max-height: calc(100dvh - 56px); margin: auto; z-index: 41; }
+#vault-backdrop { display: none; position: fixed; inset: 0; background: #0009; z-index: 40; }
+#vault-dialog[open] + #vault-backdrop { display: block; }
 #vault-form { display: grid; gap: 10px; }
 #vault-password { min-width: 0; padding: 6px 8px; font: inherit; border-radius: 6px; background: var(--bg); color: var(--text); border: 1px solid var(--line); }
 #vault-error, #delete-error { margin: 0; }
@@ -435,9 +438,9 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   <button id="delete-tile" type="button" class="danger" autofocus>Delete image</button>
 </div>
 <dialog id="vault-dialog" aria-labelledby="vault-title">
-  <form id="vault-form" autocomplete="off">
+  <form id="vault-form" method="dialog">
     <label id="vault-title" for="vault-password">Cryptomator password</label>
-    <input id="vault-password" type="password" autocomplete="off" required autofocus>
+    <input id="vault-password" name="password" type="password" autocomplete="current-password" required autofocus>
     <p id="vault-error" role="alert" hidden></p>
     <div class="dialog-actions">
       <button id="vault-unlock" type="submit">Unlock</button>
@@ -445,6 +448,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     </div>
   </form>
 </dialog>
+<div id="vault-backdrop" aria-hidden="true"></div>
 <dialog id="delete-dialog" aria-labelledby="delete-title">
   <p id="delete-title"></p>
   <div class="dialog-actions">
@@ -524,6 +528,8 @@ const vaultDialog = document.getElementById("vault-dialog");
 const vaultPassword = document.getElementById("vault-password");
 const vaultError = document.getElementById("vault-error");
 const vaultUnlock = document.getElementById("vault-unlock");
+const vaultCancel = document.getElementById("vault-cancel");
+const vaultBackground = document.querySelectorAll("body > .topbar, body > .top");
 const sortTarget = document.getElementById("sort-target");
 const folderBox = document.getElementById("folders");
 const folderSize = document.getElementById("folder-size");
@@ -874,6 +880,7 @@ function renderVault() {
   vaultToggle.setAttribute("aria-pressed", String(opened));
   vaultToggle.disabled = vaultBusy;
   vaultUnlock.disabled = vaultBusy;
+  vaultCancel.disabled = vaultBusy;
   vaultUnlock.textContent = t(219);
   vaultPassword.disabled = vaultBusy;
   sortTarget.hidden = !opened || appMode === "gallery";
@@ -2453,10 +2460,20 @@ vaultToggle.onclick = () => {
   }
   vaultPassword.value = "";
   vaultError.hidden = true;
-  vaultDialog.showModal();
+  vaultBackground.forEach(element => { element.inert = true; });
+  vaultDialog.show();
 };
-document.getElementById("vault-cancel").onclick = () => vaultDialog.close();
-vaultDialog.addEventListener("cancel", event => { if (vaultBusy) event.preventDefault(); });
+vaultCancel.onclick = () => vaultDialog.close();
+vaultDialog.addEventListener("close", () => {
+  vaultPassword.value = "";
+  vaultBackground.forEach(element => { element.inert = false; });
+  vaultToggle.focus();
+});
+document.addEventListener("keydown", event => {
+  if (event.defaultPrevented || event.key !== "Escape" || !vaultDialog.open) return;
+  event.preventDefault();
+  if (!vaultBusy) vaultDialog.close();
+});
 document.getElementById("vault-form").onsubmit = event => {
   event.preventDefault();
   if (vaultBusy) return;
