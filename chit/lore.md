@@ -9,7 +9,8 @@
 - Keep the genre add and remove buttons together in one field-width slot so a shorter row does not stretch its numbered fields.
 - Keep GPU runtime downloads opt-in and separate from the CPU Python environment so standard Docker pulls and CPU tagging never require ROCm or CUDA packages.
 - Prefer a ready installed GPU at page startup and honor an explicit manual device selection while the device is available.
-- In the web interface, show the GPU bundle and its estimated download size in the shared terminal before starting a download. Accept `y` or `n` there for the specific pending installation request.
+- In the web interface, show the GPU bundle and its estimated download size in the shared terminal before starting a download. Accept `y` or `n` there for the specific pending installation or removal request.
+- Protect GPU runtime packages while a job uses them and retain a shared CUDA build while another card remains configured for it.
 
 - Read and write image tag sidecars only in the image directory's `tags/` subfolder, using the full image filename plus `.txt` to distinguish images with the same stem.
 - Preview deletion applies only to the confirmed image in its original workspace and removes only that image's tag sidecar and index entries.
@@ -22,7 +23,9 @@
 - Keep the sort history open during a sort and flush completed entries in batches and when a graceful stop unwinds the job.
 - Keep the gallery selection separate from the latest completed tagging result so switching preview modes leaves the running job and gallery position intact.
 - Clear active tag filters on return from Gallery to Sorting, keeping favorite tags persistent per workspace and inside Cryptomator for an encrypted workspace.
-- Keep Gallery on the browsable image preview while a job runs and hide the sorting controls, sorting badges, and preview mode switch.
+- Keep the preview mode switch in both Sorting and Gallery so users can browse images during a tagging job.
+- Merge imported favorites into the active workspace without case-insensitive duplicates and preserve any existing tag's group.
+- Show paths relative to the library root in the tagging progress label while keeping absolute paths in image metadata.
 - Order folder names by symbols, numbers, then letters by default, comparing digit sequences numerically.
 - Put tags from the CSV character column under Characters and all remaining favorites under Events.
 - Display the decoded preview and its filename together before requesting image tags so metadata reads do not delay the current frame.

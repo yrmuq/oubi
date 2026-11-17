@@ -383,6 +383,7 @@ def main():
 
     csv_path = Path(args.csv)
     new_csv = not csv_path.exists()
+    progress_root = os.environ.get("OUBI_PROGRESS_ROOT")
     started = time.time()
     done = 0
     with open(csv_path, "a", newline="", encoding="utf-8") as handle:
@@ -400,7 +401,9 @@ def main():
                 continue
             if len(loaded) == 1:
                 index, path, _image = loaded[0]
-                print(say(68, path=path, index=index, total=len(files)), flush=True)
+                display_path = ("/" + path.relative_to(progress_root).as_posix()
+                                if progress_root and path.is_relative_to(progress_root) else path)
+                print(say(68, path=display_path, index=index, total=len(files)), flush=True)
             else:
                 print(say(69, start=loaded[0][0], end=loaded[-1][0], total=len(files)), flush=True)
             results = tag_images(tagger, [image for _, _, image in loaded])

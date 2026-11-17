@@ -14,6 +14,7 @@ from oubi_web import (
     flag_on,
     folder_names,
     mark,
+    merge_favorites,
     parse_progress,
     preflight,
     reject_reason,
@@ -205,6 +206,30 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(read_layout(path)["blocks"]["right"][-1], "filter")
             self.assertTrue(write_layout({"heights": {"folders": 240, "nope": 10}}, path))
             self.assertEqual(read_layout(path)["heights"], {"folders": 240})
+
+    def test_imported_layout_replaces_old_sizes_and_validates_the_whole_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layout.json"
+            self.assertTrue(write_layout({"heights": {"folders": 240}, "preview": 700}, path))
+            layout = {
+                "left": 240, "mid": 460, "right": 300,
+                "blocks": {"left": ["log"], "mid": ["buttons", "folders", "progress"],
+                           "right": ["preview", "genres", "info", "filter"]},
+                "heights": {},
+            }
+            self.assertFalse(write_layout({**layout, "heights": {"folders": -1}}, path, replace=True))
+            self.assertEqual(read_layout(path)["heights"], {"folders": 240})
+            self.assertTrue(write_layout(layout, path, replace=True))
+            self.assertEqual(read_layout(path), {key: value for key, value in layout.items() if key != "heights"})
+
+    def test_imported_favorites_merge_without_duplicates_across_groups(self):
+        current = {"character": ["Existing"], "event": ["Festive"]}
+        incoming = {"character": [" festive ", "New"], "event": ["EXISTING", "new", "Summer"]}
+        self.assertEqual(merge_favorites(current, incoming),
+                         {"character": ["Existing", "New"], "event": ["Festive", "Summer"]})
+        with self.assertRaises(ValueError):
+            merge_favorites(current, {"character": ["ok"], "event": [50]})
 
     def test_images_with_tag(self):
         import tempfile

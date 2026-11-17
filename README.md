@@ -42,7 +42,9 @@
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
 | `Identify` | Tag images in the selected folders when the model is ready. |
 | `Tagging device` | Choose CPU, AMD, or NVIDIA. Oubi selects an available installed GPU when the page opens. |
-| `Sorting` / `Gallery` | Switch between genre settings and favorite tag filters. Gallery hides the sorting controls, sorting badges, and preview mode switch. Returning to Sorting clears the active filters. |
+| `Install` / `Uninstall` | Install or remove components for the selected GPU. Confirm with `y` or cancel with `n` in the terminal. Shared CUDA packages stay available while another configured card uses them. |
+| `Sorting` / `Gallery` | Switch between genre settings and favorite tag filters. Gallery hides the sorting controls and sorting badges. Returning to Sorting clears the active filters. |
+| `Import` / `Export` | Transfer favorites from the active library or the panel layout as JSON. Import merges favorites and replaces the panel layout. |
 | Hold an image tag | Add or remove the tag from favorites. The Gallery groups saved tags by character or event. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | Lock icon | Unlock or lock the Cryptomator vault from the folder controls. |

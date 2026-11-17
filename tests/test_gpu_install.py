@@ -26,21 +26,21 @@ class GpuInstallTests(unittest.TestCase):
         app = self.app
         with patch.object(app.rocm, "resolve", return_value="gfx1102") as resolve:
             with patch.object(app.rocm, "launch_install") as launch:
-                app.request_gpu_install("amd", "auto", "en")
+                app.request_gpu_action("amd", "auto", "en")
                 first = app.gpu_prompt["id"]
                 self.assertIn("AMD ROCm gfx1102 needs a download of about 1.97 GB", app.status()["log"][-1])
                 with self.assertRaisesRegex(GpuError, "152"):
-                    app.request_gpu_install("nvidia", "auto", "en")
+                    app.request_gpu_action("nvidia", "auto", "en")
                 with self.assertRaisesRegex(GpuError, "144"):
-                    app.answer_gpu_install(first, "install", "en")
-                app.answer_gpu_install(first, "n", "en")
+                    app.answer_gpu_prompt(first, "install", "en")
+                app.answer_gpu_prompt(first, "n", "en")
                 launch.assert_not_called()
                 self.assertEqual(app.status()["log"][-2:], ["> n", "GPU installation canceled."])
 
-                app.request_gpu_install("amd", "auto", "en")
+                app.request_gpu_action("amd", "auto", "en")
                 with self.assertRaisesRegex(GpuError, "145"):
-                    app.answer_gpu_install(first, "y", "en")
-                app.answer_gpu_install(app.gpu_prompt["id"], " Y ", "en")
+                    app.answer_gpu_prompt(first, "y", "en")
+                app.answer_gpu_prompt(app.gpu_prompt["id"], " Y ", "en")
                 launch.assert_called_once()
                 self.assertEqual(launch.call_args.args, ("gfx1102", None))
                 resolve.assert_called_with("gfx1102")
@@ -52,24 +52,76 @@ class GpuInstallTests(unittest.TestCase):
             cards = [{"uuid": FIRST, "name": "First", "build": "cu126"},
                      {"uuid": SECOND, "name": "Second", "build": "cu130"}]
             gpus.return_value = cards
-            app.request_gpu_install("nvidia", "auto", "en")
+            app.request_gpu_action("nvidia", "auto", "en")
             self.assertIn("First (CUDA cu126)", app.status()["log"][-1])
             gpus.return_value = cards[::-1]
             with patch.object(app.nvidia, "launch_install") as launch:
-                app.answer_gpu_install(app.gpu_prompt["id"], "y", "en")
+                app.answer_gpu_prompt(app.gpu_prompt["id"], "y", "en")
             self.assertEqual(launch.call_args.args, ("cu126", FIRST))
 
             path = app.nvidia.environment("cu130")
             (path / "bin").mkdir(parents=True)
             (path / "bin/python").touch()
             (path / "packages-ready").touch()
-            app.request_gpu_install("nvidia", SECOND, "en")
+            app.request_gpu_action("nvidia", SECOND, "en")
             self.assertIn("Second (CUDA cu130) is already downloaded (0 GB)", app.status()["log"][-1])
             cards[1]["build"] = "cu126"
             with patch.object(app.nvidia, "launch_install") as launch:
                 with self.assertRaisesRegex(GpuError, "154"):
-                    app.answer_gpu_install(app.gpu_prompt["id"], "y", "en")
+                    app.answer_gpu_prompt(app.gpu_prompt["id"], "y", "en")
                 launch.assert_not_called()
+
+    def install_fixture(self, runtime, target, gpu=None):
+        environment = runtime.environment(target)
+        (environment / "bin").mkdir(parents=True, exist_ok=True)
+        (environment / "bin/python").touch()
+        runtime._marker(target, gpu).write_text("Test GPU", encoding="utf-8")
+        return environment
+
+    def test_amd_removal_cancels_and_rechecks_usage_after_confirmation(self):
+        app = self.app
+        amd = app.rocm
+        selected = self.install_fixture(amd, "gfx1102")
+        other = self.install_fixture(amd, "gfx1100")
+        with patch.object(amd, "resolve", return_value="gfx1102"):
+            app.request_gpu_action("amd", "gfx1102", "en", action="uninstall")
+            self.assertIn("Remove AMD ROCm gfx1102?", app.gpu_prompt["message"])
+            app.answer_gpu_prompt(app.gpu_prompt["id"], "n", "en")
+            self.assertTrue(selected.is_dir())
+            self.assertIn("GPU removal canceled.", app.status()["log"])
+
+            app.request_gpu_action("amd", "gfx1102", "en", action="uninstall")
+            amd.acquire("gfx1102")
+            try:
+                with self.assertRaisesRegex(GpuError, "233"):
+                    app.answer_gpu_prompt(app.gpu_prompt["id"], "y", "en")
+                self.assertTrue(selected.is_dir())
+            finally:
+                amd.release("gfx1102")
+
+            app.request_gpu_action("amd", "gfx1102", "en", action="uninstall")
+            with patch("oubi_gpu.threading.Thread") as thread:
+                app.answer_gpu_prompt(app.gpu_prompt["id"], "y", "en")
+                with self.assertRaisesRegex(GpuError, "120"):
+                    amd.acquire("gfx1102")
+                worker = thread.call_args.kwargs
+                worker["target"](*worker["args"])
+        self.assertFalse(selected.exists())
+        self.assertTrue(other.is_dir())
+        self.assertIn("GPU components removed.", app.status()["log"])
+
+    def test_cuda_removal_keeps_packages_until_the_last_card_is_removed(self):
+        runtime = self.app.nvidia
+        path = self.install_fixture(runtime, "cu126", FIRST)
+        self.install_fixture(runtime, "cu126", SECOND)
+        notices = []
+        runtime._uninstall("cu126", FIRST, notices.append)
+        self.assertFalse(runtime.installed("cu126", FIRST))
+        self.assertTrue(runtime.installed("cu126", SECOND))
+        self.assertIn(238, notices)
+        runtime._uninstall("cu126", SECOND, notices.append)
+        self.assertFalse(path.exists())
+        self.assertIn(235, notices)
 
     def test_gpu_progress_reads_pip_bytes_without_changing_job_progress(self):
         app = self.app

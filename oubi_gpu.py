@@ -9,12 +9,14 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 PYPI_INDEX = "https://pypi.org/simple"
 REQUIREMENTS = str(Path(__file__).with_name("requirements.txt"))
 PIP_PROGRESS = re.compile(r"Progress (\d+) of (\d+)")
 PIP_FILE = re.compile(r"Downloading ([\w.+-]+\.(?:whl(?:\.metadata)?|tar\.gz))\b")
+GPU_BUSY_STATES = {"installing", "checking", "removing"}
 
 
 class GpuError(Exception):
@@ -40,6 +42,7 @@ class GpuRuntime:
         self.lock = threading.Lock()
         self.install = {"state": "idle"}
         self.notify = None
+        self.users = {}
 
     def _marker(self, target, gpu):
         name = f"gpu-name-{gpu}" if gpu else "gpu-name"
@@ -58,6 +61,27 @@ class GpuRuntime:
             raise GpuError(self.missing_runtime)
         return str(self.environment(target) / "bin/python")
 
+    def acquire(self, target, gpu=None):
+        with self.lock:
+            if self.install["state"] == "removing" and self.install["arch"] == target:
+                raise GpuError(120)
+            python = self.python_for(target, gpu)
+            self.users[target] = self.users.get(target, 0) + 1
+            return python
+
+    def release(self, target):
+        with self.lock:
+            if self.users[target] == 1:
+                del self.users[target]
+            else:
+                self.users[target] -= 1
+
+    def check_removable(self, target, gpu):
+        if self.users.get(target):
+            raise GpuError(233)
+        if not self.installed(target, gpu):
+            raise GpuError(237)
+
     @staticmethod
     def check_platform():
         if platform.system() != "Linux" or platform.machine() != "x86_64" or sys.version_info[:2] != (3, 12):
@@ -73,7 +97,7 @@ class GpuRuntime:
     def launch_install(self, target, gpu=None, *, notify=None):
         self.check_platform()
         with self.lock:
-            if self.install["state"] in {"installing", "checking"}:
+            if self.install["state"] in GPU_BUSY_STATES:
                 raise GpuError(120)
             if self.installed(target, gpu):
                 return
@@ -81,6 +105,18 @@ class GpuRuntime:
             self.install = {"state": "installing", "arch": target, "gpu": gpu,
                             "expected": self.download_size(target), "downloaded": 0, "stage": 146}
         threading.Thread(target=self._install, args=(target, gpu), daemon=True).start()
+
+    def launch_uninstall(self, target, gpu, *, notify):
+        with self.lock:
+            if self.install["state"] in GPU_BUSY_STATES:
+                raise GpuError(120)
+            self.check_removable(target, gpu)
+            self.install = {"state": "removing", "arch": target, "gpu": gpu}
+        try:
+            threading.Thread(target=self._uninstall, args=(target, gpu, notify), daemon=True).start()
+        except RuntimeError as error:
+            self._update(state="error", error=236)
+            raise GpuError(236) from error
 
     def installation_status(self):
         with self.lock:
@@ -140,17 +176,22 @@ class GpuRuntime:
                 raise GpuError(self.install_error)
         self._update(downloaded=downloaded + amount, transfer=None)
 
-    def _install(self, target, gpu=None):
+    @contextmanager
+    def _volume_lock(self):
         import fcntl
 
+        self.root.mkdir(parents=True, exist_ok=True)
+        with (self.root / "install.lock").open("ab") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise GpuError(120) from error
+            yield
+
+    def _install(self, target, gpu=None):
         try:
             self._event(146)
-            self.root.mkdir(parents=True, exist_ok=True)
-            with (self.root / "install.lock").open("ab") as lock:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError as error:
-                    raise GpuError(120) from error
+            with self._volume_lock():
                 self._prepare(target, gpu)
         except (OSError, subprocess.SubprocessError, GpuError) as error:
             print(f"GPU setup: {error}", file=sys.__stdout__, flush=True)
@@ -160,6 +201,27 @@ class GpuRuntime:
         else:
             self._event(151)
             self._update(state="ready")
+
+    def _uninstall(self, target, gpu, notify):
+        try:
+            notify(234)
+            with self._volume_lock():
+                if not self.installed(target, gpu):
+                    raise GpuError(237)
+                runtime = self.environment(target)
+                marker = self._marker(target, gpu)
+                shared = gpu and any(item != marker and item.is_file() for item in runtime.glob("gpu-name-GPU-*"))
+                if shared:
+                    marker.unlink()
+                else:
+                    shutil.rmtree(runtime)
+        except (OSError, GpuError) as error:
+            reason = error.message_id if isinstance(error, GpuError) else 236
+            notify(reason)
+            self._update(state="error", error=reason)
+        else:
+            notify(238 if shared else 235)
+            self._update(state="idle")
 
     def _prepare(self, target, gpu=None):
         if self.installed(target, gpu):

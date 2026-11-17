@@ -103,7 +103,11 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #folder-up { height: 28px; padding: 0 8px; }
 #folder-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-settings { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
-#folder-size { width: 88px; min-width: 24px; margin: 0; accent-color: var(--pick); }
+#folder-size { appearance: none; width: 88px; min-width: 24px; margin: 0; height: 16px; background: transparent; cursor: pointer; }
+#folder-size::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: var(--line); }
+#folder-size::-moz-range-track { height: 4px; border-radius: 4px; background: var(--line); }
+#folder-size::-webkit-slider-thumb { appearance: none; width: 10px; height: 10px; margin-top: -3px; border-radius: 50%; background: var(--pick); }
+#folder-size::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: var(--pick); }
 #folder-order { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; }
 #folder-order svg { width: 16px; height: 16px; display: block; margin: auto; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 #folder-order[aria-pressed="true"] svg { transform: scaleY(-1); }
@@ -152,8 +156,12 @@ body.arrange .block * { pointer-events: none; }
 .block.dragging { opacity: 0.4; }
 .block.drop-before { box-shadow: inset 0 3px 0 var(--pick); }
 .block.drop-after { box-shadow: inset 0 -3px 0 var(--pick); }
-.head-tools { display: flex; align-items: center; gap: 8px; margin-inline-start: auto; }
+.head-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; margin-inline-start: auto; }
 .head-tools select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
+.settings-control { position: relative; }
+.settings-menu { position: absolute; inset-inline-end: 0; top: calc(100% + 6px); z-index: 5; min-width: 140px; padding: 4px; background: var(--pane); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 3px 12px #0003; }
+.settings-menu button { display: block; width: 100%; border-radius: 5px; background: transparent; color: var(--text); text-align: start; white-space: nowrap; }
+.settings-menu button:hover, .settings-menu button:focus-visible { background: var(--btn-2); }
 #arrange { width: 32px; height: 32px; padding: 0; background: var(--btn-2); color: var(--text); }
 #arrange.on { background: var(--pick); color: #111; }
 #lang { height: 32px; padding: 0 8px; background: var(--btn-2); color: var(--text); }
@@ -284,6 +292,17 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   <button id="app-mode" type="button" class="secondary" aria-pressed="false">Sorting</button>
   <div class="head-tools">
     <button id="arrange" type="button" title="Move blocks">✎</button>
+    <div class="settings-control">
+      <button id="import-settings" class="secondary" type="button" aria-expanded="false" aria-controls="settings-menu">Import</button>
+      <div id="settings-menu" class="settings-menu" hidden>
+        <button type="button" data-settings="favorites">Favorites</button>
+        <button type="button" data-settings="layout">Layout</button>
+      </div>
+    </div>
+    <div class="settings-control">
+      <button id="export-settings" class="secondary" type="button" aria-expanded="false" aria-controls="settings-menu">Export</button>
+    </div>
+    <input id="settings-file" type="file" accept=".json,application/json" hidden>
     <select id="lang" aria-label="Language">
       <option value="auto">System language</option>
       <option value="en" lang="en">English</option>
@@ -438,6 +457,7 @@ let workspaceMutation = 0;
 let genres = __OUBI_GENRES__;
 const maxGenres = __OUBI_MAX_GENRES__;
 let layout = __OUBI_LAYOUT__;
+let layoutWrites = Promise.resolve();
 let lang = "__OUBI_LANG__";
 let languageChoice = "__OUBI_LANGUAGE_CHOICE__";
 const catalogs = __OUBI_LANGS__;
@@ -456,6 +476,12 @@ let wasBusy = false;
 const panes = { left: null, mid: null, right: null };
 const deviceInput = document.getElementById("compute-device");
 const modeToggle = document.getElementById("app-mode");
+const importSettings = document.getElementById("import-settings");
+const exportSettings = document.getElementById("export-settings");
+const settingsMenu = document.getElementById("settings-menu");
+const settingsFile = document.getElementById("settings-file");
+let settingsTrigger = null;
+let settingsImport = null;
 const rocmArch = document.getElementById("rocm-arch");
 const rocmInstall = document.getElementById("rocm-install");
 const nvidiaCard = document.getElementById("nvidia-card");
@@ -526,7 +552,6 @@ function renderAppMode() {
   document.getElementById("favorites").hidden = !gallery;
   document.getElementById("sort").hidden = gallery;
   document.getElementById("plan").hidden = gallery;
-  previewMode.hidden = gallery;
   folderBox.classList.toggle("gallery", gallery);
   renderVault();
   renderFavorites();
@@ -536,7 +561,6 @@ function renderAppMode() {
 modeToggle.onclick = () => {
   appMode = appMode === "sorting" ? "gallery" : "sorting";
   savePreference("oubi.mode", appMode);
-  setPreviewMode(wasBusy);
   if (appMode === "sorting") {
     pinned = [];
     document.getElementById("filter-query").value = "";
@@ -597,6 +621,10 @@ function applyI18n() {
   deleteCancel.textContent = t(175);
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
+  importSettings.textContent = t(223);
+  exportSettings.textContent = t(224);
+  settingsMenu.querySelector('[data-settings="favorites"]').textContent = t(212);
+  settingsMenu.querySelector('[data-settings="layout"]').textContent = t(225);
   document.getElementById("all-folders").title = t(83);
   recountFolders.title = t(194);
   recountFolders.setAttribute("aria-label", t(194));
@@ -999,22 +1027,32 @@ function toggleFavorite(tag) {
   if (!shown.startsWith("images:")) return;
   const scope = vaultScope;
   const path = shown.slice("images:".length);
+  updateFavorites("/api/favorites", { scope, path, tag }, 217);
+}
+
+function updateFavorites(endpoint, payload, errorId) {
+  const { scope } = payload;
   favoriteWrites = favoriteWrites.then(async () => {
-    if (scope !== vaultScope) return;
-    const request = ++favoritesVersion;
+    if (scope !== vaultScope) return false;
     try {
-      const response = await fetch("/api/favorites", {
+      const response = await fetch(endpoint, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope, path, tag }), signal: AbortSignal.timeout(galleryTimeoutMs),
+        body: JSON.stringify(payload), signal: AbortSignal.timeout(galleryTimeoutMs),
       });
       const data = await response.json();
-      if (scope !== vaultScope || request !== favoritesVersion) return;
-      if (response.ok) showFavorites(data);
-      else showNotice(data.error || t(217));
+      if (scope !== vaultScope) return false;
+      if (response.ok) {
+        favoritesVersion++;
+        showFavorites(data);
+        return true;
+      }
+      showNotice(data.error || t(errorId));
     } catch {
-      if (scope === vaultScope && request === favoritesVersion) showNotice(t(217));
+      if (scope === vaultScope) showNotice(t(errorId));
     }
+    return false;
   });
+  return favoriteWrites;
 }
 
 function bindTagActions(span, token) {
@@ -1127,7 +1165,6 @@ function renderPreviewMode() {
 }
 
 function setPreviewMode(work) {
-  work = work && appMode === "sorting";
   if (workPreview === work) return;
   workPreview = work;
   closeZoom();
@@ -1307,8 +1344,6 @@ async function tick() {
     if (data.model === "ready") step = t(23);
     if (data.model === "downloading" && !data.detail) step = t(22);
   }
-  const named = step.match(/Сейчас: размечаю (.+) \((\d+ из \d+)\)/);
-  if (named) step = "Сейчас: размечаю " + fileName(named[1]) + " (" + named[2] + ").";
   document.getElementById("step").textContent = gpuProgress?.step || step;
   document.getElementById("detail").textContent = (gpuProgress?.detail ?? data.detail) || "";
   document.getElementById("fill").style.width = (gpuProgress?.percent ?? data.percent ?? 0) + "%";
@@ -1369,7 +1404,10 @@ function showRocm() {
   const installing = Boolean(gpuPrompt || gpuProgress || sendingGpuRequest);
   document.getElementById("amd-controls").hidden = !visible;
   rocmArch.disabled = installing;
-  rocmInstall.disabled = installing || !arch || !matches || Boolean(name);
+  rocmInstall.disabled = installing || !arch || !matches;
+  const action = name ? 229 : 157;
+  rocmInstall.textContent = t(action);
+  rocmInstall.setAttribute("aria-label", name ? t(229) + " AMD" : t(108));
   deviceInput.options[1].disabled = !name;
   deviceInput.options[1].title = t(visible ? 118 : 113);
   let message;
@@ -1406,7 +1444,9 @@ function showNvidia() {
   const installing = Boolean(gpuPrompt || gpuProgress || sendingGpuRequest);
   document.getElementById("nvidia-controls").hidden = !gpus.length;
   nvidiaCard.disabled = installing;
-  nvidiaInstall.disabled = installing || !gpu?.build || Boolean(name);
+  nvidiaInstall.disabled = installing || !gpu?.build;
+  nvidiaInstall.textContent = t(name ? 229 : 157);
+  nvidiaInstall.setAttribute("aria-label", name ? t(229) + " NVIDIA" : t(135));
   deviceInput.options[2].disabled = !name;
   let message;
   if (!gpu) message = t(130);
@@ -1454,10 +1494,14 @@ deviceInput.onchange = () => {
   tick();
 };
 rocmInstall.onclick = async () => {
-  if (await sendGpuRequest("/api/rocm", { architecture: rocmArch.value }, 121)) terminalInput.focus();
+  const architecture = selectedRocmArch() || "auto";
+  const action = rocmState?.installed[architecture] ? "uninstall" : "install";
+  if (await sendGpuRequest("/api/rocm", { architecture, action }, action === "uninstall" ? 236 : 121)) terminalInput.focus();
 };
 nvidiaInstall.onclick = async () => {
-  if (await sendGpuRequest("/api/nvidia", { gpu: nvidiaCard.value }, 133)) terminalInput.focus();
+  const gpu = selectedNvidiaGpu() || "auto";
+  const action = nvidiaState?.installed[gpu] ? "uninstall" : "install";
+  if (await sendGpuRequest("/api/nvidia", { gpu, action }, action === "uninstall" ? 236 : 133)) terminalInput.focus();
 };
 terminalInput.oninput = () => terminalInput.setCustomValidity("");
 document.getElementById("terminal-entry").onsubmit = async event => {
@@ -1661,11 +1705,9 @@ function placeBlocks(order) {
 
 function applyLayout() {
   placeBlocks(layout.blocks);
-  if (layout.heights) {
-    for (const name of Object.keys(layout.heights)) {
-      const block = document.querySelector('.block[data-block="' + name + '"]');
-      if (block) block.style.flex = "0 0 " + layout.heights[name] + "px";
-    }
+  for (const block of document.querySelectorAll(".block")) {
+    const height = layout.heights?.[block.dataset.block];
+    block.style.flex = height ? "0 0 " + height + "px" : "";
   }
   if (layout.left && layout.mid && layout.right) {
     panes.left = layout.left;
@@ -1679,7 +1721,8 @@ function applyLayout() {
 function blockHeights() {
   const heights = {};
   for (const block of document.querySelectorAll(".block")) {
-    if ((block.style.flex || "").indexOf("px") >= 0) heights[block.dataset.block] = Math.round(block.getBoundingClientRect().height);
+    const size = parseFloat(block.style.flexBasis);
+    if (Number.isFinite(size)) heights[block.dataset.block] = Math.round(size);
   }
   return heights;
 }
@@ -1691,24 +1734,137 @@ function blockOrder() {
   return order;
 }
 
-function saveLayout() {
-  layout = {
+function captureLayout() {
+  return {
     left: Math.round(document.getElementById("left").getBoundingClientRect().width),
     mid: Math.round(document.getElementById("mid").getBoundingClientRect().width),
     right: Math.round(document.getElementById("right").getBoundingClientRect().width),
-    preview: Math.round(document.getElementById("preview").getBoundingClientRect().height),
-    genres: Math.round(document.getElementById("genre-row").getBoundingClientRect().height),
-    info: Math.round(document.getElementById("info").getBoundingClientRect().height),
-    log: Math.round(document.getElementById("log").getBoundingClientRect().height),
     blocks: blockOrder(),
     heights: blockHeights(),
   };
-  fetch("/api/layout", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(layout),
-  });
 }
+
+function storeLayout(data, importing = false) {
+  const write = layoutWrites.then(async () => {
+    try {
+      const response = await fetch(importing ? "/api/layout/import" : "/api/layout", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data), signal: AbortSignal.timeout(galleryTimeoutMs),
+      });
+      const saved = await response.json();
+      if (!response.ok) {
+        showNotice(saved.error || t(92));
+        return false;
+      }
+      if (importing && layoutWrites === write) {
+        layout = saved;
+        applyLayout();
+      }
+      return true;
+    } catch {
+      showNotice(t(92));
+      return false;
+    }
+  });
+  layoutWrites = write;
+  return write;
+}
+
+function saveLayout() {
+  layout = captureLayout();
+  storeLayout(layout);
+}
+
+function closeSettingsMenu(restoreFocus = false) {
+  if (!settingsTrigger) return;
+  settingsTrigger.setAttribute("aria-expanded", "false");
+  if (restoreFocus) settingsTrigger.focus();
+  settingsTrigger = null;
+  settingsMenu.hidden = true;
+}
+
+function toggleSettingsMenu(event) {
+  const trigger = event.currentTarget;
+  if (trigger === settingsTrigger) {
+    closeSettingsMenu();
+    return;
+  }
+  closeSettingsMenu();
+  settingsTrigger = trigger;
+  trigger.after(settingsMenu);
+  trigger.setAttribute("aria-expanded", "true");
+  settingsMenu.hidden = false;
+}
+
+async function exportSettingsFile(type, scope) {
+  try {
+    let data;
+    if (type === "favorites") {
+      await favoriteWrites;
+      if (scope !== vaultScope) return;
+      data = await workspaceData("/api/favorites", AbortSignal.timeout(galleryTimeoutMs));
+      if (scope !== vaultScope) return;
+    } else {
+      data = captureLayout();
+    }
+    if (!data) throw new Error("Settings unavailable");
+    const file = new Blob([JSON.stringify({ version: 1, type, data }, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(file);
+    link.download = `oubi-${type}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  } catch {
+    showNotice(t(228));
+  }
+}
+
+importSettings.onclick = exportSettings.onclick = toggleSettingsMenu;
+document.addEventListener("click", event => {
+  if (!event.target.closest(".settings-control")) closeSettingsMenu();
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && settingsTrigger) closeSettingsMenu(true);
+});
+settingsMenu.onclick = event => {
+  const type = event.target.dataset.settings;
+  if (!type) return;
+  const importing = settingsTrigger === importSettings;
+  const scope = vaultScope;
+  closeSettingsMenu(true);
+  showNotice();
+  if (importing) {
+    settingsImport = { type, scope };
+    settingsFile.value = "";
+    settingsFile.click();
+  } else {
+    exportSettingsFile(type, scope);
+  }
+};
+settingsFile.onchange = async () => {
+  const file = settingsFile.files[0];
+  if (!file || !settingsImport) return;
+  const { type, scope } = settingsImport;
+  settingsImport = null;
+  let data;
+  try {
+    const pack = JSON.parse(await file.text());
+    if (pack?.version !== 1 || pack.type !== type || !pack.data ||
+        Array.isArray(pack.data) || typeof pack.data !== "object") throw new Error("Invalid settings file");
+    data = pack.data;
+  } catch {
+    showNotice(t(226));
+    return;
+  }
+  if (type === "favorites" && scope !== vaultScope) {
+    showNotice(t(172));
+    return;
+  }
+  const imported = type === "favorites"
+    ? await updateFavorites("/api/favorites/import", { scope, favorites: data }, 232)
+    : await storeLayout(data, true);
+  if (imported) showNotice(t(227));
+};
 
 function applyTheme(next) {
   theme = next;

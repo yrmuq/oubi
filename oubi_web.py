@@ -24,7 +24,7 @@ from uuid import uuid4
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
 from oubi_files import IMAGE_EXTS, ImageChangedError, delete_source_image, image_files, image_revision, sidecar_path
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
-from oubi_gpu import GpuError
+from oubi_gpu import GPU_BUSY_STATES, GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
 from oubi_thumbnails import VaultThumbnails, render_thumbnail
@@ -368,10 +368,12 @@ def read_layout(path=LAYOUT_PATH):
     return clean
 
 
-def write_layout(values, path=LAYOUT_PATH):
+def write_layout(values, path=LAYOUT_PATH, *, replace=False):
     if not isinstance(values, dict):
         return False
-    current = read_layout(path)
+    if replace and not {"left", "mid", "right", "blocks", "heights"} <= values.keys():
+        return False
+    current = {} if replace else read_layout(path)
     for key in LAYOUT_KEYS:
         if key not in values:
             continue
@@ -386,12 +388,12 @@ def write_layout(values, path=LAYOUT_PATH):
         current["blocks"] = blocks
     if "heights" in values:
         heights = clean_heights(values.get("heights"))
-        if heights is None:
+        if heights is None or (replace and len(heights) != len(values["heights"])):
             return False
         current["heights"] = heights
     file = Path(path)
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text(json.dumps(current), encoding="utf-8")
+    write_json_file(file, current)
     return True
 
 
@@ -913,8 +915,8 @@ def read_favorites(path):
     return data
 
 
-def write_favorites(path, data):
-    with NamedTemporaryFile(dir=path.parent, prefix=".favorites-", delete=False, mode="w", encoding="utf-8") as handle:
+def write_json_file(path, data):
+    with NamedTemporaryFile(dir=path.parent, prefix=f".{path.stem}-", delete=False, mode="w", encoding="utf-8") as handle:
         temporary = Path(handle.name)
         try:
             json.dump(data, handle, ensure_ascii=False)
@@ -922,6 +924,31 @@ def write_favorites(path, data):
             temporary.replace(path)
         finally:
             temporary.unlink(missing_ok=True)
+
+
+def favorite_label(value):
+    if not isinstance(value, str):
+        raise ValueError(value)
+    label = value.strip()
+    if not label or len(label) > 512 or "\0" in label:
+        raise ValueError(value)
+    return label
+
+
+def merge_favorites(current, incoming):
+    if not isinstance(incoming, dict) or any(not isinstance(incoming.get(group), list) for group in FAVORITE_GROUPS):
+        raise ValueError("Invalid favorite groups")
+    incoming = {group: [favorite_label(value) for value in incoming[group]] for group in FAVORITE_GROUPS}
+    merged = {group: [] for group in FAVORITE_GROUPS}
+    seen = set()
+    for source in (current, incoming):
+        for group in FAVORITE_GROUPS:
+            for label in source[group]:
+                key = label.casefold()
+                if key not in seen:
+                    merged[group].append(label)
+                    seen.add(key)
+    return merged
 
 
 def character_index(path=CSV_PATH, root=IMAGES, *, cache=None, encrypted=False):
@@ -1205,12 +1232,20 @@ class App:
         if echo and self.workspace is None:
             print(text, flush=True)
 
-    def gpu_note(self, message_id, language, **values):
-        line = text(message_id, language=language, **values)
+    def gpu_line(self, line):
         with self.lock:
             self._append_line(line)
+        vault_app = self.vault.app if self.vault else None
+        if vault_app is not None:
+            with vault_app.lock:
+                vault_app._append_line(line)
 
-    def request_gpu_install(self, vendor, choice, language):
+    def gpu_note(self, message_id, language, **values):
+        self.gpu_line(text(message_id, language=language, **values))
+
+    def request_gpu_action(self, vendor, choice, language, *, action="install"):
+        if action not in ("install", "uninstall"):
+            raise GpuError(89)
         with self.gpu_lock:
             if self.gpu_prompt:
                 raise GpuError(152)
@@ -1225,21 +1260,24 @@ class App:
                 target, gpu = runtime.resolve(choice)
                 name = next((card["name"] for card in runtime.gpus() if card["uuid"] == gpu), gpu)
                 package = f"{name} (CUDA {target})"
-            if runtime.installed(target, gpu):
-                raise GpuError(153)
-            expected = runtime.download_size(target)
-            size = f"{expected / 1e9:.2f}".rstrip("0").rstrip(".")
-            message = text(141 if expected else 142, language=language, package=package, size=size)
+            if action == "uninstall":
+                runtime.check_removable(target, gpu)
+                message = text(230, language=language, package=package)
+            else:
+                if runtime.installed(target, gpu):
+                    raise GpuError(153)
+                expected = runtime.download_size(target)
+                size = f"{expected / 1e9:.2f}".rstrip("0").rstrip(".")
+                message = text(141 if expected else 142, language=language, package=package, size=size)
             self.gpu_prompt = {"id": uuid4().hex, "vendor": vendor, "target": target, "gpu": gpu,
-                               "message": message}
-            with self.lock:
-                self._append_line(message)
+                               "action": action, "message": message}
+            self.gpu_line(message)
 
     def gpu_busy(self):
-        return any(runtime.installation_status()["state"] in {"installing", "checking"}
+        return any(runtime.installation_status()["state"] in GPU_BUSY_STATES
                    for runtime in (self.rocm, self.nvidia))
 
-    def answer_gpu_install(self, prompt_id, answer, language):
+    def answer_gpu_prompt(self, prompt_id, answer, language):
         if not isinstance(answer, str) or (answer := answer.strip().lower()) not in {"y", "n"}:
             raise GpuError(144)
         with self.gpu_lock:
@@ -1247,14 +1285,14 @@ class App:
             if not prompt or prompt["id"] != prompt_id:
                 raise GpuError(145)
             self.gpu_prompt = None
-            with self.lock:
-                self._append_line(f"> {answer}")
+            self.gpu_line(f"> {answer}")
+            uninstall = prompt["action"] == "uninstall"
             if answer == "n":
-                self.gpu_note(143, language)
+                self.gpu_note(231 if uninstall else 143, language)
                 return
             vendor, target, gpu = prompt["vendor"], prompt["target"], prompt["gpu"]
             runtime = self.rocm if vendor == "amd" else self.nvidia
-            expected = runtime.download_size(target)
+            expected = 0 if uninstall else runtime.download_size(target)
             device = "AMD" if vendor == "amd" else "NVIDIA"
 
             def notify(message_id, transfer=None, downloaded=0, **values):
@@ -1267,7 +1305,9 @@ class App:
                     runtime.resolve(target)
                 elif runtime.resolve(gpu) != (target, gpu):
                     raise GpuError(154)
-                if runtime.installed(target, gpu):
+                if uninstall:
+                    runtime.launch_uninstall(target, gpu, notify=notify)
+                elif runtime.installed(target, gpu):
                     notify(151)
                 else:
                     runtime.launch_install(target, gpu, notify=notify)
@@ -1282,7 +1322,10 @@ class App:
         status = None
         for vendor, runtime in (("amd", rocm), ("nvidia", nvidia)):
             install = runtime["install"]
-            if install["state"] not in {"installing", "checking"}:
+            if install["state"] not in GPU_BUSY_STATES:
+                continue
+            if install["state"] == "removing":
+                status = {"step": text(234, language=language), "detail": "", "percent": 0}
                 continue
             expected, downloaded = install.get("expected", 0), install.get("downloaded", 0)
             transfer = install.get("transfer")
@@ -1307,9 +1350,7 @@ class App:
         return Path(self.paths.csv).parent / FAVORITES_NAME
 
     def toggle_favorite(self, relative, label):
-        label = label.strip()
-        if not label or len(label) > 512 or "\0" in label:
-            raise ValueError(label)
+        label = favorite_label(label)
         path = self.favorites_path
         favorites = read_favorites(path)
         key = label.casefold()
@@ -1327,8 +1368,14 @@ class App:
                                           encrypted=self.workspace is not None, cache=self.character_cache)
             group = "character" if any(tag.strip().casefold() == key for tag in characters.split(",")) else "event"
             favorites[group].append(label)
-        write_favorites(path, favorites)
+        write_json_file(path, favorites)
         return favorites
+
+    def import_favorites(self, incoming):
+        path = self.favorites_path
+        merged = merge_favorites(read_favorites(path), incoming)
+        write_json_file(path, merged)
+        return merged
 
     def folders(self, directory=""):
         if self.catalog is not None:
@@ -1598,24 +1645,26 @@ class App:
         if reason:
             self.note(text(79, reason=reason, language=language))
             return reason
-        tagging = None
+        gpu_runtime = gpu_target = arch = uuid = None
         if mode in {"tag", "all"}:
             if device not in ("cpu", "amd", "nvidia"):
                 return text(122, language=language)
-            arch = uuid = python = None
             try:
                 if device == "amd":
-                    arch = self.rocm.resolve(architecture)
-                    python = self.rocm.python_for(arch)
+                    gpu_runtime = self.rocm
+                    gpu_target = arch = self.rocm.resolve(architecture)
                 elif device == "nvidia":
-                    build, uuid = self.nvidia.resolve(gpu)
-                    python = self.nvidia.python_for(build, uuid)
+                    gpu_runtime = self.nvidia
+                    gpu_target, uuid = self.nvidia.resolve(gpu)
             except GpuError as error:
                 return text(error.message_id, language=language)
-            tagging = tag_command(paths, device=device, architecture=arch, gpu=uuid, python=python, workspace=workspace)
         with self.lock:
             if self.job_running:
                 return text(33, language=language)
+            try:
+                python = gpu_runtime.acquire(gpu_target, uuid) if gpu_runtime else None
+            except GpuError as error:
+                return text(error.message_id, language=language)
             self.job_running = True
             self.cancel_requested = False
             self.job_mode = mode
@@ -1629,21 +1678,35 @@ class App:
                     self._invalidate_folders()
                 elif self.folder_scan:
                     self.folder_scan[0].set()
+        tagging = (tag_command(paths, device=device, architecture=arch, gpu=uuid, python=python, workspace=workspace)
+                   if mode in {"tag", "all"} else None)
         options = {"output": output} if self.workspace else {}
-        threading.Thread(target=self._run, args=(mode, paths, language, tagging), kwargs=options, daemon=True).start()
+        if gpu_runtime:
+            options["gpu_usage"] = (gpu_runtime, gpu_target)
+        try:
+            threading.Thread(target=self._run, args=(mode, paths, language, tagging), kwargs=options, daemon=True).start()
+        except RuntimeError:
+            if gpu_runtime:
+                gpu_runtime.release(gpu_target)
+            with self.lock:
+                self.job_running = False
+                self.job_mode = None
+            return text(239, language=language)
         return None
 
-    def _run(self, mode, folders, language, tagging, *, output=None):
+    def _run(self, mode, folders, language, tagging, *, output=None, gpu_usage=None):
         workspace = self.paths
-        commands = [tagging] if tagging else []
-        if mode in {"sort", "plan", "all"}:
-            commands.append(sort_command(plan=mode == "plan", folders=folders, workspace=workspace, output=output))
         code = 0
-        env = dict(os.environ, OUBI_JOB_LANGUAGE=language or read_lang(), PYTHONNOUSERSITE="1", OUBI_WEB_TAG_PREVIEW="1")
         catalog = self.catalog if mode != "plan" else None
         self.index_changes.clear()
         refresh_index = False
         try:
+            commands = [tagging] if tagging else []
+            if mode in {"sort", "plan", "all"}:
+                commands.append(sort_command(plan=mode == "plan", folders=folders, workspace=workspace, output=output))
+            env = dict(os.environ, OUBI_JOB_LANGUAGE=language or read_lang(), PYTHONNOUSERSITE="1", OUBI_WEB_TAG_PREVIEW="1")
+            if tagging:
+                env["OUBI_PROGRESS_ROOT"] = str(Path(workspace.images).resolve())
             if catalog is not None:
                 catalog.mark_dirty()
                 env["OUBI_INDEX_EVENTS"] = "1"
@@ -1670,6 +1733,9 @@ class App:
             code = 1
             self.note(text(26, path=workspace.data or workspace.images, error=error, language=language))
         finally:
+            if gpu_usage:
+                runtime, target = gpu_usage
+                runtime.release(target)
             if refresh_index:
                 try:
                     self._refresh_index(catalog)
@@ -1960,7 +2026,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             length = int(self.headers.get("Content-Length", "0") or 0)
-            if not 0 <= length <= 200000:
+            limit = 8 * 1024 * 1024 if parsed.path == "/api/favorites/import" else 200000
+            if not 0 <= length <= limit:
                 raise ValueError("Invalid body length")
             raw = self.rfile.read(length) if length else b"{}"
             payload = json.loads(raw)
@@ -1981,8 +2048,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, {"choice": read_language_choice(), "language": self._language()})
             return
-        if parsed.path == "/api/layout":
-            if not write_layout(payload if isinstance(payload, dict) else {}):
+        if parsed.path in {"/api/layout", "/api/layout/import"}:
+            replace = parsed.path.endswith("/import")
+            if replace and self.headers.get_content_type() != "application/json":
+                self._error(400, 89)
+                return
+            try:
+                saved = write_layout(payload, replace=replace)
+            except OSError:
+                saved = False
+            if not saved:
                 self._error(400, 92)
                 return
             self._send(200, read_layout())
@@ -1993,10 +2068,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, {"genres": read_genres()})
             return
-        if parsed.path == "/api/favorites":
+        if parsed.path in {"/api/favorites", "/api/favorites/import"}:
+            importing = parsed.path.endswith("/import")
             scope, relative, label = (payload.get(key) for key in ("scope", "path", "tag"))
             if self.headers.get_content_type() != "application/json" or not all(
-                    isinstance(value, str) for value in (scope, relative, label)):
+                    isinstance(value, str) for value in ((scope,) if importing else (scope, relative, label))):
                 self._error(400, 89)
                 return
             with self.app.vault.lock:
@@ -2005,9 +2081,11 @@ class Handler(BaseHTTPRequestHandler):
                     response = self._error_response(409, 172)
                 else:
                     try:
-                        response = (200, app.toggle_favorite(relative, label))
+                        favorites = (app.import_favorites(payload.get("favorites")) if importing
+                                     else app.toggle_favorite(relative, label))
+                        response = (200, favorites)
                     except (OSError, ValueError):
-                        response = self._error_response(409, 217)
+                        response = self._error_response(409, 232 if importing else 217)
             self._send(*response)
             return
         if parsed.path in {"/api/vault/unlock", "/api/vault/lock"}:
@@ -2053,10 +2131,11 @@ class Handler(BaseHTTPRequestHandler):
             language = self._language()
             try:
                 if parsed.path == "/api/terminal":
-                    self.app.answer_gpu_install(payload.get("id"), payload.get("answer"), language)
+                    self.app.answer_gpu_prompt(payload.get("id"), payload.get("answer"), language)
                 else:
                     vendor, field = ("amd", "architecture") if parsed.path == "/api/rocm" else ("nvidia", "gpu")
-                    self.app.request_gpu_install(vendor, payload.get(field, "auto"), language)
+                    self.app.request_gpu_action(vendor, payload.get(field, "auto"), language,
+                                                action=payload.get("action", "install"))
             except GpuError as error:
                 if parsed.path != "/api/terminal":
                     self.app.gpu_note(error.message_id, language)
