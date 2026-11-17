@@ -85,11 +85,11 @@ class Workspace:
                 raise VaultError(168)
         start_folder = os.environ.get("OUBI_CRYPT_FOLDER", "")
         if start_folder:
-            requested = Path(start_folder)
+            requested = Path(start_folder.strip().lstrip("/"))
             try:
-                if requested.is_absolute() or ".." in requested.parts:
+                if ".." in requested.parts:
                     raise ValueError(start_folder)
-                _, start_folder = resolve_source_folder(root, start_folder, output)
+                _, start_folder = resolve_source_folder(root, requested.as_posix(), output)
             except (OSError, ValueError, RuntimeError):
                 start_folder = None
         return cls(str(root), str(output), str(data / "tags.csv"), str(data / "sorted.txt"),
@@ -1206,12 +1206,20 @@ class App:
         if self.workspace is not None:
             catalog = VaultIndex(self.workspace)
             try:
-                if catalog.restore():
-                    catalog.add_missing_root_images(workspace)
+                reason = catalog.restore()
+            except (OSError, sqlite3.Error, AttributeError) as error:
+                self.note(text(262, error=error))
+            else:
+                if reason is None:
                     self.catalog = catalog
-            except (OSError, sqlite3.Error, AttributeError):
-                pass
-            if self.catalog is None:
+                else:
+                    self.note(text({"missing": 258, "interrupted": 259, "destination": 260, "invalid": 261}[reason]))
+            if self.catalog is not None:
+                try:
+                    catalog.add_missing_root_images(workspace)
+                except (OSError, sqlite3.Error, AttributeError) as error:
+                    self.note(text(208) + " " + str(error))
+            else:
                 catalog.db.close()
 
     def _append_line(self, line):
@@ -1412,8 +1420,9 @@ class App:
         return merged
 
     def folders(self, directory=""):
-        if self.catalog is not None:
-            return [_folder_summary(name, *self.catalog.totals(name)) for name in self.catalog.children(directory)]
+        catalog = self.catalog
+        if catalog is not None and catalog.has_folder(directory):
+            return [_folder_summary(name, *catalog.totals(name)) for name in catalog.children(directory)]
         paths = self.paths
         names = folder_paths(paths.images, directory, paths.excluded)
         self._ensure_count()
@@ -1423,15 +1432,20 @@ class App:
 
     def folder_images(self, directory=""):
         catalog = self.catalog
-        if catalog is not None:
+        if catalog is not None and catalog.has_folder(directory):
             files = catalog.direct_images(directory)
-        elif self.workspace is not None:
+        elif self.workspace is not None and catalog is None:
             # Status for an unlocked vault comes from its background index.
             return {"files": []}
         else:
             paths = self.paths
             root = Path(paths.images).resolve()
-            folder, relative = resolve_source_folder(root, directory, paths.excluded)
+            try:
+                folder, relative = resolve_source_folder(root, directory, paths.excluded)
+            except ValueError:
+                if self.workspace is not None:
+                    return {"files": []}
+                raise
             images = list(direct_image_files(folder))
             if not images:
                 return {"files": []}
@@ -1509,8 +1523,8 @@ class App:
     def _save_catalog(self, catalog):
         try:
             catalog.save()
-        except (OSError, sqlite3.Error, AttributeError):
-            self.note(text(208))
+        except (OSError, sqlite3.Error, AttributeError) as error:
+            self.note(text(208) + " " + str(error))
 
     def _refresh_index(self, catalog):
         with self.index_guard:

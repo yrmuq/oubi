@@ -137,14 +137,25 @@ class VaultIndex:
         return self
 
     def restore(self):
+        """Load the saved index, or return why it needs to be rebuilt."""
         snapshot = self.directory / INDEX_NAME
-        if (self.directory / DIRTY_NAME).exists() or not snapshot.is_file() or snapshot.is_symlink():
-            return False
-        self.db.deserialize(snapshot.read_bytes())
+        if (self.directory / DIRTY_NAME).exists():
+            return "interrupted"
+        try:
+            if not stat.S_ISREG(snapshot.lstat().st_mode):
+                return "invalid"
+            saved = snapshot.read_bytes()
+        except FileNotFoundError:
+            return "missing"
+        self.db.deserialize(saved)
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        return (version in (1, VERSION)
-                and self.db.execute("SELECT excluded FROM config").fetchone() == (self.excluded,)
-                and self.db.execute("PRAGMA quick_check(1)").fetchone() == ("ok",))
+        if version not in (1, VERSION):
+            return "invalid"
+        if self.db.execute("SELECT excluded FROM config").fetchone() != (self.excluded,):
+            return "destination"
+        if self.db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+            return "invalid"
+        return None
 
     def add_missing_root_images(self, workspace):
         if self.db.execute("PRAGMA user_version").fetchone() == (VERSION,):
@@ -222,9 +233,10 @@ class VaultIndex:
     def paths(self):
         return (row[0] for row in self.db.execute("SELECT path FROM images"))
 
+    def has_folder(self, name):
+        return self.db.execute("SELECT 1 FROM folders WHERE path = ?", (name,)).fetchone() is not None
+
     def children(self, name):
-        if self.db.execute("SELECT 1 FROM folders WHERE path = ?", (name,)).fetchone() is None:
-            raise ValueError(name)
         children = [row[0] for row in self.db.execute("SELECT path FROM folders WHERE parent = ?", (name,))]
         return sorted(children, key=str.casefold) or [name]
 

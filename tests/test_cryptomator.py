@@ -39,7 +39,7 @@ class VaultWorkspaceTests(unittest.TestCase):
         (self.root / "file.jpg").touch()
         with tempfile.TemporaryDirectory() as outside:
             (self.root / "outside").symlink_to(outside, target_is_directory=True)
-            cases = (("", ""), (folder + "/", folder), ("/" + folder, None), ("../" + self.root.name, None),
+            cases = (("", ""), (folder + "/", folder), ("/" + folder, folder), ("../" + self.root.name, None),
                      ("Sorted", None), ("tags", None), (".oubi", None), ("outside", None),
                      ("missing", None), ("file.jpg", None))
             for value, expected in cases:
@@ -51,6 +51,43 @@ class VaultWorkspaceTests(unittest.TestCase):
                     self.assertEqual(workspace.images, str(self.root))
         html = page_bytes([], vault_folder="Archive/</script>").decode()
         self.assertIn('const initialVaultFolder = "Archive/\\u003c/script>";', html)
+
+    def test_vault_opens_a_new_start_folder_without_rebuilding_the_saved_index(self):
+        original = App(Workspace.encrypted(self.root))
+        original._count_folders(threading.Event(), "initial")
+        original.close_catalog()
+
+        folder = "Incoming/New"
+        source = self.root / folder
+        child = source / "Album"
+        child.mkdir(parents=True)
+        image = source / "picture.jpg"
+        image.touch()
+        sidecar_path(image).parent.mkdir()
+        sidecar_path(image).write_text("moon")
+        with patch.dict(os.environ, {"OUBI_CRYPT_FOLDER": "/" + folder}):
+            app = App(Workspace.encrypted(self.root))
+        self.addCleanup(app.close_catalog)
+        with patch("oubi_web.source_folders", side_effect=AssertionError("Rebuilt a valid index")) as scan:
+            self.assertTrue(app._ensure_count())
+            self.assertEqual(app.paths.start_folder, folder)
+            self.assertEqual([item["path"] for item in app.folders(folder)], [folder + "/Album"])
+            self.assertEqual(app.folder_images(folder), {"files": [{"path": folder + "/picture.jpg", "tagged": True}]})
+            self.assertIsNone(app.status()["scan_progress"])
+            scan.assert_not_called()
+
+    def test_vault_keeps_loaded_index_when_root_migration_cannot_be_saved(self):
+        workspace = Workspace.encrypted(self.root)
+        original = App(workspace)
+        original._count_folders(threading.Event(), "initial")
+        original.close_catalog()
+        with patch.object(VaultIndex, "add_missing_root_images", side_effect=OSError("snapshot write failed")):
+            app = App(workspace)
+        self.addCleanup(app.close_catalog)
+        self.assertTrue(app._ensure_count())
+        self.assertIsNotNone(app.catalog)
+        self.assertIsNone(app.status()["scan_progress"])
+        self.assertIn("snapshot write failed", app.status()["log"][-1])
 
     def test_previous_vault_paths_work_for_gallery_sorting_and_deletion(self):
         album = self.root / "Album"
