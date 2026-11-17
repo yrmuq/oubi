@@ -13,7 +13,8 @@
 - Protect GPU runtime packages while a job uses them and retain a shared CUDA build while another card remains configured for it.
 
 - Read and write image tag sidecars only in the image directory's `tags/` subfolder, using the full image filename plus `.txt` to distinguish images with the same stem.
-- Preview deletion applies only to the confirmed image in its original workspace and removes only that image's tag sidecar and index entries.
+- Image deletion applies only to the confirmed file revision in its original workspace and removes only that image's tag sidecar and index entries.
+- Deleting an image from its browser tile works even when its contents cannot be decoded.
 - Keep status polling independent of vault filesystem requests so the terminal can report a slow unlock or network scan.
 - Release the Cryptomator lock before sending file and folder responses so a slow or disconnected browser cannot block other reads or page reloads.
 - Store the vault's rebuildable SQLite index inside Cryptomator and execute queries in memory for the open session, avoiding SQLite file locking on the NAS.
@@ -28,7 +29,7 @@
 - Merge imported favorites into the active workspace without case-insensitive duplicates and preserve any existing tag's group.
 - Show paths relative to the library root in the tagging progress label while keeping absolute paths in image metadata.
 - Report images found during the Identify walk and tag checks against the final count before tagging begins, independently of the vault index scan.
-- Keep folders before files in both browser order modes, comparing names by symbols, numbers, then letters and comparing digit sequences numerically.
+- Keep folders before files in both browser order modes, with untagged images first by default and names compared by symbols, numbers, then letters using numeric digit sequences.
 - A folder with no subfolders remains selectable with the square selection button while the grid shows only its image files.
 - Show only the current folder's image files in the browser and use the open vault's index to display their tagging status without loading image data.
 - Put tags from the CSV character column under Characters and all remaining favorites under Events.

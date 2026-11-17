@@ -130,10 +130,12 @@ button:disabled { opacity: 0.45; cursor: default; }
 .folder:hover { background: color-mix(in srgb, var(--pick) 10%, transparent); }
 .folder .name { display: block; font-size: 12px; line-height: 1.2; word-break: break-word; }
 .folder.on { border-color: var(--pick); }
-.image-tile { text-align: center; min-width: 0; }
+.image-tile { text-align: center; min-width: 0; user-select: none; }
 .image-tile .name { color: var(--text); }
 .image-tile .badge.scan { left: 50%; transform: translateX(-50%); }
 .image-tile .badge.none { background: #f4f5f7; color: #495463; }
+#image-actions { position: fixed; inset: auto; margin: 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); box-shadow: 0 4px 12px #0005; }
+#image-actions button { display: block; }
 .files-more { flex-basis: 100%; }
 .badge { position: absolute; bottom: 0; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; border: 2px solid var(--pane); box-sizing: border-box; box-shadow: 0 1px 3px #0005; }
 .badge svg { display: block; width: 11px; height: 11px; }
@@ -429,6 +431,9 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   </section>
 </div>
 <div id="suggest" hidden></div>
+<div id="image-actions" popover="manual">
+  <button id="delete-tile" type="button" class="danger" autofocus>Delete image</button>
+</div>
 <dialog id="vault-dialog" aria-labelledby="vault-title">
   <form id="vault-form" autocomplete="off">
     <label id="vault-title" for="vault-password">Cryptomator password</label>
@@ -457,6 +462,7 @@ const selected = new Set();
 let folders = FOLDERS_JSON;
 let reel = [];
 let reelAt = -1;
+let folderPreview = "";
 let workPreview = false;
 let workFile = "";
 let lastJob = null;
@@ -501,6 +507,9 @@ const nvidiaCard = document.getElementById("nvidia-card");
 const nvidiaInstall = document.getElementById("nvidia-install");
 const terminalInput = document.getElementById("terminal-input");
 const deleteImage = document.getElementById("delete-image");
+const imageActions = document.getElementById("image-actions");
+const deleteTile = document.getElementById("delete-tile");
+let imageActionTarget = null;
 const deleteDialog = document.getElementById("delete-dialog");
 const deleteConfirm = document.getElementById("delete-confirm");
 const deleteCancel = document.getElementById("delete-cancel");
@@ -520,7 +529,7 @@ const folderSize = document.getElementById("folder-size");
 const folderOrder = document.getElementById("folder-order");
 const folderUp = document.getElementById("folder-up");
 const allFolders = document.getElementById("all-folders");
-let untaggedFirst = readPreference("oubi.folder-order") === "untagged";
+let untaggedFirst = readPreference("oubi.folder-order") !== "default";
 const fileTileBatch = 200;
 let visibleFileTiles = fileTileBatch;
 let folderFiles = [];
@@ -600,14 +609,14 @@ function cancelPreviewRequest() {
   previewRequest = null;
 }
 
-function clearImage(message) {
+function clearImage(message, path = "") {
   hasFile = false;
   shown = "";
   previewRevision = "";
   renderDeleteControls();
   const shot = document.getElementById("shot");
   shot.removeAttribute("src");
-  document.getElementById("name").textContent = t(11);
+  document.getElementById("name").textContent = path ? fileName(path) : t(11);
   document.getElementById("who").textContent = "";
   tagText = "";
   document.getElementById("tags").textContent = message;
@@ -636,6 +645,7 @@ function applyI18n() {
   showTerminalInput();
   deleteImage.setAttribute("aria-label", t(182));
   deleteImage.title = t(182);
+  deleteTile.textContent = t(182);
   deleteConfirm.textContent = t(184);
   deleteCancel.textContent = t(175);
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
@@ -668,7 +678,7 @@ function applyI18n() {
   showRocm();
   showNvidia();
   if (!hasFile && !previewRequest) showEmpty();
-  if (previewRequest?.failed) clearImage(t(previewRequest.failed));
+  if (previewRequest?.failed) clearImage(t(previewRequest.failed), previewRequest.path);
   renderFolders();
   renderAppMode();
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
@@ -763,8 +773,9 @@ function renderFolders() {
 
 function appendFileTiles(files, start) {
   const tiles = document.createDocumentFragment();
-  for (const { name, tagged } of files.slice(start, visibleFileTiles)) {
-    const tile = document.createElement("div");
+  for (const { path, name, tagged } of files.slice(start, visibleFileTiles)) {
+    const tile = document.createElement("button");
+    tile.type = "button";
     tile.className = "folder image-tile";
     const icon = document.createElement("div");
     icon.className = "icon";
@@ -777,6 +788,16 @@ function appendFileTiles(files, start) {
     label.className = "name";
     label.textContent = name;
     tile.title = name + " · " + t(tagged ? 252 : 251);
+    bindHold(tile, () => openImageActions(tile, path), () => openFolderPreview(path));
+    tile.oncontextmenu = event => {
+      event.preventDefault();
+      openImageActions(tile, path);
+    };
+    tile.onkeydown = event => {
+      if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+      event.preventDefault();
+      openImageActions(tile, path);
+    };
     tile.append(icon, label);
     tiles.appendChild(tile);
   }
@@ -859,6 +880,9 @@ function renderVault() {
 
 function selectFolderLocation(path) {
   folderLocation = path;
+  imageActions.hidePopover();
+  imageActionTarget = null;
+  folderPreview = "";
   clearTimeout(folderSelectionTimer);
   selected.clear();
   pinned = [];
@@ -982,7 +1006,8 @@ async function loadGallery(reset = false) {
     reel = [];
     reelAt = -1;
   }
-  if (!workPreview && !reel.length) showEmpty();
+  if (reset) folderPreview = "";
+  if (!workPreview && !folderPreview && !reel.length) showEmpty();
   if (!selected.size) return;
   const paths = [...selected];
   const tags = [...pinned];
@@ -994,7 +1019,7 @@ async function loadGallery(reset = false) {
   if (request !== galleryRequest || paths.length !== selected.size || paths.some(path => !selected.has(path))) return;
   if (data?.scanning) {
     galleryMessage = 204;
-    if (!workPreview && !reel.length) showEmpty();
+    if (!workPreview && !folderPreview && !reel.length) showEmpty();
     return;
   }
   if (data) {
@@ -1128,29 +1153,33 @@ function updateFavorites(endpoint, payload, errorId) {
   return favoriteWrites;
 }
 
-function bindTagActions(span, token) {
+function bindHold(element, onHold, onClick) {
   let timer = null;
   let held = false;
   let start;
   const cancelHold = () => clearTimeout(timer);
-  span.onpointerdown = event => {
+  element.onpointerdown = event => {
     if (event.button !== 0 || !event.isPrimary) return;
     held = false;
     start = { x: event.clientX, y: event.clientY };
     timer = setTimeout(() => {
-      if (!span.isConnected) return;
+      if (!element.isConnected) return;
       held = true;
-      toggleFavorite(token);
+      onHold();
     }, 500);
   };
-  span.onpointermove = event => {
+  element.onpointermove = event => {
     if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) cancelHold();
   };
-  span.onpointerup = span.onpointerleave = span.onpointercancel = cancelHold;
-  span.onclick = () => {
-    if (held) held = false;
-    else togglePin(token);
+  element.onpointerup = element.onpointerleave = element.onpointercancel = cancelHold;
+  element.onclick = event => {
+    if (!held || event.detail === 0) onClick();
+    held = false;
   };
+}
+
+function bindTagActions(span, token) {
+  bindHold(span, () => toggleFavorite(token), () => togglePin(token));
   span.onkeydown = event => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
@@ -1215,13 +1244,25 @@ function paintTags(text) {
 
 function showAt(index) {
   if (workPreview || !reel.length) return;
+  folderPreview = "";
   reelAt = (index + reel.length) % reel.length;
   showImage("images", reel[reelAt]);
 }
 
 function renderGallery() {
-  if (!reel.length) showEmpty();
+  if (folderPreview) showImage("images", folderPreview);
+  else if (!reel.length) showEmpty();
   else showAt(reelAt);
+}
+
+function openFolderPreview(path) {
+  folderPreview = path;
+  clearTimeout(folderSelectionTimer);
+  const index = reel.indexOf(path);
+  if (index >= 0) reelAt = index;
+  if (previewRequest?.failed) cancelPreviewRequest();
+  if (workPreview) setPreviewMode(false);
+  else renderGallery();
 }
 
 function renderWorkPreview() {
@@ -1253,7 +1294,7 @@ async function showImage(root, path) {
   cancelPreviewRequest();
   const previous = document.getElementById("shot");
   const image = shown === imageKey ? previous : new Image();
-  const request = { key: imageKey, image, controller: new AbortController() };
+  const request = { key: imageKey, path, image, controller: new AbortController() };
   previewRequest = request;
   previewRevision = "";
   renderDeleteControls();
@@ -1273,7 +1314,7 @@ async function showImage(root, path) {
         image.removeAttribute("src");
         request.failed = error.name === "TimeoutError" ? 207 : 203;
         closeZoom();
-        clearImage(t(request.failed));
+        clearImage(t(request.failed), path);
       }
       return;
     } finally {
@@ -1308,16 +1349,44 @@ function renderDeleteControls() {
   const shot = document.getElementById("shot");
   deleteImage.hidden = !hasFile;
   deleteImage.disabled = !previewRevision || !shot.complete || !shot.naturalWidth || wasBusy || deleteBusy;
-  deleteConfirm.disabled = deleteBusy || wasBusy;
+  deleteTile.disabled = wasBusy || deleteBusy;
+  deleteConfirm.disabled = !deleteTarget?.revision || deleteBusy || wasBusy;
   deleteCancel.disabled = deleteBusy;
 }
 
-function openDeleteDialog() {
-  if (deleteImage.disabled || !shown.startsWith("images:")) return;
-  deleteTarget = { path: shown.slice("images:".length), revision: previewRevision, scope: vaultScope };
+function openImageActions(tile, path) {
+  const anchor = tile.getBoundingClientRect();
+  imageActionTarget = { path, scope: vaultScope };
+  imageActions.showPopover();
+  imageActions.style.left = Math.max(0, Math.min(anchor.left, innerWidth - imageActions.offsetWidth)) + "px";
+  const below = anchor.bottom + 4;
+  imageActions.style.top = (below + imageActions.offsetHeight <= innerHeight ?
+    below : Math.max(0, anchor.top - imageActions.offsetHeight - 4)) + "px";
+}
+
+function openDeleteDialog(target) {
+  if (target.scope !== vaultScope || deleteDialog.open || wasBusy || deleteBusy) return false;
+  deleteTarget = target;
   document.getElementById("delete-title").textContent = t(183).replace("{name}", () => fileName(deleteTarget.path));
   deleteError.hidden = true;
+  renderDeleteControls();
   deleteDialog.showModal();
+  return true;
+}
+
+async function openTileDeletion() {
+  const target = imageActionTarget;
+  imageActions.hidePopover();
+  if (!target || !openDeleteDialog(target)) return;
+  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(target.path),
+    AbortSignal.timeout(galleryTimeoutMs)).catch(() => null);
+  if (deleteTarget !== target || !deleteDialog.open) return;
+  target.revision = data?.revision;
+  if (!target.revision) {
+    deleteError.textContent = t(187);
+    deleteError.hidden = false;
+  }
+  renderDeleteControls();
 }
 
 function discardDeletedImage(path) {
@@ -1327,13 +1396,15 @@ function discardDeletedImage(path) {
   if (workFile === path) workFile = "";
   reelAt = activePath === path ? Math.min(index, reel.length - 1) : reel.indexOf(activePath);
   if (!reel.length) galleryMessage = 195;
-  if (shown === "images:" + path) showEmpty();
+  if (folderPreview === path) folderPreview = "";
+  const key = "images:" + path;
+  if (shown === key || previewRequest?.key === key) showEmpty();
   if (workPreview) renderWorkPreview();
   else renderGallery();
 }
 
 async function confirmDelete() {
-  if (!deleteTarget || deleteBusy || wasBusy) return;
+  if (!deleteTarget?.revision || deleteBusy || wasBusy) return;
   const target = deleteTarget;
   deleteBusy = true;
   deleteError.hidden = true;
@@ -2358,7 +2429,18 @@ document.getElementById("filter-query").onkeydown = (event) => {
 };
 document.getElementById("filter-query").onblur = () => setTimeout(hideSuggest, 0);
 applyI18n();
-deleteImage.onclick = openDeleteDialog;
+deleteImage.onclick = () => {
+  if (!deleteImage.disabled && shown.startsWith("images:")) {
+    openDeleteDialog({ path: shown.slice("images:".length), revision: previewRevision, scope: vaultScope });
+  }
+};
+deleteTile.onclick = openTileDeletion;
+document.addEventListener("pointerdown", event => {
+  if (!imageActions.contains(event.target)) imageActions.hidePopover();
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && imageActions.matches(":popover-open")) imageActions.hidePopover();
+});
 deleteConfirm.onclick = confirmDelete;
 deleteCancel.onclick = () => deleteDialog.close();
 deleteDialog.addEventListener("cancel", event => { if (deleteBusy) event.preventDefault(); });

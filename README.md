@@ -38,7 +38,8 @@
 | :--- | :--- |
 | Folder tile | Click to select a source folder. Double-click or press Right Arrow to open it and see its subfolders and images. Hover over the folder badges to see the tagging and sorting counts. A green badge marks a tagged image and a white badge marks an untagged image. Use the up arrow to return to the parent folder. |
 | Square selection button | Select all visible folders or select the current folder when it has no subfolders. |
-| Tile size and order | Resize tiles with the slider. Folders always come first. The order button switches between name order and untagged images first. Both modes compare names by symbols, numbers, then letters. |
+| Tile size and order | Resize tiles with the slider. Folders always come first, with untagged images first among the files by default. The order button switches between this order and name order. Both modes compare names by symbols, numbers, then letters. |
+| Image tile | Click to open the image in the preview. Press and hold, right-click, or press Shift+F10 on a focused tile to open its delete action. Confirm the file name before deleting. |
 | Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
