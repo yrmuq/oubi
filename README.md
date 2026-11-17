@@ -53,7 +53,6 @@
 | `Sort destination` | With the vault open, choose the destination for both sorting and its plan. |
 | `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
 | `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
-| `OUBI_PORT` | Choose the host port. The container listens on `8080`. |
 | `OUBI_NO_TXT=1` | Skip writing tag sidecars. Resume relies on sidecars that already exist. |
 | `OUBI_NSFW_FROM` | Use `q` to include `rating:q` and `rating:e`, or `e` to include only `rating:e`. |
 | `OUBI_COPY_TXT=1` | Copy or move accompanying `.txt` files with sorted images. |
@@ -97,7 +96,9 @@ docker compose pull
 docker compose up -d
 ```
 
-Open the server address on `OUBI_PORT` (default `8080`), choose source folders, and use `Identify`, `Sort plan`, or `Sort`. The application downloads model weights into `/cache` on startup. If the selected model requires Hugging Face authentication, set `HF_TOKEN` in your local `.env`.
+Open `http://YOUR_SERVER:8080`, choose source folders, and use `Identify`, `Sort plan`, or `Sort`. To use a different host port, edit the left side of `8080:8080` under `ports` in the Compose file. For example, `8095:8080` opens Oubi on port `8095`. The application downloads model weights into `/cache` on startup. If the selected model requires Hugging Face authentication, set `HF_TOKEN` in your local `.env`.
+
+Oubi writes tag sidecars, skips images that already have them, copies sorted images, and uses the `q` NSFW cutoff by default. Add a tagging or sorting override under `environment` in the Compose file only when you want to change that behavior.
 
 | Container Path | Purpose |
 | :--- | :--- |
@@ -108,36 +109,65 @@ Open the server address on `OUBI_PORT` (default `8080`), choose source folders, 
 
 #### AMD GPU tagging
 
-Use the `dev` image with the [AMD Compose override](docker-compose.amd.yml). The Linux Docker host needs a working AMD driver and a compatible GPU. Set `OUBI_AMD_RENDER_DEVICE` in `.env` to that GPU's render node, such as `/dev/dri/renderD128`. Set `OUBI_KFD_GID` and `OUBI_RENDER_GID` to the numeric group owners of the two devices on the host. Use `stat -c %g /dev/kfd` and `stat -c %g /dev/dri/renderD128` with your render node.
+Use the `dev` image with the [AMD Compose override](docker-compose.amd.yml). The Linux Docker host needs a compatible GPU and an AMD driver that exposes `/dev/kfd` and the card's render device. Run the following commands on the server that runs Docker. See the [ROCm Docker guide](https://rocm.docs.amd.com/projects/install-on-linux/en/docs-7.2.0/how-to/docker.html) for how device access works.
+
+1. List graphics cards and their render devices. If `lspci` is missing, install the `pciutils` package on the server.
+
+   ```bash
+   lspci -D | grep -Ei 'VGA|3D|Display'
+   ls -l /dev/dri/by-path/*-render
+   ```
+
+   Find your AMD card in the first list and note its PCI address at the start of the line. If it starts with `0000:03:00.0`, look for `pci-0000:03:00.0-render` in the second list. A link ending in `-> ../renderD128` means the device is `/dev/dri/renderD128`. Put that full path in `OUBI_AMD_RENDER_DEVICE`. Use the number shown for your own card.
+
+2. Read the numeric group ID for each device. Replace `/dev/dri/renderD128` with the path you found.
+
+   ```bash
+   stat -c '%n %g' /dev/kfd /dev/dri/renderD128
+   ```
+
+   The number after `/dev/kfd` goes into `OUBI_KFD_GID`. The number after your render device goes into `OUBI_RENDER_GID`. If both numbers are the same, enter that number for both variables.
+
+3. Fill the three AMD settings in `.env`. For example, if your device is `renderD128` and both group IDs are `105`, use:
+
+   ```dotenv
+   OUBI_AMD_RENDER_DEVICE=/dev/dri/renderD128
+   OUBI_KFD_GID=105
+   OUBI_RENDER_GID=105
+   ```
+
+   If either device is missing, check that the AMD driver is active on the host before starting the AMD override.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.amd.yml pull
 docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
 ```
 
-Choose `Auto` or an architecture such as `gfx1102` for the Radeon RX 7600. `OUBI_ROCM_ARCH` in `.env` sets the initial selection. Oubi stores the corresponding ROCm packages in `/data/rocm`. The model cache is shared between the CPU and GPU tagging environments.
+Leave `OUBI_ROCM_ARCH=auto` to let Oubi detect the exposed AMD card. To find the code before installing the AMD packages, choose `Auto` in the AMD dropdown and click `Install`. The terminal shows the selected ROCm architecture, such as `gfx1102` for a Radeon RX 7600. Enter `n` if you only want to look up the code. To make that architecture the default selection, enter the code as `OUBI_ROCM_ARCH` in `.env`. Oubi stores ROCm packages in `/data/rocm`. The model cache is shared between the CPU and GPU tagging environments.
 
 #### NVIDIA GPU tagging
 
 Use the `dev` image with the [NVIDIA Compose override](docker-compose.nvidia.yml). The Linux Docker host needs a working NVIDIA driver and [NVIDIA Container Toolkit configured for Docker](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+
+Run `nvidia-smi -L` on the Docker host to check that the driver sees your cards. The NVIDIA override exposes them through the Container Toolkit. Pick the card by name in the Oubi header.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.nvidia.yml pull
 docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
 ```
 
-Choose `Auto` or a specific detected card. Oubi picks a PyTorch CUDA build using the card's compute capability and driver version. A downloaded build in `/data/nvidia` is shared by cards that use the same CUDA packages. Each selected card still runs its own GPU test.
+With `Auto`, Oubi chooses a compatible card. It selects a PyTorch CUDA build using the card's compute capability and driver version. A downloaded build in `/data/nvidia` is shared by cards that use the same CUDA packages. Each selected card still runs its own GPU test.
 
 #### Cryptomator vaults
 
-Use the [Cryptomator Compose override](docker-compose.cryptomator.yml) with the `dev` channel on a Linux x86_64 host with FUSE. Set `OUBI_CRYPT` in `.env` to the directory containing `vault.cryptomator`. The container user needs write access to that directory. FUSE requires a user name for the configured UID inside the container. The image provides one for the default UID `1000`.
+Use the [Cryptomator Compose override](docker-compose.cryptomator.yml) with the `dev` channel on a Linux x86_64 host with FUSE. Set `OUBI_CRYPT` in `.env` to the full path on the server of the directory containing `vault.cryptomator`. The container user needs write access to that directory. FUSE requires a user name for the configured UID inside the container. The image provides one for the default UID `1000`.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml pull
 docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml up -d
 ```
 
-The standard Oubi image includes Cryptomator CLI and `fuse3`. The override mounts encrypted files at `/crypt` and enables FUSE access. It grants `SYS_ADMIN` and selects `apparmor:unconfined` for FUSE mounting. Click the lock in the folder controls and enter the password to switch to vault folders in the current browser session. On the first unlock, Oubi builds `.oubi/index.sqlite3` in the vault and shows progress in the terminal. Later unlocks reuse that index for browsing, counts, search, and suggestions. Tagging, sorting, and deletion in Oubi update the affected entries. The recount control rebuilds the index from the files and tag metadata. Click the lock again after any active job finishes or stops to return to the ordinary source folders. Serve the web interface over authenticated HTTPS when accessing it remotely.
+The standard Oubi image includes Cryptomator CLI and `fuse3`. The override mounts encrypted files at `/crypt` and enables FUSE access. It grants `SYS_ADMIN` and selects `apparmor:unconfined` for FUSE mounting. When Oubi finds `/crypt/vault.cryptomator` at startup, it shows a lock in the folder controls. Click it and enter the password to switch to vault folders in the current browser session. On the first unlock, Oubi builds `.oubi/index.sqlite3` in the vault and shows progress in the terminal. Later unlocks reuse that index for browsing, counts, search, and suggestions. Tagging, sorting, and deletion in Oubi update the affected entries. The recount control rebuilds the index from the files and tag metadata. Click the lock again after any active job finishes or stops to return to the ordinary source folders. Serve the web interface over authenticated HTTPS when accessing it remotely.
 
 Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, favorite tags, and gender overrides use the vault’s `.oubi/` folder.
 

@@ -12,5 +12,4 @@ services:
     volumes:
       - ${OUBI_CRYPT:?Set OUBI_CRYPT to the vault directory}:/crypt
     environment:
-      OUBI_CRYPT: /crypt
       OUBI_CRYPT_OUTPUT: ${OUBI_CRYPT_OUTPUT:-Sorted}

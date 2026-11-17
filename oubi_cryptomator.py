@@ -1,6 +1,5 @@
-"""Mount a configured Cryptomator vault for the browser that unlocked it."""
+"""Mount the Cryptomator vault for the browser that unlocked it."""
 
-import os
 import secrets
 import signal
 import subprocess
@@ -11,6 +10,15 @@ from pathlib import Path
 
 FUSE_MOUNTER = "org.cryptomator.frontend.fuse.mount.LinuxFuseMountProvider"
 COOKIE_NAME = "oubi_vault"
+VAULT_PATH = Path("/crypt")
+VAULT_CONFIG = "vault.cryptomator"
+
+
+def default_vault_path():
+    try:
+        return VAULT_PATH if (VAULT_PATH / VAULT_CONFIG).is_file() else None
+    except OSError:
+        return None
 
 
 class VaultError(Exception):
@@ -21,8 +29,7 @@ class VaultError(Exception):
 
 class Vault:
     def __init__(self, path=None, mount="/run/oubi-crypt/mount"):
-        configured = path if path is not None else os.environ.get("OUBI_CRYPT")
-        self.path = Path(configured) if configured else None
+        self.path = default_vault_path() if path is None else Path(path)
         self.mount = Path(mount)
         self.lock = threading.RLock()
         self.process = None
@@ -78,7 +85,7 @@ class Vault:
         if len(encoded) > 4096:
             raise VaultError(165)
         self.close()
-        if not (self.path / "vault.cryptomator").is_file():
+        if not (self.path / VAULT_CONFIG).is_file():
             raise VaultError(166)
         try:
             self.mount.mkdir(mode=0o700, exist_ok=True)

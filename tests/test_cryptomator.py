@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from oubi_cryptomator import COOKIE_NAME, VaultError
+from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
 from oubi_files import image_revision, sidecar_path
 from oubi_index import folder_sidecars
 from oubi_web import App, Handler, Workspace, images_under, read_favorites, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
@@ -19,6 +19,14 @@ class VaultWorkspaceTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+
+    def test_default_vault_replaces_the_container_environment_setting(self):
+        with patch("oubi_cryptomator.VAULT_PATH", self.root):
+            self.assertIsNone(Vault().path)
+            (self.root / "vault.cryptomator").touch()
+            self.assertEqual(Vault().path, self.root)
+            with patch.object(Path, "is_file", side_effect=PermissionError):
+                self.assertIsNone(Vault().path)
 
     def test_favorites_use_all_csv_characters_and_stay_in_the_vault(self):
         workspace = Workspace.encrypted(self.root)
