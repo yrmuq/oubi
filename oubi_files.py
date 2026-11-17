@@ -32,6 +32,13 @@ def sidecar_path(image):
     return image.parent / "tags" / (image.name + ".txt")
 
 
+def direct_image_files(folder):
+    with os.scandir(folder) as entries:
+        for entry in entries:
+            if Path(entry.name).suffix.lower() in IMAGE_EXTS and entry.is_file(follow_symlinks=False):
+                yield Path(entry.path)
+
+
 def image_files(folder, exclude=None, *, cancelled=None, visit=None, onerror=None):
     excluded = Path(exclude).resolve() if exclude else None
     for directory, subdirs, names in os.walk(folder, onerror=onerror):

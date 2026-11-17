@@ -8,12 +8,12 @@ import stat
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from oubi_files import indexed_image_path, sidecar_path
+from oubi_files import direct_image_files, indexed_image_path, sidecar_path
 
 CHANGE_EVENT = "OUBI_INDEX_CHANGES "
 INDEX_NAME = "index.sqlite3"
 DIRTY_NAME = "index.dirty"
-VERSION = 1
+VERSION = 2
 TAG_COLUMNS = ("rating", "character", "copyright", "style", "general", "meta")
 
 
@@ -141,9 +141,29 @@ class VaultIndex:
         if (self.directory / DIRTY_NAME).exists() or not snapshot.is_file() or snapshot.is_symlink():
             return False
         self.db.deserialize(snapshot.read_bytes())
-        return (self.db.execute("PRAGMA user_version").fetchone()[0] == VERSION
+        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        return (version in (1, VERSION)
                 and self.db.execute("SELECT excluded FROM config").fetchone() == (self.excluded,)
                 and self.db.execute("PRAGMA quick_check(1)").fetchone() == ("ok",))
+
+    def add_missing_root_images(self, workspace):
+        if self.db.execute("PRAGMA user_version").fetchone() == (VERSION,):
+            return
+        self.db.execute(f"PRAGMA user_version = {VERSION}")
+        if self.db.execute("SELECT 1 FROM folders WHERE parent = '' LIMIT 1").fetchone() is None:
+            return
+        # Earlier scans started at the top-level subfolders when any were present.
+        known = {name for name, _ in self.direct_images("")}
+        root = Path(workspace.images)
+        missing = [image for image in direct_image_files(root) if image.name not in known]
+        if missing:
+            rows, sorted_paths = read_metadata(workspace)
+            sidecars = folder_sidecars(root)
+            for image in missing:
+                name = image.name
+                tagged, modified, character, details, terms = image_metadata(image, rows.get(name), sidecars=sidecars)
+                self.set_image(name, tagged, name in sorted_paths, modified, character, details, terms)
+            self.save()
 
     def _sync_directory(self):
         fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
@@ -212,6 +232,14 @@ class VaultIndex:
         condition, params = folder_clause([name], "path")
         row = self.db.execute(f"SELECT COUNT(*), SUM(tagged), SUM(sorted) FROM images WHERE {condition}", params).fetchone()
         return tuple(value or 0 for value in row)
+
+    def direct_images(self, directory):
+        if not directory:
+            return self.db.execute("SELECT path, tagged FROM images WHERE instr(path, '/') = 0")
+        prefix = directory + "/"
+        return self.db.execute("SELECT path, tagged FROM images WHERE path >= ? AND path < ? "
+                               "AND instr(substr(path, ?), '/') = 0",
+                               (prefix, directory + "0", len(prefix) + 1))
 
     def gallery(self, folders):
         condition, params = folder_clause(folders, "images.path")

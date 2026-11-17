@@ -115,7 +115,7 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #folder-size::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: var(--pick); }
 #folder-order { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; }
 #folder-order svg { width: 16px; height: 16px; display: block; margin: auto; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-#folder-order[aria-pressed="true"] svg { transform: scaleY(-1); }
+#folder-order[aria-pressed="true"] { color: var(--pick); }
 #all-folders { width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
 #all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
 #all-folders.on .box { background: currentColor; }
@@ -130,6 +130,11 @@ button:disabled { opacity: 0.45; cursor: default; }
 .folder:hover { background: color-mix(in srgb, var(--pick) 10%, transparent); }
 .folder .name { display: block; font-size: 12px; line-height: 1.2; word-break: break-word; }
 .folder.on { border-color: var(--pick); }
+.image-tile { text-align: center; min-width: 0; }
+.image-tile .name { color: var(--text); }
+.image-tile .badge.scan { left: 50%; transform: translateX(-50%); }
+.image-tile .badge.none { background: #f4f5f7; color: #495463; }
+.files-more { flex-basis: 100%; }
 .badge { position: absolute; bottom: 0; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; border: 2px solid var(--pane); box-sizing: border-box; box-shadow: 0 1px 3px #0005; }
 .badge svg { display: block; width: 11px; height: 11px; }
 .badge.scan { left: min(7px, 7%); }
@@ -354,7 +359,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         </div>
         <div class="folder-settings">
           <input id="folder-size" type="range" min="68" max="160" step="4" value="104" aria-label="Folder size">
-          <button id="folder-order" type="button" class="secondary" aria-label="Reverse folder order" aria-pressed="false">
+          <button id="folder-order" type="button" class="secondary" aria-label="Unrecognized images first" aria-pressed="false">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3v14m-3-3 3 3 3-3M10 5h3m-3 5h5m-5 5h7"/></svg>
           </button>
         </div>
@@ -514,7 +519,11 @@ const folderBox = document.getElementById("folders");
 const folderSize = document.getElementById("folder-size");
 const folderOrder = document.getElementById("folder-order");
 const folderUp = document.getElementById("folder-up");
-let reverseFolderOrder = readPreference("oubi.folder-order") === "reverse";
+let untaggedFirst = readPreference("oubi.folder-order") === "untagged";
+const fileTileBatch = 200;
+let visibleFileTiles = fileTileBatch;
+let folderFiles = [];
+let folderRequest = 0;
 let vaultScope = __OUBI_VAULT_SCOPE__;
 let folderLocation = "";
 let folderSelectionTimer = null;
@@ -665,8 +674,8 @@ function applyI18n() {
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
 }
 
-function badge(kind, state) {
-  const title = {
+function badge(kind, state, file = false) {
+  const title = file ? t(state === "done" ? 252 : 251) : {
     scan: { none: t(13), part: t(14), done: t(15) },
     sort: { none: t(16), part: t(17), done: t(18) },
   }[kind][state] || "";
@@ -692,9 +701,9 @@ function folderIcon(scan, sort) {
 }
 
 function renderFolderOrder() {
-  folderOrder.title = t(reverseFolderOrder ? 222 : 221);
+  folderOrder.title = t(untaggedFirst ? 222 : 221);
   folderOrder.setAttribute("aria-label", t(221));
-  folderOrder.setAttribute("aria-pressed", String(reverseFolderOrder));
+  folderOrder.setAttribute("aria-pressed", String(untaggedFirst));
 }
 
 function compareFolderNames(left, right, collator) {
@@ -712,13 +721,12 @@ function compareFolderNames(left, right, collator) {
 
 function renderFolders() {
   const collator = new Intl.Collator(lang, { numeric: true, sensitivity: "base" });
+  const parts = name => name.normalize().match(/\p{Nd}+|[\p{L}\p{M}]\p{M}*|./gsu) || [];
+  const compare = (a, b) => compareFolderNames(a, b, collator);
   const tiles = folders.map(folder => {
     const name = folder.path === "" ? t(84) : folder.name;
-    const parts = name.normalize().match(/\p{Nd}+|[\p{L}\p{M}]\p{M}*|./gsu) || [];
-    return { folder, name, parts };
-  });
-  tiles.sort((a, b) => compareFolderNames(a, b, collator));
-  if (reverseFolderOrder) tiles.reverse();
+    return { folder, name, parts: parts(name) };
+  }).sort(compare);
   folderBox.replaceChildren();
   for (const { folder, name } of tiles) {
     const button = document.createElement("button");
@@ -749,7 +757,57 @@ function renderFolders() {
     };
     folderBox.appendChild(button);
   }
+  const files = folderFiles.map(file => {
+    const name = file.path.split("/").at(-1);
+    return { ...file, name, parts: parts(name) };
+  }).sort((a, b) => (untaggedFirst ? Number(a.tagged) - Number(b.tagged) : 0) || compare(a, b));
+  appendFileTiles(files, 0);
   updateSelectAll();
+}
+
+function appendFileTiles(files, start) {
+  const tiles = document.createDocumentFragment();
+  for (const { name, tagged } of files.slice(start, visibleFileTiles)) {
+    const tile = document.createElement("div");
+    tile.className = "folder image-tile";
+    const icon = document.createElement("div");
+    icon.className = "icon";
+    icon.innerHTML = `<svg class="folder-art" viewBox="0 0 72 56" aria-hidden="true">
+      <rect x="10" y="7" width="52" height="42" rx="5" fill="var(--pane)" stroke="currentColor" stroke-width="2"/>
+      <circle cx="46" cy="20" r="4" fill="currentColor"/>
+      <path d="m16 39 13-14 9 10 6-6 12 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    </svg>` + badge("scan", tagged ? "done" : "none", true);
+    const label = document.createElement("span");
+    label.className = "name";
+    label.textContent = name;
+    tile.title = name + " · " + t(tagged ? 252 : 251);
+    tile.append(icon, label);
+    tiles.appendChild(tile);
+  }
+  if (visibleFileTiles < files.length) {
+    const row = document.createElement("div");
+    row.className = "files-more";
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "secondary";
+    more.textContent = t(253);
+    more.onclick = () => {
+      const start = visibleFileTiles;
+      visibleFileTiles += fileTileBatch;
+      row.remove();
+      appendFileTiles(files, start);
+      folderBox.querySelector(".files-more button")?.focus({ preventScroll: true });
+    };
+    row.appendChild(more);
+    tiles.appendChild(row);
+  }
+  folderBox.appendChild(tiles);
+}
+
+function takeFolderFiles(files) {
+  if (JSON.stringify(files) === JSON.stringify(folderFiles)) return;
+  folderFiles = files;
+  renderFolders();
 }
 
 function updateSelectAll() {
@@ -820,7 +878,11 @@ function selectFolderLocation(path) {
   if (!workPreview) showEmpty();
   renderFilter();
   refreshGenreGhosts();
-  takeFolders([]);
+  folderFiles = [];
+  visibleFileTiles = fileTileBatch;
+  folders = [];
+  renderFolders();
+  folderBox.scrollTop = 0;
   renderTerminal();
 }
 
@@ -901,16 +963,15 @@ async function changeVault(action, password) {
   }
 }
 
-async function loadFolders() {
-  try {
-    const directory = folderLocation;
-    const path = directory ? "/api/folders?folder=" + encodeURIComponent(directory) : "/api/folders";
-    const data = await workspaceData(path);
-    if (directory !== folderLocation || !Array.isArray(data)) return;
-    takeFolders(data);
-  } catch (error) {
-    return;
-  }
+function loadFolders() {
+  const request = ++folderRequest;
+  const query = folderLocation ? "?folder=" + encodeURIComponent(folderLocation) : "";
+  workspaceData("/api/folders" + query).then(data => {
+    if (request === folderRequest && Array.isArray(data)) takeFolders(data);
+  }).catch(() => {});
+  workspaceData("/api/folder-images" + query).then(data => {
+    if (request === folderRequest && Array.isArray(data?.files)) takeFolderFiles(data.files);
+  }).catch(() => {});
 }
 
 async function loadGallery(reset = false) {
@@ -1292,6 +1353,7 @@ async function confirmDelete() {
       galleryRequest++;
       statusShown = ++statusRequest;
       discardDeletedImage(target.path);
+      takeFolderFiles(folderFiles.filter(file => file.path !== target.path));
       showNotice(data.warning || "");
       vocab = [];
       if (vaultScope) loadFolders();
@@ -2329,10 +2391,12 @@ folderSize.oninput = () => {
   savePreference("oubi.folder-size", folderSize.value);
 };
 folderOrder.onclick = () => {
-  reverseFolderOrder = !reverseFolderOrder;
-  savePreference("oubi.folder-order", reverseFolderOrder ? "reverse" : "default");
+  untaggedFirst = !untaggedFirst;
+  visibleFileTiles = fileTileBatch;
+  savePreference("oubi.folder-order", untaggedFirst ? "untagged" : "default");
   renderFolderOrder();
   renderFolders();
+  folderBox.scrollTop = 0;
 };
 document.getElementById("all-folders").onclick = () => {
   clearTimeout(folderSelectionTimer);

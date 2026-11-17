@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
-from oubi_files import IMAGE_EXTS, ImageChangedError, delete_source_image, image_files, image_revision, indexed_image_path, sidecar_path
+from oubi_files import IMAGE_EXTS, ImageChangedError, delete_source_image, direct_image_files, image_files, image_revision, indexed_image_path, sidecar_path
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
 from oubi_gpu import GPU_BUSY_STATES, GpuError
 from oubi_nvidia import NvidiaRuntime
@@ -623,7 +623,7 @@ def load_csv_paths(path=CSV_PATH, *, cancelled=None):
     return found
 
 
-def folder_names(root=IMAGES, *, exclude=None, strict=False):
+def folder_names(root=IMAGES, *, exclude=None):
     base = Path(root)
     if not base.is_dir():
         return []
@@ -631,8 +631,6 @@ def folder_names(root=IMAGES, *, exclude=None, strict=False):
         children = [path for path in base.iterdir() if path.is_dir() and path.name != "tags"
                     and not path.name.startswith(".") and not in_output(path, exclude)]
     except OSError as error:
-        if strict:
-            raise
         if not exclude:
             print(text(26, path=root, error=error), flush=True)
         return []
@@ -743,23 +741,31 @@ def images_under(folder, exclude=None, *, cancelled=None):
     return list(image_files(folder, exclude, cancelled=cancelled))
 
 
-def folder_paths(root, directory, exclude, *, strict=False):
-    base = Path(root)
-    folder = resolve_under(base, directory) if directory else base
+def resolve_source_folder(root, directory, exclude):
+    folder = resolve_under(root, directory)
+    rel = folder.relative_to(Path(root).resolve())
+    if (not folder.is_dir() or in_output(folder, exclude)
+            or any(part.startswith(".") or part == "tags" for part in rel.parts)):
+        raise ValueError(directory)
+    return folder, rel.as_posix() if rel.parts else ""
+
+
+def folder_paths(root, directory, exclude):
+    folder = Path(root)
     if directory:
-        rel = folder.relative_to(base.resolve())
-        if (not folder.is_dir() or in_output(folder, exclude)
-                or any(part.startswith(".") or part == "tags" for part in rel.parts)):
-            raise ValueError(directory)
-        directory = rel.as_posix() if rel.parts else ""
+        folder, directory = resolve_source_folder(root, directory, exclude)
     return ["/".join(part for part in (directory, name) if part)
-            for name in folder_names(folder, exclude=exclude, strict=strict)]
+            for name in folder_names(folder, exclude=exclude)]
 
 
 def source_folders(root=IMAGES, *, directory="", csv=CSV_PATH, sorted_list=SORTED_LIST,
                    exclude=None, cancelled=None, progress=None, include_descendants=False,
                    visit_folder=None, index_image=None):
-    names = folder_paths(root, directory, exclude, strict=visit_folder is not None)
+    if visit_folder is not None:
+        _, relative = resolve_source_folder(root, directory, exclude)
+        names = [relative]
+    else:
+        names = folder_paths(root, directory, exclude)
     if not names:
         if progress is not None and not (cancelled and cancelled()):
             progress("done", 0, 0)
@@ -1191,6 +1197,7 @@ class App:
             catalog = VaultIndex(self.workspace)
             try:
                 if catalog.restore():
+                    catalog.add_missing_root_images(workspace)
                     self.catalog = catalog
             except (OSError, sqlite3.Error, AttributeError):
                 pass
@@ -1403,6 +1410,27 @@ class App:
         with self.lock:
             summaries = self.folder_cache or {}
         return [summaries.get(name) or _folder_summary(name) for name in names]
+
+    def folder_images(self, directory=""):
+        catalog = self.catalog
+        if catalog is not None:
+            files = catalog.direct_images(directory)
+        elif self.workspace is not None:
+            # Status for an unlocked vault comes from its background index.
+            return {"files": []}
+        else:
+            paths = self.paths
+            root = Path(paths.images).resolve()
+            folder, relative = resolve_source_folder(root, directory, paths.excluded)
+            images = list(direct_image_files(folder))
+            if not images:
+                return {"files": []}
+            sidecars = folder_sidecars(folder)
+            tagged = {relative_path(path, root) for path in load_csv_paths(paths.csv)}
+            prefix = relative + "/" if relative else ""
+            files = ((prefix + image.name, sidecar_path(image).name in sidecars or prefix + image.name in tagged)
+                     for image in images)
+        return {"files": [{"path": path, "tagged": bool(tagged)} for path, tagged in files]}
 
     def _ensure_count(self, *, refresh=False):
         with self.lock:
@@ -2020,6 +2048,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/folders":
                 return 200, app.folders(directories[0] if directories else "")
+            if path == "/api/folder-images":
+                return 200, app.folder_images(directories[0] if directories else "")
             if path == "/api/favorites":
                 return 200, read_favorites(app.favorites_path)
             if path == "/api/recent":

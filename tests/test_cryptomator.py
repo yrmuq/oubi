@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
 from oubi_files import VAULT_METADATA_ROOT, image_revision, sidecar_path
-from oubi_index import folder_sidecars
+from oubi_index import VaultIndex, folder_sidecars
 from oubi_web import App, Handler, Workspace, images_under, read_favorites, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
 from sort_images import main as sort_main
 
@@ -425,6 +425,51 @@ with open(sys.argv[2], 'w') as out:
         self.assertIsNone(App(workspace).catalog)
         reopened.close_catalog()
         app.close_catalog()
+
+    def test_folder_image_tiles_use_direct_files_and_upgrade_an_existing_vault_index(self):
+        workspace = Workspace.encrypted(self.root)
+        album = self.root / "Альбом"
+        image = album / "!tagged.jpg"
+        child = album / "child" / "nested.png"
+        root_image = self.root / "root.webp"
+        excluded = Path(workspace.output) / "excluded.jpg"
+        for file in (image, child, root_image, excluded):
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.touch()
+        sidecar_path(image).parent.mkdir()
+        sidecar_path(image).write_text("moon")
+        (album / "notes.txt").touch()
+        with open(workspace.csv, "w", encoding="utf-8", newline="") as handle:
+            csv.writer(handle).writerows([("file", "general"), (root_image, "sun")])
+
+        catalog = VaultIndex(workspace).initialize()
+        catalog.db.execute("PRAGMA user_version = 1")
+        for path in ("", "Альбом", "Альбом/child"):
+            catalog.add_folder(path)
+        catalog.set_image("Альбом/!tagged.jpg", True, False, 0, "", "moon", {})
+        catalog.set_image("Альбом/child/nested.png", False, False, 0, "", "", {})
+        catalog.save()
+        catalog.db.close()
+
+        handler = Handler.__new__(Handler)
+        expected_album = {"files": [{"path": "Альбом/!tagged.jpg", "tagged": True}]}
+        expected_root = {"files": [{"path": "root.webp", "tagged": True}]}
+        with patch("oubi_web.source_folders", side_effect=AssertionError("Reloaded the entire vault")):
+            restored = App(workspace)
+            self.addCleanup(restored.close_catalog)
+            self.assertEqual(handler._file_response("/api/folder-images", {"folder": ["Альбом"]}, restored),
+                             (200, expected_album))
+            self.assertEqual(restored.folder_images(), expected_root)
+            self.assertEqual(restored.folder_images("Альбом/child"),
+                             {"files": [{"path": "Альбом/child/nested.png", "tagged": False}]})
+            self.assertEqual(restored.folder_images(Path(workspace.output).name), {"files": []})
+            with patch("oubi_index.direct_image_files", side_effect=AssertionError("Reread the root")):
+                reopened = App(workspace)
+                self.addCleanup(reopened.close_catalog)
+                self.assertEqual(reopened.folder_images(), expected_root)
+        with patch("oubi_web.normal_workspace", return_value=workspace):
+            self.assertEqual(App().folder_images("Альбом"), expected_album)
+            self.assertEqual(App().folder_images(), expected_root)
 
     def test_work_preview_uses_completed_tag_events(self):
         app = App(Workspace.encrypted(self.root))
