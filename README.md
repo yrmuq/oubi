@@ -44,6 +44,7 @@
 | Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
 | Deletion queue | Show pending duplicate removals and errors. Review advances immediately while the server works through the queue in the current workspace. |
+| Duplicate previews | Scroll over either image to zoom both and drag either zoomed image to move both. Click to open the full-screen comparison with the same controls. |
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
 | `Identify` | Show the live count of images found in the selected folders, then the progress of checking existing tags and tagging the remaining images. |
 | `Tagging device` | Choose CPU, AMD, or NVIDIA. Oubi selects an available installed GPU when the page opens. |

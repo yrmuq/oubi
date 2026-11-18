@@ -87,7 +87,8 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 #duplicate-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex: 1 0 auto; }
 .duplicate-card { display: grid; grid-template-rows: minmax(96px, 1fr) auto; gap: 6px; min-width: 0; margin: 0; }
 .duplicate-image { position: relative; padding: 0; overflow: hidden; background: var(--bg); }
-.duplicate-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.duplicate-image img, .comparison-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+#duplicate-pair.zoomed .duplicate-image { cursor: grab; touch-action: none; }
 .duplicate-card figcaption { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
 .duplicate-difference { color: #111; }
 .duplicate-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
@@ -290,6 +291,16 @@ body.arrange .block * { pointer-events: none; }
 #zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; color: #fff; }
 #zoom-img { max-width: 100%; max-height: 100%; transform-origin: center center; user-select: none; }
 #zoom-img.zoomed { cursor: grab; }
+#zoom.paired #zoom-img { display: none; }
+#comparison { display: none; width: 100%; height: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; background: #393939; }
+#zoom.paired #comparison { display: grid; }
+.comparison-frame { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #000; touch-action: none; }
+#comparison.zoomed .comparison-frame { cursor: grab; }
+#comparison .dragging, #duplicate-pair.zoomed .dragging { cursor: grabbing; }
+#comparison-warning { position: absolute; inset-inline: 16px; bottom: 12px; width: fit-content; max-width: calc(100% - 32px); margin: auto; padding: 6px 10px; border-radius: 6px; background: #111d; color: white; overflow-wrap: anywhere; }
+@media (max-width: 650px) and (orientation: portrait) {
+  #comparison { grid-template-columns: 1fr; grid-template-rows: repeat(2, minmax(0, 1fr)); }
+}
 html[data-theme="light"] {
   color-scheme: light;
   --bg: #f2f2f2; --text: #1c1c1c; --muted: #5e5e5e; --pane: #fff; --line: #c6c6c6;
@@ -517,6 +528,11 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
   <img id="zoom-img" alt="">
+  <div id="comparison" role="group">
+    <div class="comparison-frame"></div>
+    <div class="comparison-frame"></div>
+  </div>
+  <p id="comparison-warning" role="status" hidden></p>
 </div>
 <script>
 const initialVaultFolder = __OUBI_VAULT_FOLDER__;
@@ -553,6 +569,19 @@ let regularLayout;
 let duplicatePage = null;
 let duplicateRequest = 0;
 let duplicateBusy = false;
+const duplicateView = { scale: 1, x: 0.5, y: 0.5 };
+let duplicateViewKey = "";
+const duplicateFrames = [...document.querySelectorAll(".duplicate-image")];
+const zoom = document.getElementById("zoom");
+const zoomImg = document.getElementById("zoom-img");
+const comparison = document.getElementById("comparison");
+const comparisonFrames = [...comparison.children];
+const comparisonWarning = document.getElementById("comparison-warning");
+const view = { scale: 1, x: 0, y: 0, drag: null };
+let comparisonVersion = 0;
+let comparisonTrigger = null;
+let comparisonDrag = null;
+let draggedDuplicateFrame = null;
 let duplicateSearching = false;
 let duplicateError = "";
 const duplicatePreviews = new Map();
@@ -713,7 +742,7 @@ function duplicatePreview(file) {
   const image = new Image();
   image.alt = file.path;
   image.dataset.original = workspaceUrl("/api/file?display=1&" + query);
-  image.onload = updateDuplicateControls;
+  image.onload = () => { updateDuplicateControls(); paintDuplicateView(); };
   image.onerror = updateDuplicateControls;
   image.src = url;
   duplicatePreviews.set(url, image);
@@ -762,6 +791,13 @@ function renderDuplicateCaption(info, file, other) {
 function renderDuplicatePage() {
   const page = appMode === "duplicates" ? duplicatePage : null;
   const pair = page?.pair;
+  const viewKey = pair ? JSON.stringify(pair.images.map(file => [file.path, file.live_revision])) : "";
+  if (viewKey !== duplicateViewKey) {
+    duplicateViewKey = viewKey;
+    Object.assign(duplicateView, { scale: 1, x: 0.5, y: 0.5 });
+    if (comparisonDrag) endDuplicateDrag(comparisonDrag.frame);
+    if (zoom.classList.contains("paired")) closeZoom();
+  }
   const keep = new Set();
   for (const [index, side] of ["left", "right"].entries()) {
     const button = document.getElementById("duplicate-" + side + "-image");
@@ -776,7 +812,7 @@ function renderDuplicatePage() {
     const [url, image] = duplicatePreview(file);
     keep.add(url);
     button.appendChild(image);
-    button.onclick = () => { if (image.naturalWidth) { showZoomImage(image); zoom.hidden = false; } };
+    button.onclick = showDuplicateZoom;
     renderDuplicateCaption(info, file, pair.images[1 - index]);
   }
   for (const file of page?.next?.images || []) keep.add(duplicatePreview(file)[0]);
@@ -793,6 +829,7 @@ function renderDuplicatePage() {
   document.getElementById("duplicate-notice").textContent =
     duplicateError || (duplicateSearching ? t(299) : pair ? "" : t(page?.searched ? 269 : 270));
   updateDuplicateControls();
+  paintDuplicateView();
 }
 
 async function loadDuplicatePage(index = duplicatePage?.index || 0) {
@@ -966,6 +1003,7 @@ function applyI18n() {
   for (const [id, key] of [["prev", 94], ["next", 95], ["filter-query", 96], ["zoom-close", 97]]) {
     document.getElementById(id).setAttribute("aria-label", t(key));
   }
+  document.getElementById("comparison").setAttribute("aria-label", t(319));
   showRocm();
   showNvidia();
   if (!hasFile && !previewRequest) showEmpty();
@@ -2854,9 +2892,6 @@ document.getElementById("prev").onclick = () => showAt(reelAt - 1);
 document.getElementById("next").onclick = () => showAt(reelAt + 1);
 document.getElementById("split-left").onpointerdown = (event) => dragSplit("left", event);
 document.getElementById("split-mid").onpointerdown = (event) => dragSplit("mid", event);
-const zoom = document.getElementById("zoom");
-const zoomImg = document.getElementById("zoom-img");
-const view = { scale: 1, x: 0, y: 0, drag: null };
 function paintZoom() {
   zoomImg.style.transform = "translate(" + view.x + "px, " + view.y + "px) scale(" + view.scale + ")";
   zoomImg.classList.toggle("zoomed", view.scale > 1);
@@ -2864,7 +2899,139 @@ function paintZoom() {
 function closeZoom() {
   zoom.hidden = true;
   view.drag = null;
+  if (zoom.classList.contains("paired")) {
+    zoom.classList.remove("paired");
+    comparisonVersion++;
+    if (comparisonDrag) endDuplicateDrag(comparisonDrag.frame);
+    for (const frame of comparisonFrames) frame.replaceChildren();
+    comparisonWarning.hidden = true;
+    comparisonWarning.textContent = "";
+    if (comparisonTrigger && appMode === "duplicates") comparisonTrigger.focus({ preventScroll: true });
+    comparisonTrigger = null;
+  }
 }
+
+function fittedDuplicate(frame) {
+  const image = frame.firstElementChild;
+  if (!image?.naturalWidth || !image.naturalHeight || !frame.clientWidth || !frame.clientHeight) return null;
+  const fit = Math.min(frame.clientWidth / image.naturalWidth, frame.clientHeight / image.naturalHeight);
+  return { image, width: fit * image.naturalWidth, height: fit * image.naturalHeight };
+}
+
+function paintDuplicateView() {
+  const { scale, x, y } = duplicateView;
+  for (const frame of [...duplicateFrames, ...comparisonFrames]) {
+    const fitted = fittedDuplicate(frame);
+    if (!fitted) continue;
+    const dx = (0.5 - x) * fitted.width * scale;
+    const dy = (0.5 - y) * fitted.height * scale;
+    fitted.image.style.transform = scale === 1 ? "" : `translate(${dx}px, ${dy}px) scale(${scale})`;
+  }
+  comparison.classList.toggle("zoomed", scale > 1);
+  document.getElementById("duplicate-pair").classList.toggle("zoomed", scale > 1);
+}
+
+function moveDuplicateView(x, y) {
+  duplicateView.x = Math.max(0, Math.min(1, x));
+  duplicateView.y = Math.max(0, Math.min(1, y));
+  paintDuplicateView();
+}
+
+function zoomDuplicateAt(event) {
+  const frame = event.currentTarget;
+  const fitted = fittedDuplicate(frame);
+  if (!fitted || !event.deltaY) return;
+  event.preventDefault();
+  const units = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? frame.clientHeight : 1;
+  const delta = Math.max(-120, Math.min(120, event.deltaY * units));
+  const prior = duplicateView.scale;
+  const scale = Math.max(1, Math.min(8, prior * Math.exp(-delta * 0.002)));
+  if (scale === prior) return;
+  duplicateView.scale = scale;
+  if (scale === 1) {
+    moveDuplicateView(0.5, 0.5);
+    return;
+  }
+  const rect = frame.getBoundingClientRect();
+  const dx = (event.clientX - rect.left - rect.width / 2) / fitted.width;
+  const dy = (event.clientY - rect.top - rect.height / 2) / fitted.height;
+  // Keep the point under the cursor fixed in normalized image coordinates.
+  const shift = 1 / prior - 1 / scale;
+  moveDuplicateView(duplicateView.x + dx * shift, duplicateView.y + dy * shift);
+}
+
+function showDuplicateZoom(event) {
+  if (event.detail && draggedDuplicateFrame === event.currentTarget) return;
+  const previews = duplicateFrames.map(frame => frame.querySelector("img"));
+  if (previews.some(image => !image) || !previews.some(image => image.naturalWidth)) return;
+  const version = ++comparisonVersion;
+  comparisonTrigger = event.currentTarget;
+  comparisonWarning.hidden = true;
+  comparisonWarning.textContent = "";
+  const failures = [];
+  previews.forEach((preview, index) => {
+    const frame = comparisonFrames[index];
+    const fallback = preview.cloneNode();
+    fallback.onload = paintDuplicateView;
+    frame.replaceChildren(fallback);
+    const original = new Image();
+    original.alt = preview.alt;
+    original.onload = () => {
+      if (comparisonVersion !== version) return;
+      frame.replaceChildren(original);
+      paintDuplicateView();
+    };
+    original.onerror = () => {
+      if (comparisonVersion !== version) return;
+      failures.push("[318] " + t(318).replace("{path}", () => preview.alt));
+      comparisonWarning.textContent = failures.join(" ");
+      comparisonWarning.hidden = false;
+    };
+    original.src = preview.dataset.original;
+  });
+  zoom.classList.add("paired");
+  zoom.hidden = false;
+  document.getElementById("zoom-close").focus({ preventScroll: true });
+  paintDuplicateView();
+}
+
+const compareResize = new ResizeObserver(paintDuplicateView);
+function endDuplicateDrag(frame) {
+  if (comparisonDrag?.frame !== frame) return;
+  if (comparisonDrag.moved) draggedDuplicateFrame = frame;
+  frame.classList.remove("dragging");
+  comparisonDrag = null;
+}
+for (const frame of [...duplicateFrames, ...comparisonFrames]) {
+  compareResize.observe(frame);
+  frame.addEventListener("wheel", zoomDuplicateAt, { passive: false });
+  frame.onpointerdown = event => {
+    if (!event.isPrimary || event.button !== 0) return;
+    draggedDuplicateFrame = null;
+    if (duplicateView.scale <= 1 || !fittedDuplicate(frame)) return;
+    comparisonDrag = { frame, id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+    frame.setPointerCapture(event.pointerId);
+  };
+  frame.onpointermove = event => {
+    if (comparisonDrag?.id !== event.pointerId || comparisonDrag.frame !== frame) return;
+    const moveX = event.clientX - comparisonDrag.x;
+    const moveY = event.clientY - comparisonDrag.y;
+    if (!comparisonDrag.moved && Math.hypot(moveX, moveY) < 4) return;
+    const fitted = fittedDuplicate(frame);
+    if (!fitted) return;
+    const dx = moveX / (fitted.width * duplicateView.scale);
+    const dy = moveY / (fitted.height * duplicateView.scale);
+    comparisonDrag.x = event.clientX;
+    comparisonDrag.y = event.clientY;
+    comparisonDrag.moved = true;
+    frame.classList.add("dragging");
+    moveDuplicateView(duplicateView.x - dx, duplicateView.y - dy);
+  };
+  frame.onpointerup = frame.onpointercancel = frame.onlostpointercapture = event => {
+    if (comparisonDrag?.id === event.pointerId) endDuplicateDrag(frame);
+  };
+}
+
 function showZoomImage(image) {
   view.scale = 1;
   view.x = 0;
@@ -2884,12 +3051,13 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeZoom();
   if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
     event.preventDefault();
-    if (workPreview || !reel.length) return;
+    if (zoom.classList.contains("paired") || workPreview || !reel.length) return;
     showAt(reelAt + (event.key === "ArrowRight" ? 1 : -1));
   }
 });
 zoom.addEventListener("wheel", (event) => {
   event.preventDefault();
+  if (zoom.classList.contains("paired")) return;
   const next = view.scale * (event.deltaY < 0 ? 1.12 : 1 / 1.12);
   view.scale = Math.min(8, Math.max(1, next));
   if (view.scale === 1) {
