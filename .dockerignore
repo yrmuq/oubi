@@ -11,6 +11,7 @@ tests
 *.jpg
 *.jpeg
 *.png
+!assets/oubi-*.png
 *.webp
 *.bmp
 *.gif

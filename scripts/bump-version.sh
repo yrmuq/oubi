@@ -4,6 +4,7 @@
 set -eu
 mode="${1:?stable or prerelease}"
 file="${2:?VERSION file}"
+shift 2
 current=$(tr -d '[:space:]' < "$file")
 case "$current" in
   *.*.*) ;;
@@ -24,16 +25,21 @@ case "$mode" in
   prerelease)
     high=$Z
     if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      for tag in $(git tag -l "v${X}.${Y}.*"); do
-        tz=${tag#v${X}.${Y}.}
-        case "$tz" in
-          ''|*[!0-9]*) continue ;;
-        esac
-        if [ "$tz" -gt "$high" ]; then
-          high=$tz
-        fi
-      done
+      set -- "$@" $(git tag -l "v${X}.${Y}.*")
     fi
+    for allocated do
+      tag=${allocated#v}
+      case "$tag" in
+        "$X.$Y."*) tz=${tag#"$X.$Y."} ;;
+        *) continue ;;
+      esac
+      case "$tz" in
+        ''|0[0-9]*|*[!0-9]*) continue ;;
+      esac
+      if [ "$tz" -gt "$high" ]; then
+        high=$tz
+      fi
+    done
     Z=$((high + 1))
     ;;
   *)

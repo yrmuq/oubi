@@ -1,0 +1,8 @@
+services:
+  oubi:
+    devices:
+      - /dev/kfd
+      - "${OUBI_AMD_RENDER_DEVICE}"
+    group_add:
+      - "${OUBI_KFD_GID}"
+      - "${OUBI_RENDER_GID}"

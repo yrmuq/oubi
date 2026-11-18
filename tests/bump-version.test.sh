@@ -18,6 +18,8 @@ pre=$(sh bump-version.sh prerelease VERSION)
 git tag v1.4.7
 pre=$(sh bump-version.sh prerelease VERSION)
 [ "$pre" = "1.4.8" ]
+pre=$(sh bump-version.sh prerelease VERSION 1.4.12 sha-xyz 1.5.30)
+[ "$pre" = "1.4.13" ]
 printf '0.0.0\n' > VERSION
 stable=$(sh bump-version.sh stable VERSION)
 [ "$stable" = "0.1.0" ]

@@ -1,5 +1,6 @@
 <div align="center">
 
+  <img src="assets/oubi.svg" width="64" height="64" alt="Golden Oubi bell">
   <h1>oubi</h1>
 
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
@@ -10,48 +11,59 @@
 ---
 
 > [!NOTE]
-> This project is in active development. Behavior can change and bugs may occur. A finished `tags.csv` can become outdated. Delete `tags.csv` and the `.txt` files next to the images, then run tagging again.
+> This project is in active development. Behavior can change and bugs may occur. A finished `tags.csv` can become outdated. Delete `tags.csv` and the saved `.txt` files under each source folder’s `tags/` directory, then run tagging again.
 
 ---
 
-`oubi` tags a folder of anime images with [PixAI Tagger v1.0](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) and sorts them into folders by series, rating, and character. Tagging and sorting are separate steps, so the sort can be repeated without running the model again. This image runs on CPU.
+`oubi` tags anime images with [PixAI Tagger v1.0](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) and sorts them by series, rating, character, and selected genres. The self-hosted web interface runs in a CPU container. Tagging and sorting are separate steps, so you can sort again using saved tags.
+
+![Oubi web interface showing the folder list, image preview, tag filter, and job controls](docs/oubi-web.png)
 
 ---
 
 ## Features
 
-* Tags every image under the source folder and writes `tags.csv` with columns `file`, `rating`, `character`, `copyright`, `style`, `general`, and `meta`. Tags inside a column are ordered by confidence.
-* Skips an image when a `.txt` sidecar is already next to it, so an interrupted run can continue. `--force` retags.
-* Sorts from `tags.csv` only, without loading the model, into `<title>/<sfw|nsfw>/<character>/<character>_<title>_0001.jpg`.
-* The `dev` image opens a page, downloads the model, and waits. Tagging and sorting start from the buttons on that page.
-* Reads optional gender corrections from `genders.csv`.
+- Select source folders, identify images, and preview saved tags in the browser.
+- Tag JPEG, PNG, WebP, BMP, GIF, and JPEG XL images. Resume from `tags/<image filename>.txt`, such as `tags/photo.jpg.txt`. Set `OUBI_FORCE=1` to tag those images again.
+- Find visually similar images across selected folders with Duplicates. Compare pairs side by side and keep either copy or mark the pair as different.
+- Plan a sort from `tags.csv`, then copy or move images. Numbered pages stay in their series and original art can be sorted by configured genres.
+- Open a Cryptomator vault and choose whether sorted images stay inside it or go to the usual output folder.
+- Filter the preview by tags, correct character genders through `genders.csv`, and customize the layout, theme, and language.
 
 ---
 
-## Configuration
-
 <details>
-<summary>Environment</summary>
+<summary><h2>Configuration</h2></summary>
 
 | Input | Action |
 | :--- | :--- |
-| `OUBI_MODE` | Ignored on the `dev` image. The page starts tagging and sorting. On `latest`, `all`, `tag`, or `sort` still run at startup and there is no page. |
-| `OUBI_PORT` | Host port for the `dev` page. The container listens on `8080`. |
-| `OUBI_DRY_RUN=1` | Print the sort plan and do not copy or move. Tagging still writes when the mode is `all`. |
-| `OUBI_MOVE=1` | Move files instead of copying them. |
-| `OUBI_NSFW_FROM=q` | `rating:q` and `rating:e` go to `nsfw`. `e` sends only `rating:e` to `nsfw`. |
-| `OUBI_NO_TXT=1` | Do not write `.txt` sidecars. Resume then has nothing to skip. |
-| `OUBI_FORCE=1` | Tag images again even when a `.txt` sidecar exists. |
-| `OUBI_COPY_TXT=1` | Copy or move the `.txt` sidecar next to the sorted image. |
-| `OUBI_BATCH_SIZE=1` | Images per model pass. Leave this at `1` on CPU. |
-| `OUBI_MODEL` | Hugging Face id or a local model directory. |
-| `HSA_OVERRIDE_GFX_VERSION` | Kept for a later ROCm image. This CPU image ignores it. |
+| Folder tile | Click to select a source folder. Double-click or press Right Arrow to open it and see its subfolders and images. Hover over the folder badges to see the tagging and sorting counts. A green badge marks a tagged image and a white badge marks an untagged image. Use the up arrow to return to the parent folder. |
+| Square selection button | Select all visible folders or select the current folder when it has no subfolders. |
+| Tile size and order | Resize tiles with the slider. Folders always come first, with untagged images first among the files by default. The order button switches between this order and name order. Both modes compare names by symbols, numbers, then letters. |
+| Image tile | Click to open the image in the preview. Press and hold, right-click, or press Shift+F10 on a focused tile to open its delete action. Confirm the file name before deleting. |
+| Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
+| Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
+| Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
+| `Identify` | Show the live count of images found in the selected folders, then the progress of checking existing tags and tagging the remaining images. |
+| `Tagging device` | Choose CPU, AMD, or NVIDIA. Oubi selects an available installed GPU when the page opens. |
+| `Install` / `Uninstall` | Install or remove components for the selected GPU. Confirm with `y` or cancel with `n` in the terminal. Shared CUDA packages stay available while another configured card uses them. |
+| `Sorting` / `Gallery` | Switch between genre settings and favorite tag filters. Gallery hides the sorting controls and sorting badges. Returning to Sorting clears the active filters. |
+| Default panel layout | Find tag search and active filters under the preview. Genre tags in Sorting and favorites in Gallery appear under the current image's tags. |
+| `Import` / `Export` | Transfer favorites from the active library or the panel layout as JSON. Import merges favorites and replaces the panel layout. |
+| Hold an image tag | Add or remove the tag from favorites. The Gallery groups saved tags by character or event. |
+| `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
+| Lock icon | Unlock or lock the Cryptomator vault from the folder controls. |
+| `Sort destination` | With the vault open, choose the destination for both sorting and its plan. |
+| `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
+| `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
+| `OUBI_NO_TXT=1` | Skip writing tag sidecars. Resume relies on sidecars that already exist. |
+| `OUBI_NSFW_FROM` | Use `q` to include `rating:q` and `rating:e`, or `e` to include only `rating:e`. |
+| `OUBI_COPY_TXT=1` | Copy or move accompanying `.txt` files with sorted images. |
+| `OUBI_BATCH_SIZE` | Set the number of images in a model pass. The CPU default is `1`. |
+| `OUBI_MODEL` | Use a Hugging Face model ID or a model directory visible to the container. |
+| `OUBI_GENRE_1`–`OUBI_GENRE_20` | Set initial genre tags in order. A saved genre list in the web interface takes precedence. |
 
-`OUBI_DRY_RUN` is not used by the page. `Sort plan` prints the destination and does not copy. A dry-run still writes `unknown_genders.txt` when some characters have no gender vote.
-
-The container prints the compute device before tagging. On this image the line is `Device: CPU (no graphics card found!)`. That is expected: AMD and Nvidia are not wired up yet. `HSA_OVERRIDE_GFX_VERSION` does not turn a GPU on.
-
-`genders.csv` is optional. Put it in the data volume, with no header. One row is a character tag and `f` or `m`, for example `hatsune_miku,f`. If the file exists, sort loads it. After sort, characters that still have no gender are listed in `unknown_genders.txt` in the same folder. Add those rows to `genders.csv` and run sort again.
+Put optional gender overrides in `genders.csv` under the data directory as headerless rows like `hatsune_miku,f`. Copy entries from `unknown_genders.txt` into that file, add `f` or `m`, then sort again.
 
 </details>
 
@@ -66,105 +78,109 @@ The container prints the compute device before tagging. On this image the line i
 | `x86_64` | ✅ |
 | `arm64` | ❌ |
 
+The published container supports `linux/amd64` and uses CPU inference by default. The development build can download optional ROCm and CUDA environments from the web interface for compatible GPUs.
+
+Select a GPU in the header and click its `Install` button. The terminal shows the selected bundle and estimated download size. Enter `y` to start or `n` to cancel. The shared progress bar and terminal show the installation steps, download speed, and estimated time remaining. After the GPU test passes, choose `AMD` or `NVIDIA` in the tagging device selector and click `Identify`.
+
 ### Release Scheme
 
-A push to `dev` publishes `ghcr.io/yrmuq/oubi:dev`. It does not create a release and it does not move `latest`.
-
-`v0.1.0` is the current stable release on `main`. It has no web page. Its image is `ghcr.io/yrmuq/oubi:latest` until the next merge. The next merge into `main` publishes `v0.2.0`, moves `latest` to that image, and also tags the image with `0.2.0`, which stays put. GitHub opens the release and writes the number back. A second push created by that write does not publish another version.
-
-Each commit is also tagged `sha-<commit>` once, and that tag is not replaced. Only `linux/amd64` is built.
+Use the [latest stable release](https://github.com/yrmuq/oubi/releases/latest) for regular use and the [release list](https://github.com/yrmuq/oubi/releases) for versioned images. Stable releases are `X.Y.0` and publish `ghcr.io/yrmuq/oubi:latest`. Automated dependency prereleases use `X.Y.Z` with `Z > 0` and use their numbered tag. Development builds use `:dev`. All three channels run the web interface.
 
 ### Docker
 
+Put the [Compose file](docker-compose.yml) and the [environment example](.env.example) in the same folder. Copy the example to `.env` and fill in your image and output paths, `LOCATION`, `PUID`, and `PGID`. The example uses `OUBI_CHANNEL=dev`. Set `OUBI_CHANNEL=latest` for the stable image.
 
-Copy `.env.example` to `.env` and set the paths, `PUID`, and `PGID`.
+Create the host directories for `/data`, `/cache`, and `/output`, and give your configured container user write access. The user also needs write access to the source folder when writing sidecars or moving originals.
 
-```bash
-mkdir -p "$LOCATION/docker/data/oubi/data" "$LOCATION/docker/data/oubi/cache" "$OUBI_OUTPUT"
-sudo chown -R "$PUID:$PGID" "$LOCATION/docker/data/oubi" "$OUBI_OUTPUT"
-```
-
-The source folder must be writable by that user, because tagging writes a `.txt` file next to each image unless `OUBI_NO_TXT=1`.
-
-`docker-compose.yml`:
-
-```yaml
-services:
-
-  oubi:
-    container_name: oubi
-    image: ghcr.io/yrmuq/oubi:dev
-    ports:
-      - ${OUBI_PORT}:8080
-    user: "${PUID}:${PGID}"
-    volumes:
-      - ${OUBI_IMAGES}:/images
-      - ${OUBI_OUTPUT}:/output
-      - ${LOCATION}/docker/data/oubi/data:/data
-      - ${LOCATION}/docker/data/oubi/cache:/cache
-    environment:
-      - TZ=${TZ}
-      - HF_HOME=/cache
-      - HUGGINGFACE_HUB_CACHE=/cache
-      - OUBI_MODEL=pixai-labs/pixai-tagger-v1.0
-      - OUBI_BATCH_SIZE=1
-      - OUBI_NO_TXT=0
-      - OUBI_FORCE=0
-      - OUBI_MOVE=0
-      - OUBI_DRY_RUN=0
-      - OUBI_NSFW_FROM=q
-      - OUBI_COPY_TXT=0
-      - HF_TOKEN=${HF_TOKEN}
-      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION}
-    logging:
-      driver: json-file
-      options:
-        max-size: "55m"
-        max-file: "1"
-    restart: "unless-stopped"
-
-```
-
-`.env`:
-
-```dotenv
-TZ=UTC
-LOCATION=/path/to/data
-PUID=1000
-PGID=1000
-OUBI_IMAGES=/path/to/pictures
-OUBI_OUTPUT=/path/to/sorted
-OUBI_PORT=8080
-HF_TOKEN=
-HSA_OVERRIDE_GFX_VERSION=
-```
+Run these commands for installation and updates.
 
 ```bash
 docker compose pull
-docker compose up
-```
-
-Open `http://<server>:${OUBI_PORT}`. On startup the `dev` image only downloads the model and serves the page. Pick one or more folders in the mounted pictures, then start tagging or sorting. The buttons do nothing until a folder is selected. A folder carries two marks: tagging (not started, partial, done) and sorting (the same three states). `Identify` tags. `Sort` copies. `Sort plan` does not copy. Running the sort again copies the pictures once more under the next numbers.
-
-`latest` has no page. It still runs the job from `OUBI_MODE` and exits when that job finishes.
-
-For a long run:
-
-```bash
 docker compose up -d
-docker compose logs -f oubi
 ```
 
-`tags.csv` stores container paths under `/images`. Keep that mount path. The page downloads the model weights into the cache volume when the container starts. They are not in the image.
+Open `http://YOUR_SERVER:8080`, choose source folders, and use `Identify`, `Sort plan`, or `Sort`. To use a different host port, edit the left side of `8080:8080` under `ports` in the Compose file. For example, `8095:8080` opens Oubi on port `8095`. The application downloads model weights into `/cache` on startup. If the selected model requires Hugging Face authentication, set `HF_TOKEN` in your local `.env`.
+
+Oubi writes tag sidecars, skips images that already have them, copies sorted images, and uses the `q` NSFW cutoff by default. Add a tagging or sorting override under `environment` in the Compose file only when you want to change that behavior.
 
 | Container Path | Purpose |
 | :--- | :--- |
-| `/images` | Source pictures. Writable, so `.txt` sidecars can be saved next to them. |
-| `/output` | Sorted copies or moves. |
-| `/data` | `tags.csv`, optional `genders.csv`, and `unknown_genders.txt`. |
-| `/cache` | Hugging Face download of the tagger weights. |
+| `/images` | Source images and optional tag sidecars. Keep this mount path because saved indexes use it. |
+| `/output` | Sorted images. |
+| `/data` | Saved tags, sorting history, gender overrides, web settings, and downloaded GPU environments. |
+| `/cache` | Downloaded model weights, kept across image updates. |
 
-To preview the folders before copying, use `Sort plan` on the page.
+#### AMD GPU tagging
+
+Use the `dev` image with the [AMD Compose override](docker-compose.amd.yml). The Linux Docker host needs a compatible GPU and an AMD driver that exposes `/dev/kfd` and the card's render device. Run the following commands on the server that runs Docker. See the [ROCm Docker guide](https://rocm.docs.amd.com/projects/install-on-linux/en/docs-7.2.0/how-to/docker.html) for how device access works.
+
+1. List graphics cards and their render devices. If `lspci` is missing, install the `pciutils` package on the server.
+
+   ```bash
+   lspci -D | grep -Ei 'VGA|3D|Display'
+   ls -l /dev/dri/by-path/*-render
+   ```
+
+   Find your AMD card in the first list and note its PCI address at the start of the line. If it starts with `0000:03:00.0`, look for `pci-0000:03:00.0-render` in the second list. A link ending in `-> ../renderD128` means the device is `/dev/dri/renderD128`. Put that full path in `OUBI_AMD_RENDER_DEVICE`. Use the number shown for your own card.
+
+2. Read the numeric group ID for each device. Replace `/dev/dri/renderD128` with the path you found.
+
+   ```bash
+   stat -c '%n %g' /dev/kfd /dev/dri/renderD128
+   ```
+
+   The number after `/dev/kfd` goes into `OUBI_KFD_GID`. The number after your render device goes into `OUBI_RENDER_GID`. If both numbers are the same, enter that number for both variables.
+
+3. Fill the three AMD settings in `.env`. For example, if your device is `renderD128` and both group IDs are `105`, use:
+
+   ```dotenv
+   OUBI_AMD_RENDER_DEVICE=/dev/dri/renderD128
+   OUBI_KFD_GID=105
+   OUBI_RENDER_GID=105
+   ```
+
+   If either device is missing, check that the AMD driver is active on the host before starting the AMD override.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.amd.yml pull
+docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
+```
+
+Leave `OUBI_ROCM_ARCH=auto` to let Oubi detect the exposed AMD card. To find the code before installing the AMD packages, choose `Auto` in the AMD dropdown and click `Install`. The terminal shows the selected ROCm architecture, such as `gfx1102` for a Radeon RX 7600. Enter `n` if you only want to look up the code. To make that architecture the default selection, enter the code as `OUBI_ROCM_ARCH` in `.env`. Oubi stores ROCm packages in `/data/rocm`. The model cache is shared between the CPU and GPU tagging environments.
+
+#### NVIDIA GPU tagging
+
+Use the `dev` image with the [NVIDIA Compose override](docker-compose.nvidia.yml). The Linux Docker host needs a working NVIDIA driver and [NVIDIA Container Toolkit configured for Docker](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+
+Run `nvidia-smi -L` on the Docker host to check that the driver sees your cards. The NVIDIA override exposes them through the Container Toolkit. Pick the card by name in the Oubi header.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.nvidia.yml pull
+docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+```
+
+With `Auto`, Oubi chooses a compatible card. It selects a PyTorch CUDA build using the card's compute capability and driver version. A downloaded build in `/data/nvidia` is shared by cards that use the same CUDA packages. Each selected card still runs its own GPU test.
+
+#### Cryptomator vaults
+
+Use the [Cryptomator Compose override](docker-compose.cryptomator.yml) with the `dev` channel on a Linux x86_64 host with FUSE. Set `OUBI_CRYPT` in `.env` to the full path on the server of the directory containing `vault.cryptomator`. The container user needs write access to that directory. FUSE requires a user name for the configured UID inside the container. The image provides one for the default UID `1000`.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml pull
+docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml up -d
+```
+
+The standard Oubi image includes Cryptomator CLI and `fuse3`. The override mounts encrypted files at `/crypt` and enables FUSE access. It grants `SYS_ADMIN` and selects `apparmor:unconfined` for FUSE mounting. When Oubi finds `/crypt/vault.cryptomator` at startup, it shows a lock in the folder controls. Click it and enter the password to switch to vault folders in the current browser session. On the first unlock, Oubi builds `.oubi/index.sqlite3` in the vault and shows progress in the terminal. Later unlocks reuse that index for browsing, counts, search, and suggestions. Tagging, sorting, and deletion in Oubi update the affected entries. The recount control rebuilds the index from the files and tag metadata. Click the lock again after any active job finishes or stops to return to the ordinary source folders. Serve the web interface over authenticated HTTPS when accessing it remotely.
+
+Set `OUBI_CRYPT_FOLDER` in `.env` when using the Cryptomator override, for example `OUBI_CRYPT_FOLDER="Photos/Archive/To review"`. If you use a custom Compose file, pass `OUBI_CRYPT_FOLDER` in the Oubi service's `environment`. Recreate the container to apply the value. Oubi opens the path inside the vault after unlocking or reloading an unlocked vault. A leading slash also starts at the vault root. An empty value starts at the root. If the folder is unavailable, Oubi starts at the root and shows a notice. Use the up arrow to open parent folders.
+
+Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, favorite tags, and gender overrides use the vault’s `.oubi/` folder.
+
+If opening fails, the password dialog identifies the failed step and shows the relevant error from Cryptomator or FUSE when available. Use that message when reporting a vault problem. If Oubi has to rebuild the index on unlock, the terminal shows the reason before discovery starts.
+
+Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
+
+Oubi saves gallery thumbnails on demand in `.oubi/thumbnails/`. Open a preview to load the full-size image. For JPEG XL, Oubi serves a PNG rendition if the browser lacks native JPEG XL support. Existing vault indexes refresh once to discover JPEG XL files. Deletion through Oubi removes the corresponding thumbnail, and a recount removes cached thumbnails whose originals were deleted elsewhere.
 
 ---
 
@@ -174,7 +190,9 @@ The scripts and `Dockerfile` in this repository are licensed under `GPL-3.0-only
 
 | Component | Upstream | License | Integration Details |
 | --- | --- | --- | --- |
-| PixAI Tagger v1.0 | [pixai-labs/pixai-tagger-v1.0](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) | `Apache-2.0` | Weights download into `/cache` on first tag. Not baked into the image. |
+| PixAI Tagger v1.0 | [pixai-labs/pixai-tagger-v1.0](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) | `Apache-2.0` | Weights download into `/cache` when the app starts. |
 | PyTorch | [pytorch/pytorch](https://github.com/pytorch/pytorch) | `BSD-3-Clause` | CPU build installed in the image. |
 | Transformers | [huggingface/transformers](https://github.com/huggingface/transformers) | `Apache-2.0` | Loads the tagger pipeline. |
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | `Apache-2.0` | Required by the tagger model code. |
+| Pillow JPEG XL plugin | [Isotr0py/pillow-jpegxl-plugin](https://github.com/Isotr0py/pillow-jpegxl-plugin) | `GPL-3.0-or-later` | Shared decoder with a bundled license and [matching source distribution](https://pypi.org/project/pillow-jxl-plugin/1.3.8/#files). |
+| Cryptomator CLI | [Cryptomator CLI 0.6.2 source](https://github.com/cryptomator/cli/tree/0.6.2) | `AGPL-3.0-only` | The upstream Linux x86_64 binary and its license ship with Oubi. The vault override enables mounting via FUSE. |

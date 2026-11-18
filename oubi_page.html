@@ -1,9 +1,13 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="__OUBI_LANG__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>oubi</title>
+<link rel="icon" href="/assets/oubi-192.png" type="image/png" sizes="192x192">
+<link rel="icon" href="/assets/oubi.svg" type="image/svg+xml" sizes="any">
+<link rel="apple-touch-icon" href="/assets/oubi-192.png">
+<link rel="manifest" href="/assets/oubi.webmanifest">
 <style>
 :root {
   color-scheme: light;
@@ -62,32 +66,106 @@
 }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
 body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
-.topbar { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--pane); }
-.brand { font-size: 18px; font-weight: 650; }
+.topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px 12px; box-sizing: border-box; min-height: 48px; padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--pane); }
+.head-compute { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+#app-mode { min-width: 102px; padding: 5px 12px; }
+#app-mode[aria-pressed="true"] { background: var(--btn); color: white; }
+@media (max-width: 760px) {
+  .head-compute { grid-column: 1 / -1; }
+  #app-mode { grid-column: 2; }
+  .head-tools { grid-column: 1 / -1; }
+}
+.brand { display: inline-flex; align-items: center; gap: 6px; font-size: 18px; font-weight: 650; }
 #theme { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
 .top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
+.top.duplicates { grid-template-columns: minmax(190px, 1fr) minmax(0, 2.2fr) !important; gap: 8px; }
+.top.duplicates > .split-v, .top.duplicates > #right, .top.duplicates [data-block="preview"],
+.top.duplicates [data-block="filter"], .top.duplicates .block-split,
+.top.duplicates .edge-split { display: none; }
+#duplicates-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 10px; padding: 8px 0; }
+#duplicates-panel[hidden], #duplicate-pair[hidden], .duplicate-controls[hidden] { display: none; }
+#duplicate-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex: 1; min-height: 0; }
+.duplicate-card { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 6px; min-width: 0; margin: 0; }
+.duplicate-image { display: grid; place-items: center; min-height: 0; padding: 0; overflow: hidden; background: var(--bg); }
+.duplicate-image img { width: 100%; height: 100%; object-fit: contain; min-height: 0; }
+.duplicate-card figcaption { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
+.duplicate-difference { color: #111; }
+.duplicate-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+#duplicate-status { margin: 0; font-size: 0.9rem; }
+@media (max-width: 650px) {
+  .top.duplicates { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: minmax(150px, 34%) minmax(0, 1fr); }
+}
 .pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-#all-folders { margin-left: auto; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
+.compute { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding-inline-start: 12px; border-inline-start: 1px solid var(--line); box-sizing: border-box; }
+.compute[hidden] { display: none; }
+.compute select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 6px; padding: 4px; min-width: 0; }
+#nvidia-card { max-width: 200px; }
+.compute button { padding: 5px 8px; }
+.folder-actions { margin-inline-start: auto; display: flex; gap: 6px; }
+#vault-toggle, #recount-folders { width: 32px; height: 32px; padding: 0; }
+#vault-toggle svg, #recount-folders svg { width: 16px; height: 16px; display: block; margin: auto; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#recount-folders svg { transform: scaleX(-1); }
+#vault-toggle[aria-pressed="true"] .shackle { transform: translate(4px, -1px); }
+#vault-toggle[aria-pressed="true"] { color: var(--pick); }
+#sort-target { box-sizing: border-box; width: 100%; background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+#vault-dialog, #delete-dialog { background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; width: min(320px, calc(100vw - 56px)); }
+#delete-dialog::backdrop { background: #0009; }
+#vault-dialog { position: fixed; inset: 0; height: fit-content; max-height: calc(100dvh - 56px); margin: auto; z-index: 41; }
+#vault-backdrop { display: none; position: fixed; inset: 0; background: #0009; z-index: 40; }
+#vault-dialog[open] + #vault-backdrop { display: block; }
+#vault-form { display: grid; gap: 10px; }
+#vault-password { min-width: 0; padding: 6px 8px; font: inherit; border-radius: 6px; background: var(--bg); color: var(--text); border: 1px solid var(--line); }
+#vault-error, #delete-error { margin: 0; }
+#vault-error { white-space: pre-line; overflow-wrap: anywhere; }
+#delete-title { margin: 0 0 14px; overflow-wrap: anywhere; }
+#delete-error { margin-top: 10px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#vault-dialog .dialog-actions button { flex: 1 1 0; }
+.folder-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+#folder-navigation { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
+#folder-up { height: 28px; padding: 0 8px; }
+#folder-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-settings { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+#folder-size { appearance: none; width: 88px; min-width: 24px; margin: 0; height: 16px; background: transparent; cursor: pointer; }
+#folder-size::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: var(--line); }
+#folder-size::-moz-range-track { height: 4px; border-radius: 4px; background: var(--line); }
+#folder-size::-webkit-slider-thumb { appearance: none; width: 10px; height: 10px; margin-top: -3px; border-radius: 50%; background: var(--pick); }
+#folder-size::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: var(--pick); }
+#folder-order { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; }
+#folder-order svg { width: 16px; height: 16px; display: block; margin: auto; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#folder-order[aria-pressed="true"] { color: var(--pick); }
+#all-folders { width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
 #all-folders .box { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; display: block; flex: 0 0 auto; }
 #all-folders.on .box { background: currentColor; }
 button { font: inherit; color: #fff; background: var(--btn); border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
 button.secondary { background: var(--btn-2); color: var(--btn-2-text); }
 button.danger { background: var(--danger); color: #fff; }
 button:disabled { opacity: 0.45; cursor: default; }
-#folders { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 16px; margin-left: 16px; padding: 4px; }
-.folder { width: 104px; background: transparent; color: inherit; border: 2px solid transparent; border-radius: 8px; padding: 4px; box-sizing: border-box; }
-.folder .icon { width: 72px; height: 56px; margin: 0 auto 6px; position: relative; background: none; border: 0; }
-.folder .icon svg { width: 100%; height: 100%; display: block; }
+#folders { --folder-width: 104px; flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 14px; margin-top: 16px; margin-left: 16px; padding: 4px; }
+.folder { width: var(--folder-width); background: transparent; color: inherit; border: 2px solid transparent; border-radius: 8px; padding: 4px; box-sizing: border-box; }
+.folder .icon { width: calc(var(--folder-width) * 72 / 104); aspect-ratio: 72 / 56; margin: 0 auto 6px; position: relative; }
+.folder .folder-art { width: 100%; height: 100%; display: block; filter: drop-shadow(0 2px 2px #0003); }
+.folder:hover { background: color-mix(in srgb, var(--pick) 10%, transparent); }
 .folder .name { display: block; font-size: 12px; line-height: 1.2; word-break: break-word; }
 .folder.on { border-color: var(--pick); }
-.badge { position: absolute; bottom: 7px; width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; }
-.badge.scan { left: 12px; }
-.badge.sort { right: 12px; }
-.badge.none { background: #8d8d8d; border: 1px solid #5a5a5a; }
-.badge.part { background: #f5c400; border: 1px solid #8a6d00; }
-.badge.done { background: #3dba6a; border: 1px solid #1e7a3a; }
+.image-tile { text-align: center; min-width: 0; user-select: none; }
+.image-tile .name { color: var(--text); }
+.image-tile .badge.scan { left: 50%; transform: translateX(-50%); }
+.image-tile .badge.none { background: #f4f5f7; color: #495463; }
+#image-actions { position: fixed; inset: auto; margin: 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); box-shadow: 0 4px 12px #0005; }
+#image-actions button { display: block; }
+.files-more { flex-basis: 100%; }
+.badge { position: absolute; bottom: 0; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; border: 2px solid var(--pane); box-sizing: border-box; box-shadow: 0 1px 3px #0005; }
+.badge svg { display: block; width: 11px; height: 11px; }
+.badge.scan { left: min(7px, 7%); }
+.badge.sort { right: min(7px, 7%); }
+#folders.gallery .badge.sort { display: none; }
+#folders.gallery .badge.scan { left: 50%; transform: translateX(-50%); }
+.badge.none { background: #89939f; color: #fff; }
+.badge.part { background: #f5c453; color: #543c0b; }
+.badge.done { background: #208556; color: #fff; }
 .split { position: relative; touch-action: none; }
 .split-v { cursor: col-resize; margin: 8px 0 0; }
 .split-h { cursor: row-resize; }
@@ -98,10 +176,14 @@ button:disabled { opacity: 0.45; cursor: default; }
 .step { margin: 0; }
 .bar { height: 10px; background: var(--bar); border-radius: 99px; overflow: hidden; }
 .bar > div { height: 100%; width: 0; background: var(--fill); }
-.detail { color: var(--muted); min-height: 1.2em; }
+.bar > .searching { animation: scan-progress 1.8s linear infinite; }
+@keyframes scan-progress { from { transform: translateX(-100%); } to { transform: translateX(286%); } }
+@media (prefers-reduced-motion: reduce) { .bar > .searching { animation: none; } }
+.detail { color: var(--muted); min-height: 1.2em; overflow-wrap: anywhere; }
 .mid { position: relative; text-align: center; gap: 0; display: flex; flex-direction: column; }
 .block { min-width: 0; min-height: 0; position: relative; }
 .block.grow { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; }
+.block[hidden] { display: none; }
 .block-split { flex: 0 0 8px; height: 8px; margin: 6px 0; }
 .edge-split { position: absolute; left: 0; right: 0; bottom: 0; height: 10px; margin: 0; z-index: 3; }
 body.arrange .block { outline: 1px dashed var(--pick); cursor: grab; border-radius: 8px; }
@@ -109,12 +191,25 @@ body.arrange .block * { pointer-events: none; }
 .block.dragging { opacity: 0.4; }
 .block.drop-before { box-shadow: inset 0 3px 0 var(--pick); }
 .block.drop-after { box-shadow: inset 0 -3px 0 var(--pick); }
-.head-tools { display: flex; align-items: center; gap: 8px; }
+.head-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; margin-inline-start: auto; }
+.head-tools select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
+.settings-control { position: relative; }
+.settings-menu { position: absolute; inset-inline-end: 0; top: calc(100% + 6px); z-index: 5; min-width: 140px; padding: 4px; background: var(--pane); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 3px 12px #0003; }
+.settings-menu button { display: block; width: 100%; border-radius: 5px; background: transparent; color: var(--text); text-align: start; white-space: nowrap; }
+.settings-menu button:hover, .settings-menu button:focus-visible { background: var(--btn-2); }
 #arrange { width: 32px; height: 32px; padding: 0; background: var(--btn-2); color: var(--text); }
 #arrange.on { background: var(--pick); color: #111; }
 #lang { height: 32px; padding: 0 8px; background: var(--btn-2); color: var(--text); }
 #preview { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-#shot { width: 100%; flex: 1 1 auto; min-height: 80px; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
+#shot-frame { position: relative; flex: 1 1 0; min-height: 80px; }
+#shot { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; object-fit: contain; background: #000; border: 1px solid var(--line); cursor: zoom-in; }
+#delete-image, #preview-mode { position: absolute; bottom: 8px; width: 32px; height: 32px; padding: 0; border: 1px solid #777; color: #fff; background: #161616e0; }
+#delete-image { right: 8px; }
+#preview-mode { left: 8px; }
+#preview-mode:hover, #preview-mode[aria-pressed="true"] { color: var(--pick); }
+#preview-mode[aria-pressed="true"] .gallery-icon, #preview-mode[aria-pressed="false"] .work-icon { display: none; }
+#delete-image:not(:disabled):hover { background: var(--danger); }
+#delete-image svg, #preview-mode svg { display: block; margin: auto; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 #switch { position: relative; width: 100%; height: 44px; flex: 0 0 44px; margin-bottom: 8px; }
 #prev, #next { position: absolute; top: 0; z-index: 2; height: 44px; margin: 0; padding: 0 10px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; line-height: 1; background: transparent; color: var(--text); font-size: 22px; }
 #prev { left: 0; }
@@ -122,8 +217,12 @@ body.arrange .block * { pointer-events: none; }
 #name { position: absolute; left: 48px; right: 48px; top: 0; height: 44px; margin: 0; display: flex; align-items: center; justify-content: center; line-height: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #who { margin: 0; min-height: 1.2em; font-size: 22px; font-weight: 700; }
 #tags { white-space: pre-wrap; margin: 0; width: 100%; overflow: auto; }
-#genre-row { display: flex; flex-wrap: wrap; gap: 8px 16px; width: 100%; flex: 1; min-height: 0; overflow: auto; align-items: flex-start; align-content: flex-start; }
-.genre-slot { display: flex; gap: 6px; align-items: center; flex: 1 1 180px; max-width: 280px; min-width: 0; overflow: hidden; }
+#genre-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 8px 16px; width: 100%; flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; align-content: start; }
+.genre-slot, .genre-actions { max-width: 280px; min-width: 0; }
+.genre-slot { display: flex; gap: 6px; align-items: center; overflow: hidden; }
+.genre-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-items: center; }
+.genre-actions button { height: 32px; padding: 0; }
+#genre-remove { grid-column: 2; }
 .genre-handle, .genre-pin { width: 22px; height: 28px; padding: 0; border-radius: 6px; flex: 0 0 22px; box-sizing: border-box; }
 .genre-handle { cursor: grab; color: #111; }
 .genre-pin { background: var(--btn-2); color: var(--text); border: 2px solid transparent; }
@@ -136,12 +235,20 @@ body.arrange .block * { pointer-events: none; }
 #suggest button.on { background: var(--line); }
 .ghost-tail { color: var(--muted); }
 .genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
-#genre-add { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
-.tag-hit { cursor: pointer; border-radius: 4px; padding: 0 3px; }
+.tag-hit, .duplicate-difference { border-radius: 4px; padding: 0 3px; }
+.tag-hit { cursor: pointer; }
 .filter-find { margin: 0 0 8px; background: var(--search-bg); border: 1px solid var(--search-edge); border-radius: 6px; }
 .filter-find input, .filter-find .genre-ghost { border: 0; background: transparent; padding-right: 30px; }
 .search-icon { position: absolute; right: 8px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 .filter-tag { color: #111; border-radius: 6px; }
+#favorites { order: 1; flex: 0 1 auto; max-height: 36%; overflow: auto; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+#favorites h2 { margin: 0 0 8px; font-size: 14px; }
+#favorites h3 { margin: 4px 0; font-size: 12px; color: var(--muted); }
+#favorites .favorite-list { display: flex; flex-wrap: wrap; gap: 4px; }
+#favorites .favorite-tag { padding: 3px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--pane); color: var(--text); overflow-wrap: anywhere; }
+#favorites .favorite-tag[aria-pressed="true"] { background: var(--pick); color: #111; border-color: var(--pick); }
+#favorites-empty { margin: 0; font-size: 12px; color: var(--muted); }
+.tag-hit.favorite::after { content: "★"; color: var(--pick); margin-inline-start: 3px; font-size: 0.8em; }
 .genre { border-radius: 4px; padding: 0 3px; color: #111; }
 .genre-1, .genre-handle.genre-1 { background: #ffb4b4; }
 .genre-2, .genre-handle.genre-2 { background: #b9d0ff; }
@@ -167,6 +274,9 @@ body.arrange .block * { pointer-events: none; }
 .genre-19, .genre-handle.genre-19 { background: #ead9a4; }
 .genre-20, .genre-handle.genre-20 { background: #c8d5dc; }
 .log { margin: 0; border: 0; flex: 1; min-height: 0; background: #000; color: #e6e6e6; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
+.terminal-entry { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid #333; background: #000; color: #e6e6e6; font: 13px/1.35 ui-monospace, monospace; }
+.terminal-entry input { font: inherit; flex: 1; min-width: 0; padding: 3px 5px; border: 1px solid #555; border-radius: 4px; background: #151515; color: inherit; }
+.terminal-entry input:disabled { opacity: .65; }
 #zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
 #zoom[hidden] { display: none; }
 #zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; color: #fff; }
@@ -195,10 +305,45 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
 </head>
 <body>
 <header class="topbar">
-  <span class="brand">oubi</span>
+  <div class="head-compute">
+    <span class="brand"><img src="/assets/oubi.svg" width="26" height="26" alt="">oubi</span>
+    <div class="compute">
+      <select id="compute-device" aria-label="Tagging device">
+        <option value="cpu">CPU</option>
+        <option value="amd" disabled>AMD</option>
+        <option value="nvidia" disabled>NVIDIA</option>
+      </select>
+    </div>
+    <div class="compute" id="amd-controls" hidden>
+      <span>AMD</span>
+      <select id="rocm-arch"></select>
+      <button type="button" class="secondary" id="rocm-install">Install</button>
+    </div>
+    <div class="compute" id="nvidia-controls" hidden>
+      <span>NVIDIA</span>
+      <select id="nvidia-card"><option value="auto">Auto</option></select>
+      <button type="button" class="secondary" id="nvidia-install">Install</button>
+    </div>
+  </div>
+  <button id="app-mode" type="button" class="secondary" aria-pressed="false">Sorting</button>
   <div class="head-tools">
     <button id="arrange" type="button" title="Move blocks">✎</button>
-    <button id="lang" type="button" title="Language">EN</button>
+    <div class="settings-control">
+      <button id="import-settings" class="secondary" type="button" aria-expanded="false" aria-controls="settings-menu">Import</button>
+      <div id="settings-menu" class="settings-menu" hidden>
+        <button type="button" data-settings="favorites">Favorites</button>
+        <button type="button" data-settings="layout">Layout</button>
+      </div>
+    </div>
+    <div class="settings-control">
+      <button id="export-settings" class="secondary" type="button" aria-expanded="false" aria-controls="settings-menu">Export</button>
+    </div>
+    <input id="settings-file" type="file" accept=".json,application/json" hidden>
+    <select id="lang" aria-label="Language">
+      <option value="auto">System language</option>
+      <option value="en" lang="en">English</option>
+      <option value="ru" lang="ru">Русский</option>
+    </select>
     <button id="theme" type="button">auto</button>
   </div>
 </header>
@@ -211,43 +356,95 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <button id="plan" class="secondary">План сортировки</button>
         <button id="stop" class="danger" disabled>Остановить</button>
         <button id="retry" class="secondary" hidden>Повторить скачивание модели</button>
-        <button id="all-folders" class="secondary" type="button" title="Select all folders"><span class="box"></span></button>
+        <div class="folder-actions">
+          <button id="vault-toggle" class="secondary" type="button" aria-pressed="false"__OUBI_VAULT_HIDDEN__>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path class="shackle" d="M6 8V6a4 4 0 0 1 8 0v2"/>
+              <rect x="4" y="8" width="12" height="9" rx="2"/>
+            </svg>
+          </button>
+          <button id="recount-folders" class="secondary" type="button">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6 6 0 1 0 .1 4M16 3v5h-5"/></svg>
+          </button>
+          <button id="all-folders" class="secondary" type="button" title="Select all folders"><span class="box"></span></button>
+        </div>
+        <select id="sort-target" hidden>
+          <option value="vault">Sort into the vault</option>
+          <option value="output">Sort outside the vault</option>
+        </select>
       </div>
     </div>
     <div class="block grow" data-block="folders">
+      <div class="folder-toolbar">
+        <div id="folder-navigation">
+          <button id="folder-up" type="button" class="secondary" aria-label="Up one level" hidden>↑</button>
+          <span id="folder-location">/</span>
+        </div>
+        <div class="folder-settings">
+          <input id="folder-size" type="range" min="68" max="160" step="4" value="104" aria-label="Folder size">
+          <button id="folder-order" type="button" class="secondary" aria-label="Unrecognized images first" aria-pressed="false">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3v14m-3-3 3 3 3-3M10 5h3m-3 5h5m-5 5h7"/></svg>
+          </button>
+        </div>
+      </div>
       <div id="folders"></div>
     </div>
     <div class="block" data-block="progress">
       <p id="step" class="step">Открываю…</p>
       <div class="bar"><div id="fill"></div></div>
       <p id="detail" class="detail"></p>
+      <p id="notice" class="detail" role="status" hidden></p>
     </div>
     <div class="block grow" data-block="log">
       <pre id="log" class="log"></pre>
+      <form id="terminal-entry" class="terminal-entry">
+        <span aria-hidden="true">&gt;</span>
+        <input id="terminal-input" type="text" aria-label="Terminal input" enterkeyhint="send" autocomplete="off" autocapitalize="off" spellcheck="false" disabled>
+      </form>
     </div>
   </section>
   <div class="split split-v" id="split-left"></div>
   <section class="pane mid" id="mid">
+    <section id="duplicates-panel" hidden>
+      <div id="duplicate-pair" hidden>
+        <figure class="duplicate-card">
+          <button id="duplicate-left-image" class="duplicate-image" type="button"></button>
+          <figcaption id="duplicate-left-info"></figcaption>
+        </figure>
+        <figure class="duplicate-card">
+          <button id="duplicate-right-image" class="duplicate-image" type="button"></button>
+          <figcaption id="duplicate-right-info"></figcaption>
+        </figure>
+      </div>
+      <div class="duplicate-controls" id="duplicate-nav" hidden>
+        <button id="duplicate-prev" class="secondary" type="button">❮</button>
+        <p id="duplicate-status" role="status"></p>
+        <button id="duplicate-next" class="secondary" type="button">❯</button>
+      </div>
+      <div class="duplicate-controls" id="duplicate-actions" hidden>
+        <button id="duplicate-keep-left" type="button"></button>
+        <button id="duplicate-different" class="secondary" type="button"></button>
+        <button id="duplicate-keep-right" type="button"></button>
+      </div>
+      <p id="duplicate-notice" role="status"></p>
+    </section>
     <div class="block grow" data-block="preview">
       <div id="preview">
-        <img id="shot" alt="">
+        <div id="shot-frame">
+          <img id="shot" alt="">
+          <button id="preview-mode" type="button" aria-pressed="false">
+            <svg class="gallery-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h14v12H3zM3 13l4-4 4 4 2-2 4 4M12 7h1"/></svg>
+            <svg class="work-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>
+          </button>
+          <button id="delete-image" type="button" aria-label="Delete image" hidden disabled>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14m-12 0 1 12h8l1-12M7 5V3h6v2M8 8v6m4-6v6"/></svg>
+          </button>
+        </div>
         <div id="switch">
           <button id="prev" type="button">❮</button>
           <span id="name">filename</span>
           <button id="next" type="button">❯</button>
         </div>
-      </div>
-    </div>
-    <div class="block grow" data-block="genres">
-      <div id="genre-row"></div>
-    </div>
-  </section>
-  <div class="split split-v" id="split-mid"></div>
-  <section class="pane" id="right">
-    <div class="block grow" data-block="info">
-      <div id="info">
-        <p id="who"></p>
-        <p id="tags">Select a file to show tags</p>
       </div>
     </div>
     <div class="block" data-block="filter">
@@ -259,30 +456,158 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <div id="filter"></div>
     </div>
   </section>
+  <div class="split split-v" id="split-mid"></div>
+  <section class="pane" id="right">
+    <div class="block grow" data-block="info">
+      <div id="info">
+        <p id="who"></p>
+        <p id="tags">Select a folder to see tagged images</p>
+      </div>
+    </div>
+    <div class="block grow" data-block="genres">
+      <div id="genre-row"></div>
+    </div>
+    <aside id="favorites" aria-labelledby="favorites-title" hidden>
+      <h2 id="favorites-title"></h2>
+      <div id="favorite-groups"></div>
+      <p id="favorites-empty"></p>
+    </aside>
+  </section>
 </div>
 <div id="suggest" hidden></div>
+<div id="image-actions" popover="manual">
+  <button id="delete-tile" type="button" class="danger" autofocus>Delete image</button>
+</div>
+<dialog id="vault-dialog" aria-labelledby="vault-title">
+  <form id="vault-form" method="dialog">
+    <label id="vault-title" for="vault-password">Cryptomator password</label>
+    <input id="vault-password" name="password" type="password" autocomplete="current-password" required autofocus>
+    <p id="vault-error" role="alert" hidden></p>
+    <div class="dialog-actions">
+      <button id="vault-unlock" type="submit">Unlock</button>
+      <button id="vault-cancel" class="secondary" type="button">Cancel</button>
+    </div>
+  </form>
+</dialog>
+<div id="vault-backdrop" aria-hidden="true"></div>
+<dialog id="delete-dialog" aria-labelledby="delete-title">
+  <p id="delete-title"></p>
+  <div class="dialog-actions">
+    <button id="delete-cancel" type="button" class="secondary" autofocus>Cancel</button>
+    <button id="delete-confirm" type="button" class="danger">Yes, delete</button>
+  </div>
+  <p id="delete-error" role="alert" hidden></p>
+</dialog>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
   <img id="zoom-img" alt="">
 </div>
 <script>
+const initialVaultFolder = __OUBI_VAULT_FOLDER__;
 const selected = new Set();
 let folders = FOLDERS_JSON;
 let reel = [];
 let reelAt = -1;
-let follow = true;
+let folderPreview = "";
+let workPreview = false;
+let workFile = "";
+let lastJob = null;
+let galleryMessage = 201;
+let galleryRequest = 0;
+const galleryTimeoutMs = 30000;
 let shown = "";
+let previewRequest = null;
+let previewRevision = "";
+let workspaceMutation = 0;
 let genres = __OUBI_GENRES__;
+const maxGenres = __OUBI_MAX_GENRES__;
 let layout = __OUBI_LAYOUT__;
+let layoutWrites = Promise.resolve();
 let lang = "__OUBI_LANG__";
+let languageChoice = "__OUBI_LANGUAGE_CHOICE__";
 const catalogs = __OUBI_LANGS__;
 let tagText = "";
 let hasFile = false;
 let pinned = [];
 let vocab = [];
+const appModes = ["sorting", "gallery", "duplicates"];
+const savedMode = readPreference("oubi.mode");
+let appMode = appModes.includes(savedMode) ? savedMode : "sorting";
+let regularLayout;
+let duplicatePage = null;
+let duplicateRequest = 0;
+let duplicateBusy = false;
+let duplicateSearching = false;
+let duplicateError = "";
+const duplicatePreviews = new Map();
+const duplicateButtons = ["duplicate-keep-left", "duplicate-different", "duplicate-keep-right"];
+let manualDevice = null;
+let preferredGpu = readPreference("oubi.gpu");
+let favorites = { character: [], event: [] };
+let favoritesVersion = 0;
+let favoriteWrites = Promise.resolve();
 let theme = savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto" ? savedTheme : "auto";
 let wasBusy = false;
 const panes = { left: null, mid: null, right: null };
+const deviceInput = document.getElementById("compute-device");
+const modeToggle = document.getElementById("app-mode");
+const importSettings = document.getElementById("import-settings");
+const exportSettings = document.getElementById("export-settings");
+const settingsMenu = document.getElementById("settings-menu");
+const settingsFile = document.getElementById("settings-file");
+let settingsTrigger = null;
+let settingsImport = null;
+const rocmArch = document.getElementById("rocm-arch");
+const rocmInstall = document.getElementById("rocm-install");
+const nvidiaCard = document.getElementById("nvidia-card");
+const nvidiaInstall = document.getElementById("nvidia-install");
+const terminalInput = document.getElementById("terminal-input");
+const deleteImage = document.getElementById("delete-image");
+const imageActions = document.getElementById("image-actions");
+const deleteTile = document.getElementById("delete-tile");
+let imageActionTarget = null;
+const deleteDialog = document.getElementById("delete-dialog");
+const deleteConfirm = document.getElementById("delete-confirm");
+const deleteCancel = document.getElementById("delete-cancel");
+const deleteError = document.getElementById("delete-error");
+let deleteTarget = null;
+let deleteBusy = false;
+const vaultToggle = document.getElementById("vault-toggle");
+const recountFolders = document.getElementById("recount-folders");
+const previewMode = document.getElementById("preview-mode");
+const vaultDialog = document.getElementById("vault-dialog");
+const vaultPassword = document.getElementById("vault-password");
+const vaultError = document.getElementById("vault-error");
+const vaultUnlock = document.getElementById("vault-unlock");
+const vaultCancel = document.getElementById("vault-cancel");
+const vaultBackground = document.querySelectorAll("body > .topbar, body > .top");
+const sortTarget = document.getElementById("sort-target");
+const folderBox = document.getElementById("folders");
+const folderSize = document.getElementById("folder-size");
+const folderOrder = document.getElementById("folder-order");
+const folderUp = document.getElementById("folder-up");
+const allFolders = document.getElementById("all-folders");
+let untaggedFirst = readPreference("oubi.folder-order") !== "default";
+const fileTileBatch = 200;
+let visibleFileTiles = fileTileBatch;
+let folderFiles = [];
+let folderRequest = 0;
+let vaultScope = __OUBI_VAULT_SCOPE__;
+let folderLocation = "";
+let folderSelectionTimer = null;
+let vaultBusy = false;
+let vaultOpening = false;
+let terminalHistory = [];
+let folderScan = null;
+let tagScanMessage = "";
+let recountPending = false;
+let rocmState = null;
+let nvidiaState = null;
+let gpuPrompt = null;
+let gpuProgress = null;
+let sendingGpuRequest = false;
+let statusRequest = 0;
+let statusShown = 0;
 
 function fileName(path) {
   const parts = String(path || "").split("/");
@@ -295,123 +620,664 @@ function t(id) {
   return pack[String(id)] || english[String(id)] || "";
 }
 
-function showEmpty() {
+function readPreference(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function savePreference(key, value) {
+  try { localStorage.setItem(key, value); } catch { return; }
+}
+
+function renderAppMode() {
+  const gallery = appMode === "gallery";
+  const duplicates = appMode === "duplicates";
+  const top = document.querySelector(".top");
+  if (duplicates && !top.classList.contains("duplicates")) {
+    regularLayout = captureLayout();
+    const left = document.getElementById("left");
+    for (const name of ["buttons", "folders", "progress", "log"]) {
+      left.appendChild(document.querySelector('.block[data-block="' + name + '"]'));
+    }
+  } else if (!duplicates && top.classList.contains("duplicates")) {
+    placeBlocks(layout.blocks || regularLayout.blocks);
+  }
+  top.classList.toggle("duplicates", duplicates);
+  document.getElementById("duplicates-panel").hidden = !duplicates;
+  document.getElementById("arrange").hidden = duplicates;
+  document.getElementById("tag").textContent = t(duplicates ? 264 : 1);
+  modeToggle.textContent = t(duplicates ? 264 : gallery ? 211 : 210);
+  modeToggle.removeAttribute("aria-pressed");
+  modeToggle.setAttribute("aria-label", modeToggle.textContent + " · " + t(265));
+  modeToggle.title = t(265);
+  document.querySelector('[data-block="genres"]').hidden = gallery || duplicates;
+  document.querySelector('[data-block="info"]').hidden = duplicates;
+  document.getElementById("favorites").hidden = !gallery;
+  document.getElementById("sort").hidden = gallery || duplicates;
+  document.getElementById("plan").hidden = gallery || duplicates;
+  folderBox.classList.toggle("gallery", gallery || duplicates);
+  renderVault();
+  renderFavorites();
+  renderDuplicatePage();
+  fitSplits();
+}
+
+modeToggle.onclick = () => {
+  if (appMode === "duplicates") closeZoom();
+  appMode = appModes[(appModes.indexOf(appMode) + 1) % appModes.length];
+  savePreference("oubi.mode", appMode);
+  if (appMode === "sorting") {
+    pinned = [];
+    document.getElementById("filter-query").value = "";
+    document.getElementById("filter-ghost").replaceChildren();
+    hideSuggest();
+    renderFilter();
+    renderGenreRow();
+    loadGallery(true);
+  }
+  if (hasFile) paintTags(tagText);
+  renderAppMode();
+  if (appMode === "duplicates") loadDuplicatePage();
+};
+
+function duplicatePreview(file) {
+  const path = encodeURIComponent(file.path);
+  const query = "path=" + path + "&revision=" + encodeURIComponent(file.live_revision);
+  const url = workspaceUrl("/api/thumbnail?duplicates=1&" + query);
+  if (duplicatePreviews.has(url)) return [url, duplicatePreviews.get(url)];
+  const image = new Image();
+  image.alt = file.path;
+  image.dataset.original = workspaceUrl("/api/file?display=1&" + query);
+  image.onload = updateDuplicateControls;
+  image.onerror = updateDuplicateControls;
+  image.src = url;
+  duplicatePreviews.set(url, image);
+  return [url, image];
+}
+
+function updateDuplicateControls() {
+  const images = [...document.querySelectorAll("#duplicate-pair img")];
+  const loaded = images.length === 2 && images.every(image => image.complete && image.naturalWidth);
+  for (const id of duplicateButtons) {
+    document.getElementById(id).disabled = !duplicatePage?.pair || wasBusy || duplicateBusy || !loaded;
+  }
+  const failed = images.find(image => image.complete && !image.naturalWidth);
+  if (failed && !duplicateError) {
+    document.getElementById("duplicate-notice").textContent = "[290] " + t(290).replace("{path}", () => failed.alt);
+  }
+}
+
+function renderDuplicateCaption(info, file, other) {
+  const fields = image => {
+    const path = image.path.split("/");
+    return [path.at(-2) || "", path.at(-1), image.width + "×" + image.height, image.size];
+  };
+  const current = fields(file);
+  const comparison = fields(other);
+  const kib = Math.round(file.size / 1024);
+  const showBytes = file.size !== other.size && kib === Math.round(other.size / 1024);
+  const number = new Intl.NumberFormat(lang);
+  const values = [current[0] || "—", current[1], current[2],
+    showBytes ? number.format(file.size) + " B" : number.format(kib) + " KiB"];
+  info.replaceChildren();
+  values.forEach((value, index) => {
+    if (index) info.append("  ·  ");
+    if (current[index] === comparison[index]) {
+      info.append(value);
+      return;
+    }
+    const mark = document.createElement("mark");
+    mark.className = "duplicate-difference";
+    mark.style.background = rainbow(index);
+    mark.textContent = value;
+    info.append(mark);
+  });
+}
+
+function renderDuplicatePage() {
+  const page = appMode === "duplicates" ? duplicatePage : null;
+  const pair = page?.pair;
+  const keep = new Set();
+  for (const [index, side] of ["left", "right"].entries()) {
+    const button = document.getElementById("duplicate-" + side + "-image");
+    const info = document.getElementById("duplicate-" + side + "-info");
+    button.replaceChildren();
+    if (!pair) {
+      button.onclick = null;
+      info.textContent = "";
+      continue;
+    }
+    const file = pair.images[index];
+    const [url, image] = duplicatePreview(file);
+    keep.add(url);
+    button.appendChild(image);
+    button.onclick = () => { if (image.naturalWidth) { showZoomImage(image); zoom.hidden = false; } };
+    renderDuplicateCaption(info, file, pair.images[1 - index]);
+  }
+  for (const file of page?.next?.images || []) keep.add(duplicatePreview(file)[0]);
+  for (const url of duplicatePreviews.keys()) {
+    if (!keep.has(url)) duplicatePreviews.delete(url);
+  }
+  document.getElementById("duplicate-pair").hidden = !pair;
+  document.getElementById("duplicate-nav").hidden = !pair;
+  document.getElementById("duplicate-actions").hidden = !pair;
+  document.getElementById("duplicate-prev").disabled = !pair || duplicateBusy || page.index === 0;
+  document.getElementById("duplicate-next").disabled = !pair || duplicateBusy || page.index + 1 >= page.count;
+  document.getElementById("duplicate-status").textContent = pair ?
+    t(271).replace("{current}", page.index + 1).replace("{total}", page.count).replace("{distance}", pair.distance) : "";
+  document.getElementById("duplicate-notice").textContent =
+    duplicateError || (duplicateSearching ? t(299) : pair ? "" : t(page?.searched ? 269 : 270));
+  updateDuplicateControls();
+}
+
+async function loadDuplicatePage(index = duplicatePage?.index || 0) {
+  const id = ++duplicateRequest;
+  const scope = vaultScope;
+  try {
+    const response = await fetch(workspaceUrl("/api/duplicates?index=" + index, scope));
+    const data = await response.json();
+    if (id !== duplicateRequest || scope !== vaultScope || appMode !== "duplicates") return;
+    if (response.ok) {
+      duplicatePage = data;
+      duplicateError = "";
+    } else {
+      duplicatePage = null;
+      duplicateError = data.error || "[288] " + t(288);
+    }
+  } catch {
+    if (id !== duplicateRequest || scope !== vaultScope || appMode !== "duplicates") return;
+    duplicatePage = null;
+    duplicateError = "[288] " + t(288);
+  }
+  renderDuplicatePage();
+}
+
+async function reviewDuplicate(decision) {
+  const pair = duplicatePage?.pair;
+  if (!pair || duplicateBusy || wasBusy) return;
+  const scope = vaultScope;
+  const index = duplicatePage.index;
+  const [left, right] = pair.images;
+  duplicateBusy = true;
+  renderDuplicatePage();
+  try {
+    const response = await fetch("/api/duplicates/review", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope, decision, pair: [left.path, right.path, left.revision, right.revision, left.live_revision, right.live_revision],
+      }),
+    });
+    const data = await response.json();
+    if (scope !== vaultScope) return;
+    if (response.ok) {
+      await loadDuplicatePage(index);
+      if (decision !== "different") {
+        workspaceMutation++;
+        loadFolders();
+      }
+      if (data.warning) showNotice(data.warning);
+    } else {
+      if (response.status === 409) await loadDuplicatePage(index);
+      duplicateError = data.error || "[289] " + t(289);
+    }
+  } catch {
+    if (scope === vaultScope) duplicateError = "[289] " + t(289);
+  } finally {
+    duplicateBusy = false;
+    renderDuplicatePage();
+  }
+}
+
+function cancelPreviewRequest() {
+  if (!previewRequest) return;
+  previewRequest.controller.abort();
+  if (!previewRequest.image.isConnected) previewRequest.image.removeAttribute("src");
+  previewRequest = null;
+}
+
+function clearImage(message, path = "") {
   hasFile = false;
   shown = "";
+  previewRevision = "";
+  renderDeleteControls();
   const shot = document.getElementById("shot");
   shot.removeAttribute("src");
-  document.getElementById("name").textContent = t(11);
+  document.getElementById("name").textContent = path ? fileName(path) : t(11);
   document.getElementById("who").textContent = "";
   tagText = "";
-  document.getElementById("tags").textContent = t(12);
+  document.getElementById("tags").textContent = message;
+}
+
+function showEmpty() {
+  cancelPreviewRequest();
+  clearImage(t(workPreview ? 12 : selected.size ? galleryMessage : 200));
 }
 
 function applyI18n() {
+  document.documentElement.lang = lang;
   document.getElementById("tag").textContent = t(1);
+  duplicateButtons.forEach((id, index) => { document.getElementById(id).textContent = t(266 + index); });
+  document.getElementById("duplicate-prev").setAttribute("aria-label", t(300));
+  document.getElementById("duplicate-next").setAttribute("aria-label", t(301));
   document.getElementById("sort").textContent = t(2);
   document.getElementById("plan").textContent = t(3);
   document.getElementById("stop").textContent = t(4);
   document.getElementById("retry").textContent = t(5);
+  deviceInput.setAttribute("aria-label", t(104));
+  rocmArch.setAttribute("aria-label", t(107));
+  rocmInstall.setAttribute("aria-label", t(108));
+  rocmInstall.textContent = t(157);
+  nvidiaCard.setAttribute("aria-label", t(128));
+  nvidiaInstall.setAttribute("aria-label", t(135));
+  nvidiaInstall.textContent = t(157);
+  terminalInput.setAttribute("aria-label", t(158));
+  showTerminalInput();
+  deleteImage.setAttribute("aria-label", t(182));
+  deleteImage.title = t(182);
+  deleteTile.textContent = t(182);
+  deleteConfirm.textContent = t(184);
+  deleteCancel.textContent = t(175);
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
-  document.getElementById("all-folders").title = t(83);
-  document.getElementById("lang").title = t(21);
-  document.getElementById("lang").textContent = lang === "ru" ? "RU" : "EN";
-  if (!hasFile) showEmpty();
+  importSettings.textContent = t(223);
+  exportSettings.textContent = t(224);
+  settingsMenu.querySelector('[data-settings="favorites"]').textContent = t(212);
+  settingsMenu.querySelector('[data-settings="layout"]').textContent = t(225);
+  recountFolders.title = t(194);
+  recountFolders.setAttribute("aria-label", t(194));
+  renderPreviewMode();
+  folderUp.title = t(180);
+  folderUp.setAttribute("aria-label", t(180));
+  folderSize.title = t(220);
+  folderSize.setAttribute("aria-label", t(220));
+  renderFolderOrder();
+  document.getElementById("vault-title").textContent = t(174);
+  document.getElementById("vault-cancel").textContent = t(175);
+  sortTarget.setAttribute("aria-label", t(176));
+  sortTarget.options[0].textContent = t(177);
+  sortTarget.options[1].textContent = t(178);
+  renderTerminal();
+  const language = document.getElementById("lang");
+  language.setAttribute("aria-label", t(21));
+  language.options[0].textContent = t(102);
+  language.value = languageChoice;
+  for (const [id, key] of [["prev", 94], ["next", 95], ["filter-query", 96], ["zoom-close", 97]]) {
+    document.getElementById(id).setAttribute("aria-label", t(key));
+  }
+  showRocm();
+  showNvidia();
+  if (!hasFile && !previewRequest) showEmpty();
+  if (previewRequest?.failed) clearImage(t(previewRequest.failed), previewRequest.path);
   renderFolders();
+  renderAppMode();
   if (document.getElementById("genre-1") || document.querySelector(".genre-pin")) renderGenreRow();
 }
 
-function badge(kind, state) {
-  const title = {
-    scan: { none: t(13), part: t(14), done: t(15) },
-    sort: { none: t(16), part: t(17), done: t(18) },
-  }[kind][state] || "";
-  if (!title) return "";
-  return `<span class="badge ${kind} ${state}" title="${title}"></span>`;
+function badge(kind, state, title) {
+  const shape = {
+    none: '<circle cx="7" cy="7" r="2" fill="currentColor"/>',
+    part: '<path d="M7 2.5a4.5 4.5 0 1 1-4.5 4.5"/>',
+    done: '<path d="m3 7 2.5 2.5L11 4"/>',
+  }[state];
+  if (!shape) return "";
+  return `<span class="badge ${kind} ${state}" title="${title}"><svg viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${shape}</svg></span>`;
 }
 
-function folderIcon(scan, sort) {
+function folderIcon(folder) {
+  const { scan, sort, tagged, sorted, total } = folder;
+  const count = (label, done) => t(label).replace("{done}", done).replace("{total}", total);
   const icon = document.createElement("div");
   icon.className = "icon";
-  icon.innerHTML = `<svg viewBox="0 0 64 52" aria-hidden="true">
-    <path fill="var(--folder-tab)" d="M8 18h14l4-8h24a4 4 0 0 1 4 4v8H8z"/>
-    <path fill="var(--folder)" stroke="var(--folder-edge)" stroke-width="1.4" d="M4 18h56a4 4 0 0 1 4 4v22a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V18z"/>
-    <path fill="var(--folder-front)" d="M4 28h56v16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V28z"/>
-  </svg>` + badge("scan", scan) + badge("sort", sort);
+  icon.innerHTML = `<svg class="folder-art" viewBox="0 0 72 56" aria-hidden="true">
+    <path fill="var(--folder-tab)" stroke="var(--folder-edge)" stroke-width="1.25" d="M6 15a6 6 0 0 1 6-6h16c2 0 3 1 5 3l3 3h23a6 6 0 0 1 6 6v24a5 5 0 0 1-5 5H12a6 6 0 0 1-6-6z"/>
+    <path fill="var(--folder-front)" stroke="var(--folder-edge)" stroke-width="1.25" d="M7 22h57a4 4 0 0 1 4 4.8l-4 18a6 6 0 0 1-6 5H13a6 6 0 0 1-6-5l-3.5-18A4 4 0 0 1 7 22z"/>
+    <path fill="var(--folder)" d="M8 37h56l-2 8a5 5 0 0 1-5 4H14a5 5 0 0 1-5-4z" opacity=".48"/>
+    <path d="M10 26h51" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".53"/>
+  </svg>` + badge("scan", scan, count(255, tagged)) + badge("sort", sort, count(256, sorted));
   return icon;
 }
 
+function renderFolderOrder() {
+  folderOrder.title = t(untaggedFirst ? 222 : 221);
+  folderOrder.setAttribute("aria-label", t(221));
+  folderOrder.setAttribute("aria-pressed", String(untaggedFirst));
+}
+
+function compareFolderNames(left, right, collator) {
+  const rank = token => /^\p{Nd}/u.test(token) ? 1 : /^[\p{L}\p{M}]/u.test(token) ? 2 : 0;
+  for (let index = 0; index < Math.min(left.parts.length, right.parts.length); index++) {
+    const a = left.parts[index];
+    const b = right.parts[index];
+    const order = rank(a) - rank(b) || collator.compare(a, b);
+    if (order) return order;
+  }
+  if (left.parts.length !== right.parts.length) return left.parts.length - right.parts.length;
+  if (left.name === right.name) return 0;
+  return left.name < right.name ? -1 : 1;
+}
+
 function renderFolders() {
-  const box = document.getElementById("folders");
-  box.innerHTML = "";
-  for (const folder of folders) {
+  const collator = new Intl.Collator(lang, { numeric: true, sensitivity: "base" });
+  const parts = name => name.normalize().match(/\p{Nd}+|[\p{L}\p{M}]\p{M}*|./gsu) || [];
+  const compare = (a, b) => compareFolderNames(a, b, collator);
+  const tiles = folders.filter(folder => folder.path !== folderLocation)
+    .map(folder => ({ folder, name: folder.name, parts: parts(folder.name) })).sort(compare);
+  folderBox.replaceChildren();
+  for (const { folder, name } of tiles) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "folder" + (selected.has(folder.path) ? " on" : "");
     const label = document.createElement("span");
     label.className = "name";
-    label.textContent = folder.name;
-    button.append(folderIcon(folder.scan, folder.sort), label);
+    label.textContent = name;
+    button.append(folderIcon(folder), label);
+    button.title = t(181);
     button.onclick = () => {
       if (selected.has(folder.path)) selected.delete(folder.path);
       else selected.add(folder.path);
-      renderFolders();
-      loadRecent();
-      loadVocab();
+      button.classList.toggle("on", selected.has(folder.path));
+      updateSelectAll();
+      vocab = [];
+      clearTimeout(folderSelectionTimer);
+      folderSelectionTimer = setTimeout(() => {
+        loadGallery(true);
+      }, 250);
     };
-    box.appendChild(button);
+    button.ondblclick = () => navigateFolders(folder.path);
+    button.onkeydown = event => {
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        navigateFolders(folder.path);
+      }
+    };
+    folderBox.appendChild(button);
   }
-  const all = document.getElementById("all-folders");
-  if (all) all.classList.toggle("on", folders.length > 0 && folders.every((folder) => selected.has(folder.path)));
+  const files = folderFiles.map(file => {
+    const name = file.path.split("/").at(-1);
+    return { ...file, name, parts: parts(name) };
+  }).sort((a, b) => (untaggedFirst ? Number(a.tagged) - Number(b.tagged) : 0) || compare(a, b));
+  appendFileTiles(files, 0);
+  updateSelectAll();
+}
+
+function appendFileTiles(files, start) {
+  const tiles = document.createDocumentFragment();
+  for (const { path, name, tagged } of files.slice(start, visibleFileTiles)) {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "folder image-tile";
+    const icon = document.createElement("div");
+    icon.className = "icon";
+    icon.innerHTML = `<svg class="folder-art" viewBox="0 0 72 56" aria-hidden="true">
+      <rect x="10" y="7" width="52" height="42" rx="5" fill="var(--pane)" stroke="currentColor" stroke-width="2"/>
+      <circle cx="46" cy="20" r="4" fill="currentColor"/>
+      <path d="m16 39 13-14 9 10 6-6 12 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    </svg>` + badge("scan", tagged ? "done" : "none", t(tagged ? 252 : 251));
+    const label = document.createElement("span");
+    label.className = "name";
+    label.textContent = name;
+    tile.title = name + " · " + t(tagged ? 252 : 251);
+    bindHold(tile, () => openImageActions(tile, path), () => openFolderPreview(path));
+    tile.oncontextmenu = event => {
+      event.preventDefault();
+      openImageActions(tile, path);
+    };
+    tile.onkeydown = event => {
+      if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+      event.preventDefault();
+      openImageActions(tile, path);
+    };
+    tile.append(icon, label);
+    tiles.appendChild(tile);
+  }
+  if (visibleFileTiles < files.length) {
+    const row = document.createElement("div");
+    row.className = "files-more";
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "secondary";
+    more.textContent = t(253);
+    more.onclick = () => {
+      const start = visibleFileTiles;
+      visibleFileTiles += fileTileBatch;
+      row.remove();
+      appendFileTiles(files, start);
+      folderBox.querySelector(".files-more button")?.focus({ preventScroll: true });
+    };
+    row.appendChild(more);
+    tiles.appendChild(row);
+  }
+  folderBox.appendChild(tiles);
+}
+
+function takeFolderFiles(files) {
+  if (JSON.stringify(files) === JSON.stringify(folderFiles)) return;
+  folderFiles = files;
+  renderFolders();
+}
+
+function updateSelectAll() {
+  const currentOnly = folders.length === 1 && folders[0].path === folderLocation;
+  const label = t(currentOnly ? 254 : 83);
+  const active = folders.length > 0 && folders.every(folder => selected.has(folder.path));
+  allFolders.title = label;
+  allFolders.setAttribute("aria-label", label);
+  allFolders.setAttribute("aria-pressed", String(active));
+  allFolders.classList.toggle("on", active);
 }
 
 function takeFolders(data) {
   const prev = new Map(folders.map((folder) => [folder.path, folder]));
-  folders = data.map((folder) => {
+  const updated = data.map((folder) => {
     if (!folder.scan && prev.has(folder.path) && prev.get(folder.path).scan) {
       const old = prev.get(folder.path);
       return Object.assign({}, folder, { scan: old.scan, sort: old.sort });
     }
     return folder;
   });
+  if (JSON.stringify(updated) === JSON.stringify(folders)) return;
+  folders = updated;
   renderFolders();
 }
 
-async function loadFolders() {
+function workspaceUrl(path, scope = vaultScope) {
+  if (!scope) return path;
+  return path + (path.includes("?") ? "&" : "?") + "scope=" + encodeURIComponent(scope);
+}
+
+async function workspaceData(path, signal) {
+  const scope = vaultScope;
+  const mutation = workspaceMutation;
+  const response = await fetch(workspaceUrl(path, scope), { signal });
+  if (!response.ok) return null;
+  const data = await response.json();
+  return scope === vaultScope && mutation === workspaceMutation ? data : null;
+}
+
+function renderVault() {
+  const opened = Boolean(vaultScope);
+  const label = t(opened ? 179 : 163);
+  vaultToggle.title = label;
+  vaultToggle.setAttribute("aria-label", label);
+  vaultToggle.setAttribute("aria-pressed", String(opened));
+  vaultToggle.disabled = vaultBusy;
+  vaultUnlock.disabled = vaultBusy;
+  vaultCancel.disabled = vaultBusy;
+  vaultUnlock.textContent = t(219);
+  vaultPassword.disabled = vaultBusy;
+  sortTarget.hidden = !opened || appMode !== "sorting";
+}
+
+function selectFolderLocation(path) {
+  folderLocation = path;
+  imageActions.hidePopover();
+  imageActionTarget = null;
+  folderPreview = "";
+  clearTimeout(folderSelectionTimer);
+  selected.clear();
+  pinned = [];
+  vocab = [];
+  reel = [];
+  reelAt = -1;
+  galleryMessage = 201;
+  galleryRequest++;
+  const caption = document.getElementById("folder-location");
+  caption.textContent = path || "/";
+  caption.title = caption.textContent;
+  folderUp.hidden = !path;
+  document.getElementById("filter-query").value = "";
+  document.getElementById("filter-ghost").replaceChildren();
+  hideSuggest();
+  closeZoom();
+  zoomImg.removeAttribute("src");
+  if (!workPreview) showEmpty();
+  renderFilter();
+  refreshGenreGhosts();
+  folderFiles = [];
+  visibleFileTiles = fileTileBatch;
+  folders = [];
+  renderFolders();
+  folderBox.scrollTop = 0;
+  renderTerminal();
+}
+
+function navigateFolders(path) {
+  if (path === folderLocation) return;
+  selectFolderLocation(path);
+  loadFolders();
+  tick();
+}
+
+function useVault(scope, folder) {
+  if (scope === vaultScope) return;
+  if (deleteDialog.open && !deleteBusy) deleteDialog.close();
+  vaultScope = scope;
+  duplicatePage = null;
+  duplicateRequest++;
+  duplicateError = "";
+  duplicateSearching = false;
+  duplicatePreviews.clear();
+  renderDuplicatePage();
+  if (appMode === "duplicates") loadDuplicatePage();
+  favoritesVersion++;
+  favorites = { character: [], event: [] };
+  renderFavorites();
+  loadFavorites();
+  workPreview = false;
+  workFile = "";
+  lastJob = null;
+  wasBusy = false;
+  renderPreviewMode();
+  selectFolderLocation(scope ? folder || "" : "");
+  showNotice(scope && folder === null ? t(257) : "");
+  sortTarget.value = "vault";
+  document.getElementById("step").textContent = "";
+  document.getElementById("detail").textContent = "";
+  terminalHistory = [];
+  folderScan = null;
+  tagScanMessage = "";
+  renderTerminal();
+  document.getElementById("fill").style.width = "0";
+  document.getElementById("fill").classList.remove("searching");
+  renderVault();
+  loadFolders();
+}
+
+async function changeVault(action, password) {
+  vaultBusy = true;
+  vaultOpening = action === "unlock";
+  renderVault();
+  renderTerminal();
+  vaultError.hidden = true;
+  showNotice();
   try {
-    const data = await (await fetch("/api/folders")).json();
-    if (!Array.isArray(data)) return;
-    takeFolders(data);
-  } catch (error) {
-    return;
+    const response = await fetch("/api/vault/" + action, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(action === "unlock" ? { password } : {}),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      if (action === "unlock") {
+        vaultError.textContent = data.error || t(169);
+        vaultError.hidden = false;
+      } else {
+        showNotice(data.error || t(170));
+      }
+      return;
+    }
+    if (vaultDialog.open) vaultDialog.close();
+    statusShown = ++statusRequest;
+    useVault(data.scope, data.folder);
+  } catch {
+    if (action === "unlock") {
+      vaultError.textContent = t(250);
+      vaultError.hidden = false;
+    } else {
+      showNotice(t(170));
+    }
+  } finally {
+    vaultBusy = false;
+    vaultOpening = false;
+    renderVault();
+    renderTerminal();
+    if (vaultDialog.open) vaultPassword.focus();
+    tick();
   }
 }
 
-async function loadRecent() {
-  if (pinned.length) return;
-  if (!selected.size) {
+function loadFolders() {
+  const request = ++folderRequest;
+  const query = folderLocation ? "?folder=" + encodeURIComponent(folderLocation) : "";
+  workspaceData("/api/folders" + query).then(data => {
+    if (request === folderRequest && Array.isArray(data)) takeFolders(data);
+  }).catch(() => {});
+  workspaceData("/api/folder-images" + query).then(data => {
+    if (request === folderRequest && Array.isArray(data?.files)) takeFolderFiles(data.files);
+  }).catch(() => {});
+}
+
+async function loadGallery(reset = false) {
+  const request = ++galleryRequest;
+  galleryMessage = 201;
+  if (reset || !selected.size) {
     reel = [];
-    showEmpty();
+    reelAt = -1;
+  }
+  if (reset) folderPreview = "";
+  if (!workPreview && !folderPreview && !reel.length) showEmpty();
+  if (!selected.size) return;
+  const paths = [...selected];
+  const tags = [...pinned];
+  const query = new URLSearchParams();
+  paths.forEach(path => query.append("folder", path));
+  tags.forEach(tag => query.append("tag", tag));
+  const signal = AbortSignal.timeout(galleryTimeoutMs);
+  const data = await workspaceData((tags.length ? "/api/tagged?" : "/api/recent?") + query, signal).catch(() => null);
+  if (request !== galleryRequest || paths.length !== selected.size || paths.some(path => !selected.has(path))) return;
+  if (data?.scanning) {
+    galleryMessage = 204;
+    if (!workPreview && !folderPreview && !reel.length) showEmpty();
     return;
   }
-  const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
-  const data = await (await fetch("/api/recent?" + query)).json();
-  reel = data.files || [];
-  if (!reel.length) showEmpty();
-  else if (follow && reel.length) showAt(reel.length - 1);
+  if (data) {
+    const current = reel[reelAt];
+    reel = data.files || [];
+    reelAt = reel.indexOf(current);
+    if (reelAt < 0 && reel.length) reelAt = tags.length ? 0 : reel.length - 1;
+  }
+  galleryMessage = data ? 195 : signal.aborted ? 206 : 202;
+  if (!workPreview) renderGallery();
 }
 
 async function loadVocab() {
   const key = [...selected].sort().join("\n");
-  if (!key) {
+  if (!selected.size) {
     vocab = [];
     return;
   }
   const query = [...selected].map((folder) => "folder=" + encodeURIComponent(folder)).join("&");
   try {
-    const data = await (await fetch("/api/vocabulary?" + query)).json();
-    if ([...selected].sort().join("\n") !== key) return;
+    const data = await workspaceData("/api/vocabulary?" + query);
+    if (!data || !selected.size || [...selected].sort().join("\n") !== key) return;
     vocab = data.tags || [];
   } catch (error) {
     return;
@@ -442,6 +1308,121 @@ function renderFilter() {
     button.onclick = () => togglePin(tag);
     box.append(button);
   });
+  renderFavorites();
+}
+
+function renderFavorites() {
+  const box = document.getElementById("favorite-groups");
+  document.getElementById("favorites-title").textContent = t(212);
+  const empty = document.getElementById("favorites-empty");
+  empty.textContent = t(215);
+  empty.hidden = favorites.character.length > 0 || favorites.event.length > 0;
+  box.replaceChildren();
+  if (!empty.hidden) return;
+  for (const [group, label] of [["character", 213], ["event", 214]]) {
+    const heading = document.createElement("h3");
+    heading.textContent = t(label);
+    const list = document.createElement("div");
+    list.className = "favorite-list";
+    list.dataset.group = group;
+    for (const tag of favorites[group]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "favorite-tag";
+      button.textContent = tag;
+      button.setAttribute("aria-pressed", String(pinIndex(tag) >= 0));
+      button.onclick = () => togglePin(tag);
+      list.append(button);
+    }
+    box.append(heading, list);
+  }
+}
+
+function favoriteTag(tag) {
+  const key = tag.toLowerCase();
+  return [...favorites.character, ...favorites.event].some(item => item.toLowerCase() === key);
+}
+
+function showFavorites(data) {
+  favorites = data;
+  renderFavorites();
+  for (const tag of document.querySelectorAll("#tags .tag-hit")) {
+    tag.classList.toggle("favorite", favoriteTag(tag.dataset.tag));
+  }
+}
+
+async function loadFavorites() {
+  const request = ++favoritesVersion;
+  const data = await workspaceData("/api/favorites", AbortSignal.timeout(galleryTimeoutMs)).catch(() => null);
+  if (data && request === favoritesVersion) showFavorites(data);
+}
+
+function toggleFavorite(tag) {
+  if (!shown.startsWith("images:")) return;
+  const scope = vaultScope;
+  const path = shown.slice("images:".length);
+  updateFavorites("/api/favorites", { scope, path, tag }, 217);
+}
+
+function updateFavorites(endpoint, payload, errorId) {
+  const { scope } = payload;
+  favoriteWrites = favoriteWrites.then(async () => {
+    if (scope !== vaultScope) return false;
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload), signal: AbortSignal.timeout(galleryTimeoutMs),
+      });
+      const data = await response.json();
+      if (scope !== vaultScope) return false;
+      if (response.ok) {
+        favoritesVersion++;
+        showFavorites(data);
+        return true;
+      }
+      showNotice(data.error || t(errorId));
+    } catch {
+      if (scope === vaultScope) showNotice(t(errorId));
+    }
+    return false;
+  });
+  return favoriteWrites;
+}
+
+function bindHold(element, onHold, onClick) {
+  let timer = null;
+  let held = false;
+  let start;
+  const cancelHold = () => clearTimeout(timer);
+  element.onpointerdown = event => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    held = false;
+    start = { x: event.clientX, y: event.clientY };
+    timer = setTimeout(() => {
+      if (!element.isConnected) return;
+      held = true;
+      onHold();
+    }, 500);
+  };
+  element.onpointermove = event => {
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) cancelHold();
+  };
+  element.onpointerup = element.onpointerleave = element.onpointercancel = cancelHold;
+  element.onclick = event => {
+    if (!held || event.detail === 0) onClick();
+    held = false;
+  };
+}
+
+function bindTagActions(span, token) {
+  bindHold(span, () => toggleFavorite(token), () => togglePin(token));
+  span.onkeydown = event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    if (event.repeat) return;
+    if (event.shiftKey) toggleFavorite(token);
+    else togglePin(token);
+  };
 }
 
 function addFilterTag(raw) {
@@ -466,18 +1447,9 @@ function togglePin(tag) {
   applyFilter();
 }
 
-async function applyFilter() {
-  if (!pinned.length) {
-    follow = true;
-    loadRecent();
-    return;
-  }
-  const query = pinned.map((tag) => "tag=" + encodeURIComponent(tag)).join("&");
-  const data = await (await fetch("/api/tagged?" + query)).json();
-  reel = data.files || [];
-  follow = false;
-  if (reel.length) showAt(0);
-  else showEmpty();
+function applyFilter() {
+  setPreviewMode(false);
+  loadGallery(true);
 }
 function paintTags(text) {
   const box = document.getElementById("tags");
@@ -489,77 +1461,538 @@ function paintTags(text) {
     if (!token) return;
     const span = document.createElement("span");
     span.className = "tag-hit";
+    span.dataset.tag = token;
+    span.classList.toggle("favorite", favoriteTag(token));
+    span.tabIndex = 0;
+    span.setAttribute("role", "button");
+    span.title = t(216);
     const pinnedAt = pinIndex(token);
     const rank = genres.findIndex((item) => item && item.toLowerCase() === token.toLowerCase());
     if (pinnedAt >= 0) {
       span.style.background = rainbow(pinnedAt);
       span.style.color = "#111";
-    } else if (rank >= 0 && rank < 20) span.classList.add("genre", "genre-" + (rank + 1));
+    } else if (appMode === "sorting" && rank >= 0 && rank < 20) span.classList.add("genre", "genre-" + (rank + 1));
     span.textContent = part;
-    span.onclick = () => togglePin(token);
+    bindTagActions(span, token);
     box.append(span);
   });
 }
 
 function showAt(index) {
-  if (!reel.length) return;
+  if (workPreview || !reel.length) return;
+  folderPreview = "";
   reelAt = (index + reel.length) % reel.length;
   showImage("images", reel[reelAt]);
 }
 
+function renderGallery() {
+  if (folderPreview) showImage("images", folderPreview);
+  else if (!reel.length) showEmpty();
+  else showAt(reelAt);
+}
+
+function openFolderPreview(path) {
+  folderPreview = path;
+  clearTimeout(folderSelectionTimer);
+  const index = reel.indexOf(path);
+  if (index >= 0) reelAt = index;
+  if (previewRequest?.failed) cancelPreviewRequest();
+  if (workPreview) setPreviewMode(false);
+  else renderGallery();
+}
+
+function renderWorkPreview() {
+  if (!workFile) showEmpty();
+  else showImage("images", workFile);
+}
+
+function renderPreviewMode() {
+  previewMode.setAttribute("aria-pressed", String(workPreview));
+  previewMode.setAttribute("aria-label", t(196));
+  previewMode.title = t(workPreview ? 197 : 198);
+  document.getElementById("prev").disabled = workPreview;
+  document.getElementById("next").disabled = workPreview;
+}
+
+function setPreviewMode(work) {
+  if (workPreview === work) return;
+  workPreview = work;
+  closeZoom();
+  renderPreviewMode();
+  if (work) renderWorkPreview();
+  else renderGallery();
+}
+
 async function showImage(root, path) {
   if (!path) return;
-  shown = root + ":" + path;
-  document.getElementById("shot").src = "/api/file?root=" + root + "&path=" + encodeURIComponent(path);
+  const imageKey = root + ":" + path;
+  if (previewRequest?.key === imageKey) return;
+  cancelPreviewRequest();
+  const previous = document.getElementById("shot");
+  const image = shown === imageKey ? previous : new Image();
+  const request = { key: imageKey, path, image, controller: new AbortController() };
+  previewRequest = request;
+  previewRevision = "";
+  renderDeleteControls();
+  if (image !== previous) {
+    if (!hasFile) document.getElementById("tags").textContent = t(205);
+    const query = "path=" + encodeURIComponent(path);
+    image.dataset.original = workspaceUrl("/api/file?display=1&root=" + root + "&" + query);
+    image.src = vaultScope && root === "images" ? workspaceUrl("/api/thumbnail?" + query) : image.dataset.original;
+    let timeout;
+    const deadline = new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new DOMException("", "TimeoutError")), galleryTimeoutMs);
+    });
+    try {
+      await Promise.race([image.decode(), deadline]);
+    } catch (error) {
+      if (previewRequest === request) {
+        image.removeAttribute("src");
+        request.failed = error.name === "TimeoutError" ? 207 : 203;
+        closeZoom();
+        clearImage(t(request.failed), path);
+      }
+      return;
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (previewRequest !== request) return;
+    image.id = previous.id;
+    image.alt = previous.alt;
+    previous.replaceWith(image);
+    if (!zoom.hidden && !workPreview) showZoomImage(image);
+  }
+  shown = imageKey;
   document.getElementById("name").textContent = fileName(path);
   hasFile = true;
+  renderDeleteControls();
   document.getElementById("who").textContent = "";
   document.getElementById("tags").replaceChildren();
   tagText = "";
   if (root !== "images") return;
-  const data = await (await fetch("/api/tags?path=" + encodeURIComponent(path))).json();
+  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(path), request.controller.signal)
+    .catch(() => null);
+  if (!data || previewRequest !== request) return;
   document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
   tagText = data.text || "";
+  previewRevision = data.revision || "";
+  renderDeleteControls();
   paintTags(tagText);
   refreshGenreGhosts();
 }
 
-async function tick() {
-  const data = await (await fetch("/api/status")).json();
-  let step = data.step || t(7);
-  const named = step.match(/Сейчас: размечаю (.+) \((\d+ из \d+)\)/);
-  if (named) step = "Сейчас: размечаю " + fileName(named[1]) + " (" + named[2] + ").";
-  document.getElementById("step").textContent = step;
-  document.getElementById("detail").textContent = data.detail || "";
-  document.getElementById("fill").style.width = (data.percent || 0) + "%";
-  const log = document.getElementById("log");
-  log.textContent = (data.log || []).join(String.fromCharCode(10));
-  log.scrollTop = log.scrollHeight;
-  const busy = data.job_running;
-  const ready = data.model === "ready";
-  const picked = selected.size > 0;
-  for (const id of ["tag", "sort", "plan"]) {
-    document.getElementById(id).disabled = busy || !picked || (id === "tag" && !ready);
+function renderDeleteControls() {
+  const shot = document.getElementById("shot");
+  deleteImage.hidden = !hasFile;
+  deleteImage.disabled = !previewRevision || !shot.complete || !shot.naturalWidth || wasBusy || deleteBusy;
+  deleteTile.disabled = wasBusy || deleteBusy;
+  deleteConfirm.disabled = !deleteTarget?.revision || deleteBusy || wasBusy;
+  deleteCancel.disabled = deleteBusy;
+}
+
+function openImageActions(tile, path) {
+  const anchor = tile.getBoundingClientRect();
+  imageActionTarget = { path, scope: vaultScope };
+  imageActions.showPopover();
+  imageActions.style.left = Math.max(0, Math.min(anchor.left, innerWidth - imageActions.offsetWidth)) + "px";
+  const below = anchor.bottom + 4;
+  imageActions.style.top = (below + imageActions.offsetHeight <= innerHeight ?
+    below : Math.max(0, anchor.top - imageActions.offsetHeight - 4)) + "px";
+}
+
+function openDeleteDialog(target) {
+  if (target.scope !== vaultScope || deleteDialog.open || wasBusy || deleteBusy) return false;
+  deleteTarget = target;
+  document.getElementById("delete-title").textContent = t(183).replace("{name}", () => fileName(deleteTarget.path));
+  deleteError.hidden = true;
+  renderDeleteControls();
+  deleteDialog.showModal();
+  return true;
+}
+
+async function openTileDeletion() {
+  const target = imageActionTarget;
+  imageActions.hidePopover();
+  if (!target || !openDeleteDialog(target)) return;
+  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(target.path),
+    AbortSignal.timeout(galleryTimeoutMs)).catch(() => null);
+  if (deleteTarget !== target || !deleteDialog.open) return;
+  target.revision = data?.revision;
+  if (!target.revision) {
+    deleteError.textContent = t(187);
+    deleteError.hidden = false;
   }
-  document.getElementById("stop").disabled = !busy;
-  document.getElementById("retry").hidden = data.model !== "error";
-  if (wasBusy && !busy) loadFolders();
-  wasBusy = !!busy;
-  if (follow && data.preview_file && data.preview_file !== (reel[reelAt] || "")) {
-    if (!reel.includes(data.preview_file)) reel.push(data.preview_file);
-    showAt(reel.indexOf(data.preview_file));
+  renderDeleteControls();
+}
+
+function discardDeletedImage(path) {
+  const activePath = reel[reelAt];
+  const index = reel.indexOf(path);
+  reel = reel.filter(item => item !== path);
+  if (workFile === path) workFile = "";
+  reelAt = activePath === path ? Math.min(index, reel.length - 1) : reel.indexOf(activePath);
+  if (!reel.length) galleryMessage = 195;
+  if (folderPreview === path) folderPreview = "";
+  const key = "images:" + path;
+  if (shown === key || previewRequest?.key === key) showEmpty();
+  if (workPreview) renderWorkPreview();
+  else renderGallery();
+}
+
+async function confirmDelete() {
+  if (!deleteTarget?.revision || deleteBusy || wasBusy) return;
+  const target = deleteTarget;
+  deleteBusy = true;
+  deleteError.hidden = true;
+  renderDeleteControls();
+  try {
+    const response = await fetch("/api/image/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(target),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      deleteError.textContent = data.error || t(186);
+      deleteError.hidden = false;
+      return;
+    }
+    deleteDialog.close();
+    if (target.scope === vaultScope) {
+      workspaceMutation++;
+      galleryRequest++;
+      statusShown = ++statusRequest;
+      discardDeletedImage(target.path);
+      takeFolderFiles(folderFiles.filter(file => file.path !== target.path));
+      showNotice(data.warning || "");
+      vocab = [];
+      if (vaultScope) loadFolders();
+      tick();
+    }
+  } catch {
+    deleteError.textContent = t(186);
+    deleteError.hidden = false;
+  } finally {
+    deleteBusy = false;
+    renderDeleteControls();
   }
 }
 
-async function start(mode) {
-  await fetch("/api/job", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, folders: [...selected] }),
-  });
-  follow = true;
-  tick();
+function renderTerminal() {
+  const lines = terminalHistory.slice();
+  if (gpuPrompt && !lines.includes(gpuPrompt.message)) lines.push(gpuPrompt.message);
+  if (vaultOpening) {
+    lines.push(t(190));
+  } else if (tagScanMessage) {
+    lines.push(tagScanMessage);
+  } else if (!wasBusy && !gpuProgress && !gpuPrompt && folderScan) {
+    const { stage, done, total } = folderScan;
+    const number = new Intl.NumberFormat(lang);
+    if (stage === "discover") {
+      lines.push(t(191).replace("{count}", number.format(done)));
+    } else if (stage === "checking" && total > 0) {
+      const percent = Math.floor(100 * done / total);
+      lines.push(t(192).replace("{done}", number.format(done)).replace("{total}", number.format(total))
+        .replace("{percent}", percent));
+    } else if (stage === "done") {
+      lines.push(t(193).replace("{total}", number.format(total)));
+    }
+  }
+  const log = document.getElementById("log");
+  const contents = lines.join("\n");
+  if (log.textContent !== contents) {
+    log.textContent = contents;
+    log.scrollTop = log.scrollHeight;
+  }
 }
+
+function scanDuration(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const rest = String(seconds % 60).padStart(2, "0");
+  if (minutes < 60) return minutes + ":" + rest;
+  return Math.floor(minutes / 60) + ":" + String(minutes % 60).padStart(2, "0") + ":" + rest;
+}
+
+function tagScanDisplay(scan) {
+  const { stage, done, total, elapsed } = scan;
+  const number = new Intl.NumberFormat(lang);
+  const percent = stage === "checking" ? Math.floor(100 * done / total) : null;
+  const step = percent === null
+    ? t(191).replace("{count}", number.format(done))
+    : t(240).replace("{done}", number.format(done)).replace("{total}", number.format(total))
+      .replace("{percent}", number.format(percent));
+  const hasEstimate = percent !== null && elapsed >= 2 && done > 0 && done < total;
+  let detail = t(hasEstimate ? 242 : 241).replace("{elapsed}", scanDuration(elapsed));
+  if (hasEstimate) detail = detail.replace("{remaining}", scanDuration(Math.ceil(elapsed * (total - done) / done)));
+  return { step, detail, percent };
+}
+
+async function tick() {
+  const request = ++statusRequest;
+  const data = await (await fetch("/api/status")).json();
+  if (request < statusShown) return;
+  statusShown = request;
+  vaultToggle.hidden = !data.vault_enabled;
+  useVault(data.vault_scope || "", data.vault_folder);
+  rocmState = data.rocm;
+  nvidiaState = data.nvidia;
+  if (gpuPrompt?.id !== data.gpu_prompt?.id) {
+    terminalInput.value = "";
+    terminalInput.setCustomValidity("");
+  }
+  gpuPrompt = data.gpu_prompt;
+  gpuProgress = data.gpu_progress;
+  showTerminalInput();
+  const readyDevices = { cpu: true, amd: showRocm(), nvidia: showNvidia() };
+  deviceInput.value = [manualDevice, preferredGpu, "amd", "nvidia", "cpu"].find(device => readyDevices[device] === true);
+  let step = data.step || t(7);
+  if (data.phase === "download" && !data.job_running) {
+    if (data.model === "ready") step = t(23);
+    if (data.model === "downloading" && !data.detail) step = t(22);
+  }
+  const tagScan = data.tag_scan ? tagScanDisplay(data.tag_scan) : null;
+  tagScanMessage = tagScan ? tagScan.step + " " + tagScan.detail : "";
+  const searching = !gpuProgress && (tagScan?.percent === null ||
+    (data.job_mode === "duplicates" && data.percent === null));
+  document.getElementById("step").textContent = gpuProgress?.step || tagScan?.step || step;
+  document.getElementById("detail").textContent = (gpuProgress?.detail ?? tagScan?.detail ?? data.detail) || "";
+  const fill = document.getElementById("fill");
+  fill.classList.toggle("searching", searching);
+  fill.style.width = (searching ? 35 : (gpuProgress?.percent ?? tagScan?.percent ?? data.percent ?? 0)) + "%";
+  terminalHistory = data.log || [];
+  const scan = data.scan_progress || null;
+  const scanFinished = scan?.stage === "done" && (scan.id !== folderScan?.id || folderScan?.stage !== "done");
+  folderScan = scan;
+  const busy = data.job_running;
+  const jobChanged = data.job_id && data.job_id !== lastJob;
+  const jobFinished = !busy && (wasBusy || (jobChanged && lastJob !== null));
+  const ready = data.model === "ready";
+  const picked = selected.size > 0;
+  for (const id of ["tag", "sort", "plan"]) {
+    document.getElementById(id).disabled = busy || !picked ||
+      (id === "tag" && appMode !== "duplicates" && (!ready || !readyDevices[deviceInput.value]));
+  }
+  document.getElementById("stop").disabled = !busy;
+  document.getElementById("retry").hidden = data.model !== "error";
+  if (jobFinished || scanFinished) loadFolders();
+  if (appMode === "duplicates") {
+    const searchingDuplicates = busy && data.job_mode === "duplicates";
+    if (duplicateSearching !== searchingDuplicates) {
+      duplicateSearching = searchingDuplicates;
+      renderDuplicatePage();
+    }
+    if (jobFinished) loadDuplicatePage(data.phase === "duplicates" ? 0 : duplicatePage?.index || 0);
+  } else if (jobFinished && !workPreview && (!jobChanged || appMode === "gallery")) loadGallery();
+  else if ((galleryMessage === 204 && (!scan || scan.stage === "done")) ||
+           (scanFinished && vaultScope && selected.size && !pinned.length)) loadGallery();
+  recountFolders.disabled = recountPending || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
+  wasBusy = !!busy;
+  workFile = data.preview_file || "";
+  if (data.phase !== "duplicates" && jobChanged && (busy || lastJob !== null)) setPreviewMode(true);
+  lastJob = data.job_id;
+  renderTerminal();
+  renderDeleteControls();
+  if (appMode === "duplicates") updateDuplicateControls();
+  else if (workPreview && (workFile || hasFile || previewRequest)) renderWorkPreview();
+}
+
+function showTerminalInput() {
+  terminalInput.disabled = !gpuPrompt || sendingGpuRequest;
+  terminalInput.placeholder = t(gpuPrompt ? 159 : gpuProgress ? 162 : 160);
+}
+
+function selectedRocmArch() {
+  if (!rocmState || rocmArch.value !== "auto") return rocmArch.value;
+  const candidates = Object.keys(rocmState.gpus).filter(arch => rocmState.architectures.includes(arch));
+  return candidates.find(arch => rocmState.installed[arch]) || candidates[0];
+}
+
+function showRocm() {
+  if (!rocmState) return false;
+  const { architectures, gpus, installed, visible, install } = rocmState;
+  if (!rocmArch.options.length) {
+    for (const value of ["auto", ...architectures]) {
+      rocmArch.add(new Option(value, value));
+    }
+    rocmArch.value = rocmState.default;
+  }
+  rocmArch.options[0].textContent = t(10);
+  const detected = Object.keys(gpus);
+  const arch = selectedRocmArch();
+  const matches = !detected.length || detected.includes(arch);
+  const name = visible && matches && installed[arch];
+  const installing = Boolean(gpuPrompt || gpuProgress || sendingGpuRequest);
+  document.getElementById("amd-controls").hidden = !visible;
+  rocmArch.disabled = installing;
+  rocmInstall.disabled = installing || !arch || !matches;
+  const action = name ? 229 : 157;
+  rocmInstall.textContent = t(action);
+  rocmInstall.setAttribute("aria-label", name ? t(229) + " AMD" : t(108));
+  deviceInput.options[1].disabled = !name;
+  deviceInput.options[1].title = t(visible ? 118 : 113);
+  let message;
+  if (!arch) message = t(detected.length ? 115 : 114);
+  else if (!matches) message = t(116);
+  else if (name) message = t(124).replace("{gpu}", name).replace("{arch}", arch);
+  else if (install.arch === arch && install.state === "error") message = t(install.error);
+  else message = t(125).replace("{gpu}", gpus[arch] || arch);
+  rocmArch.title = rocmInstall.title = message;
+  if (name) deviceInput.options[1].title = message;
+  return Boolean(name);
+}
+
+function selectedNvidiaGpu() {
+  if (!nvidiaState || nvidiaCard.value !== "auto") return nvidiaCard.value;
+  return nvidiaState.gpus.find(gpu => nvidiaState.installed[gpu.uuid])?.uuid || nvidiaState.default;
+}
+
+function showNvidia() {
+  if (!nvidiaState) return false;
+  const { gpus, installed, install } = nvidiaState;
+  const options = JSON.stringify(gpus.map(({ uuid, name }) => [uuid, name]));
+  if (nvidiaCard.dataset.options !== options) {
+    const selected = nvidiaCard.value;
+    nvidiaCard.replaceChildren(new Option(t(10), "auto"));
+    for (const { uuid, name } of gpus) nvidiaCard.add(new Option(name, uuid));
+    nvidiaCard.value = gpus.some(({ uuid }) => uuid === selected) ? selected : "auto";
+    nvidiaCard.dataset.options = options;
+  }
+  nvidiaCard.options[0].textContent = t(10);
+  const uuid = selectedNvidiaGpu();
+  const gpu = gpus.find(item => item.uuid === uuid);
+  const name = installed[uuid];
+  const installing = Boolean(gpuPrompt || gpuProgress || sendingGpuRequest);
+  document.getElementById("nvidia-controls").hidden = !gpus.length;
+  nvidiaCard.disabled = installing;
+  nvidiaInstall.disabled = installing || !gpu?.build;
+  nvidiaInstall.textContent = t(name ? 229 : 157);
+  nvidiaInstall.setAttribute("aria-label", name ? t(229) + " NVIDIA" : t(135));
+  deviceInput.options[2].disabled = !name;
+  let message;
+  if (!gpu) message = t(130);
+  else if (!gpu.build) message = t(134);
+  else if (name) message = t(138).replace("{gpu}", name).replace("{build}", gpu.build);
+  else if (install.gpu === uuid && install.state === "error") message = t(install.error);
+  else message = t(137).replace("{gpu}", gpu.name).replace("{build}", gpu.build);
+  nvidiaCard.title = nvidiaInstall.title = message;
+  deviceInput.options[2].title = name ? message : t(gpu?.build ? 132 : gpu ? 134 : 130);
+  return Boolean(name);
+}
+
+async function sendGpuRequest(endpoint, payload, errorId) {
+  if (sendingGpuRequest) return false;
+  sendingGpuRequest = true;
+  showRocm();
+  showNvidia();
+  showTerminalInput();
+  showNotice();
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (response.ok) return true;
+    showNotice((await response.json()).error || t(errorId));
+  } catch {
+    showNotice(t(errorId));
+  } finally {
+    sendingGpuRequest = false;
+    await tick();
+  }
+  return false;
+}
+
+rocmArch.onchange = () => { showRocm(); tick(); };
+nvidiaCard.onchange = () => { showNvidia(); tick(); };
+deviceInput.onchange = () => {
+  manualDevice = deviceInput.value;
+  if (manualDevice !== "cpu") {
+    preferredGpu = manualDevice;
+    savePreference("oubi.gpu", preferredGpu);
+  }
+  tick();
+};
+rocmInstall.onclick = async () => {
+  const architecture = selectedRocmArch() || "auto";
+  const action = rocmState?.installed[architecture] ? "uninstall" : "install";
+  if (await sendGpuRequest("/api/rocm", { architecture, action }, action === "uninstall" ? 236 : 121)) terminalInput.focus();
+};
+nvidiaInstall.onclick = async () => {
+  const gpu = selectedNvidiaGpu() || "auto";
+  const action = nvidiaState?.installed[gpu] ? "uninstall" : "install";
+  if (await sendGpuRequest("/api/nvidia", { gpu, action }, action === "uninstall" ? 236 : 133)) terminalInput.focus();
+};
+terminalInput.oninput = () => terminalInput.setCustomValidity("");
+document.getElementById("terminal-entry").onsubmit = async event => {
+  event.preventDefault();
+  if (!gpuPrompt || sendingGpuRequest) return;
+  const answer = terminalInput.value.trim().toLowerCase();
+  if (answer !== "y" && answer !== "n") {
+    terminalInput.setCustomValidity(t(144));
+    terminalInput.reportValidity();
+    return;
+  }
+  terminalInput.value = "";
+  if (!await sendGpuRequest("/api/terminal", { id: gpuPrompt.id, answer }, 161)) terminalInput.focus();
+};
+
+function showNotice(message = "") {
+  const notice = document.getElementById("notice");
+  notice.textContent = message;
+  notice.hidden = !message;
+}
+
+async function start(mode) {
+  showNotice();
+  const scope = vaultScope;
+  try {
+    const response = await fetch("/api/job", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode, folders: [...selected], device: deviceInput.value, architecture: selectedRocmArch() || "auto",
+        gpu: selectedNvidiaGpu() || "auto", scope, destination: scope ? sortTarget.value : "output",
+      }),
+    });
+    if (!response.ok) {
+      showNotice((await response.json()).error || t(100));
+      return;
+    }
+    const data = await response.json();
+    if (scope === vaultScope) {
+      if (data.job_id !== lastJob) {
+        statusShown = ++statusRequest;
+        lastJob = data.job_id;
+        if (mode === "duplicates") {
+          duplicateSearching = true;
+          renderDuplicatePage();
+        } else setPreviewMode(true);
+        wasBusy = true;
+      }
+    }
+    tick();
+  } catch {
+    showNotice(t(100));
+  }
+}
+
+recountFolders.onclick = async () => {
+  const scope = vaultScope;
+  recountPending = true;
+  recountFolders.disabled = true;
+  showNotice();
+  try {
+    const response = await fetch("/api/folders/recount", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope }),
+    });
+    if (scope !== vaultScope) return;
+    if (!response.ok) showNotice((await response.json()).error || t(199));
+  } catch {
+    if (scope === vaultScope) showNotice(t(199));
+  } finally {
+    recountPending = false;
+    tick();
+  }
+};
 
 function paintPanes() {
   const top = document.querySelector(".top");
@@ -619,7 +2052,7 @@ function fitSplits() {
   for (const id of ["left", "mid", "right"]) {
     const host = document.getElementById(id);
     for (const old of host.querySelectorAll(":scope > .block-split, :scope .edge-split")) old.remove();
-    const blocks = [...host.querySelectorAll(":scope > .block")];
+    const blocks = [...host.querySelectorAll(":scope > .block:not([hidden])")];
     for (let index = 0; index < blocks.length - 1; index += 1) {
       const split = document.createElement("div");
       split.className = "split split-h block-split";
@@ -692,12 +2125,10 @@ function placeBlocks(order) {
 }
 
 function applyLayout() {
-  placeBlocks(layout.blocks);
-  if (layout.heights) {
-    for (const name of Object.keys(layout.heights)) {
-      const block = document.querySelector('.block[data-block="' + name + '"]');
-      if (block) block.style.flex = "0 0 " + layout.heights[name] + "px";
-    }
+  if (appMode !== "duplicates") placeBlocks(layout.blocks);
+  for (const block of document.querySelectorAll(".block")) {
+    const height = layout.heights?.[block.dataset.block];
+    block.style.flex = height ? "0 0 " + height + "px" : "";
   }
   if (layout.left && layout.mid && layout.right) {
     panes.left = layout.left;
@@ -711,7 +2142,8 @@ function applyLayout() {
 function blockHeights() {
   const heights = {};
   for (const block of document.querySelectorAll(".block")) {
-    if ((block.style.flex || "").indexOf("px") >= 0) heights[block.dataset.block] = Math.round(block.getBoundingClientRect().height);
+    const size = parseFloat(block.style.flexBasis);
+    if (Number.isFinite(size)) heights[block.dataset.block] = Math.round(size);
   }
   return heights;
 }
@@ -723,24 +2155,140 @@ function blockOrder() {
   return order;
 }
 
-function saveLayout() {
-  layout = {
+function captureLayout() {
+  if (document.querySelector(".top").classList.contains("duplicates")) {
+    return { ...regularLayout, ...layout };
+  }
+  return {
     left: Math.round(document.getElementById("left").getBoundingClientRect().width),
     mid: Math.round(document.getElementById("mid").getBoundingClientRect().width),
     right: Math.round(document.getElementById("right").getBoundingClientRect().width),
-    preview: Math.round(document.getElementById("preview").getBoundingClientRect().height),
-    genres: Math.round(document.getElementById("genre-row").getBoundingClientRect().height),
-    info: Math.round(document.getElementById("info").getBoundingClientRect().height),
-    log: Math.round(document.getElementById("log").getBoundingClientRect().height),
     blocks: blockOrder(),
     heights: blockHeights(),
   };
-  fetch("/api/layout", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(layout),
-  });
 }
+
+function storeLayout(data, importing = false) {
+  const write = layoutWrites.then(async () => {
+    try {
+      const response = await fetch(importing ? "/api/layout/import" : "/api/layout", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data), signal: AbortSignal.timeout(galleryTimeoutMs),
+      });
+      const saved = await response.json();
+      if (!response.ok) {
+        showNotice(saved.error || t(92));
+        return false;
+      }
+      if (importing && layoutWrites === write) {
+        layout = saved;
+        applyLayout();
+      }
+      return true;
+    } catch {
+      showNotice(t(92));
+      return false;
+    }
+  });
+  layoutWrites = write;
+  return write;
+}
+
+function saveLayout() {
+  layout = captureLayout();
+  storeLayout(layout);
+}
+
+function closeSettingsMenu(restoreFocus = false) {
+  if (!settingsTrigger) return;
+  settingsTrigger.setAttribute("aria-expanded", "false");
+  if (restoreFocus) settingsTrigger.focus();
+  settingsTrigger = null;
+  settingsMenu.hidden = true;
+}
+
+function toggleSettingsMenu(event) {
+  const trigger = event.currentTarget;
+  if (trigger === settingsTrigger) {
+    closeSettingsMenu();
+    return;
+  }
+  closeSettingsMenu();
+  settingsTrigger = trigger;
+  trigger.after(settingsMenu);
+  trigger.setAttribute("aria-expanded", "true");
+  settingsMenu.hidden = false;
+}
+
+async function exportSettingsFile(type, scope) {
+  try {
+    let data;
+    if (type === "favorites") {
+      await favoriteWrites;
+      if (scope !== vaultScope) return;
+      data = await workspaceData("/api/favorites", AbortSignal.timeout(galleryTimeoutMs));
+      if (scope !== vaultScope) return;
+    } else {
+      data = captureLayout();
+    }
+    if (!data) throw new Error("Settings unavailable");
+    const file = new Blob([JSON.stringify({ version: 1, type, data }, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(file);
+    link.download = `oubi-${type}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  } catch {
+    showNotice(t(228));
+  }
+}
+
+importSettings.onclick = exportSettings.onclick = toggleSettingsMenu;
+document.addEventListener("click", event => {
+  if (!event.target.closest(".settings-control")) closeSettingsMenu();
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && settingsTrigger) closeSettingsMenu(true);
+});
+settingsMenu.onclick = event => {
+  const type = event.target.dataset.settings;
+  if (!type) return;
+  const importing = settingsTrigger === importSettings;
+  const scope = vaultScope;
+  closeSettingsMenu(true);
+  showNotice();
+  if (importing) {
+    settingsImport = { type, scope };
+    settingsFile.value = "";
+    settingsFile.click();
+  } else {
+    exportSettingsFile(type, scope);
+  }
+};
+settingsFile.onchange = async () => {
+  const file = settingsFile.files[0];
+  if (!file || !settingsImport) return;
+  const { type, scope } = settingsImport;
+  settingsImport = null;
+  let data;
+  try {
+    const pack = JSON.parse(await file.text());
+    if (pack?.version !== 1 || pack.type !== type || !pack.data ||
+        Array.isArray(pack.data) || typeof pack.data !== "object") throw new Error("Invalid settings file");
+    data = pack.data;
+  } catch {
+    showNotice(t(226));
+    return;
+  }
+  if (type === "favorites" && scope !== vaultScope) {
+    showNotice(t(172));
+    return;
+  }
+  const imported = type === "favorites"
+    ? await updateFavorites("/api/favorites/import", { scope, favorites: data }, 232)
+    : await storeLayout(data, true);
+  if (imported) showNotice(t(227));
+};
 
 function applyTheme(next) {
   theme = next;
@@ -760,7 +2308,14 @@ document.getElementById("theme").onclick = () => {
     body: JSON.stringify({ theme: next }),
   });
 };
-for (const id of ["tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
+for (const id of ["tag", "sort", "plan"]) {
+  document.getElementById(id).onclick = () => start(id === "tag" && appMode === "duplicates" ? "duplicates" : id);
+}
+duplicateButtons.forEach((id, index) => {
+  document.getElementById(id).onclick = () => reviewDuplicate(["left", "different", "right"][index]);
+});
+document.getElementById("duplicate-prev").onclick = () => loadDuplicatePage(duplicatePage.index - 1);
+document.getElementById("duplicate-next").onclick = () => loadDuplicatePage(duplicatePage.index + 1);
 if (!Array.isArray(genres) || !genres.length) genres = [""];
 let genreTimer = 0;
 let genreDrag = -1;
@@ -869,7 +2424,7 @@ function saveGenres() {
     fetch("/api/genres", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ genres: genres.slice(0, 20) }),
+      body: JSON.stringify({ genres }),
     });
   }, 300);
 }
@@ -971,18 +2526,39 @@ function renderGenreRow(focusAt) {
     slot.append(handle, pin, field);
     row.append(slot);
   });
-  if (genres.length < 20) {
+  const actions = document.createElement("div");
+  actions.className = "genre-actions";
+  if (genres.length < maxGenres) {
     const add = document.createElement("button");
     add.type = "button";
     add.id = "genre-add";
     add.textContent = "+";
+    add.title = t(101);
+    add.setAttribute("aria-label", add.title);
     add.onclick = () => {
-      if (genres.length >= 20) return;
       genres.push("");
       renderGenreRow(genres.length - 1);
     };
-    row.append(add);
+    actions.append(add);
   }
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.id = "genre-remove";
+  remove.className = "secondary";
+  remove.textContent = "−";
+  remove.title = t(103);
+  remove.setAttribute("aria-label", remove.title);
+  remove.disabled = genres.length <= 1;
+  remove.onclick = () => {
+    genres.pop();
+    hideSuggest();
+    renderGenreRow(genres.length === 1 ? 0 : undefined);
+    if (genres.length > 1) document.getElementById("genre-remove").focus();
+    paintTags(tagText);
+    saveGenres();
+  };
+  actions.append(remove);
+  row.append(actions);
   if (focusAt !== undefined) {
     const inputs = row.querySelectorAll(".genre-field input");
     const target = inputs[focusAt];
@@ -1006,7 +2582,7 @@ function arrangeMove(event) {
   const hit = document.elementFromPoint(event.clientX, event.clientY);
   const panel = hit && hit.closest(".pane");
   if (!panel || !dragBlock) return;
-  const blocks = [...panel.querySelectorAll(":scope > .block")].filter((item) => item !== dragBlock);
+  const blocks = [...panel.querySelectorAll(":scope > .block:not([hidden])")].filter((item) => item !== dragBlock);
   let before = null;
   let after = null;
   for (const item of blocks) {
@@ -1054,14 +2630,28 @@ document.getElementById("arrange").onclick = () => {
   document.getElementById("arrange").classList.toggle("on", arranging);
   if (!arranging) saveLayout();
 };
-document.getElementById("lang").onclick = () => {
-  lang = lang === "ru" ? "en" : "ru";
-  applyI18n();
-  fetch("/api/language", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ language: lang }),
-  });
+document.getElementById("lang").onchange = async (event) => {
+  const selector = event.currentTarget;
+  selector.disabled = true;
+  showNotice();
+  try {
+    const response = await fetch("/api/language", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language: selector.value }),
+    });
+    if (!response.ok) throw new Error();
+    const choice = await response.json();
+    languageChoice = choice.choice;
+    lang = choice.language;
+    applyI18n();
+    tick();
+  } catch {
+    selector.value = languageChoice;
+    showNotice(t(98));
+  } finally {
+    selector.disabled = false;
+  }
 };
 document.getElementById("filter-query").onfocus = () => loadVocab();
 document.getElementById("filter-query").oninput = () => {
@@ -1097,18 +2687,84 @@ document.getElementById("filter-query").onkeydown = (event) => {
 };
 document.getElementById("filter-query").onblur = () => setTimeout(hideSuggest, 0);
 applyI18n();
-document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
-document.getElementById("all-folders").onclick = () => {
+deleteImage.onclick = () => {
+  if (!deleteImage.disabled && shown.startsWith("images:")) {
+    openDeleteDialog({ path: shown.slice("images:".length), revision: previewRevision, scope: vaultScope });
+  }
+};
+deleteTile.onclick = openTileDeletion;
+document.addEventListener("pointerdown", event => {
+  if (!imageActions.contains(event.target)) imageActions.hidePopover();
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && imageActions.matches(":popover-open")) imageActions.hidePopover();
+});
+deleteConfirm.onclick = confirmDelete;
+deleteCancel.onclick = () => deleteDialog.close();
+deleteDialog.addEventListener("cancel", event => { if (deleteBusy) event.preventDefault(); });
+document.getElementById("stop").onclick = () => fetch(workspaceUrl("/api/stop"), { method: "POST" });
+vaultToggle.onclick = () => {
+  if (vaultScope) {
+    changeVault("lock");
+    return;
+  }
+  vaultPassword.value = "";
+  vaultError.hidden = true;
+  vaultBackground.forEach(element => { element.inert = true; });
+  vaultDialog.show();
+};
+vaultCancel.onclick = () => vaultDialog.close();
+vaultDialog.addEventListener("close", () => {
+  vaultPassword.value = "";
+  vaultBackground.forEach(element => { element.inert = false; });
+  vaultToggle.focus();
+});
+document.addEventListener("keydown", event => {
+  if (event.defaultPrevented || event.key !== "Escape" || !vaultDialog.open) return;
+  event.preventDefault();
+  if (!vaultBusy) vaultDialog.close();
+});
+document.getElementById("vault-form").onsubmit = event => {
+  event.preventDefault();
+  if (vaultBusy) return;
+  const password = vaultPassword.value;
+  vaultPassword.value = "";
+  changeVault("unlock", password);
+};
+folderUp.onclick = () => {
+  navigateFolders(folderLocation.split("/").slice(0, -1).join("/"));
+};
+const savedFolderSize = readPreference("oubi.folder-size");
+if (savedFolderSize) folderSize.value = savedFolderSize;
+folderBox.style.setProperty("--folder-width", folderSize.value + "px");
+folderSize.oninput = () => {
+  folderBox.style.setProperty("--folder-width", folderSize.value + "px");
+  savePreference("oubi.folder-size", folderSize.value);
+};
+folderOrder.onclick = () => {
+  untaggedFirst = !untaggedFirst;
+  visibleFileTiles = fileTileBatch;
+  savePreference("oubi.folder-order", untaggedFirst ? "untagged" : "default");
+  renderFolderOrder();
+  renderFolders();
+  folderBox.scrollTop = 0;
+};
+allFolders.onclick = () => {
+  clearTimeout(folderSelectionTimer);
   const every = folders.length > 0 && folders.every((folder) => selected.has(folder.path));
   if (every) selected.clear();
   else for (const folder of folders) selected.add(folder.path);
+  vocab = [];
   renderFolders();
-  loadRecent();
-  loadVocab();
+  loadGallery(true);
 };
 document.getElementById("retry").onclick = () => fetch("/api/download", { method: "POST" });
-document.getElementById("prev").onclick = () => { follow = false; showAt(reelAt - 1); };
-document.getElementById("next").onclick = () => { follow = false; showAt(reelAt + 1); };
+previewMode.onclick = () => {
+  setPreviewMode(!workPreview);
+  if (!workPreview) loadGallery();
+};
+document.getElementById("prev").onclick = () => showAt(reelAt - 1);
+document.getElementById("next").onclick = () => showAt(reelAt + 1);
 document.getElementById("split-left").onpointerdown = (event) => dragSplit("left", event);
 document.getElementById("split-mid").onpointerdown = (event) => dragSplit("mid", event);
 const zoom = document.getElementById("zoom");
@@ -1122,15 +2778,18 @@ function closeZoom() {
   zoom.hidden = true;
   view.drag = null;
 }
-document.getElementById("shot").onclick = () => {
-  if (!document.getElementById("shot").src) return;
+function showZoomImage(image) {
   view.scale = 1;
   view.x = 0;
   view.y = 0;
   view.drag = null;
-  zoomImg.src = document.getElementById("shot").src;
-  zoom.hidden = false;
+  zoomImg.src = image.dataset.original || image.src;
   paintZoom();
+}
+document.getElementById("shot-frame").onclick = (event) => {
+  if (event.target.id !== "shot" || !event.target.getAttribute("src")) return;
+  showZoomImage(event.target);
+  zoom.hidden = false;
 };
 document.getElementById("zoom-close").onclick = closeZoom;
 document.addEventListener("keydown", (event) => {
@@ -1138,15 +2797,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeZoom();
   if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
     event.preventDefault();
-    if (!reel.length) return;
-    follow = false;
+    if (workPreview || !reel.length) return;
     showAt(reelAt + (event.key === "ArrowRight" ? 1 : -1));
-    zoomImg.src = document.getElementById("shot").src;
-    view.scale = 1;
-    view.x = 0;
-    view.y = 0;
-    view.drag = null;
-    paintZoom();
   }
 });
 zoom.addEventListener("wheel", (event) => {
@@ -1171,11 +2823,14 @@ window.addEventListener("mousemove", (event) => {
   paintZoom();
 });
 window.addEventListener("mouseup", () => { view.drag = null; });
+if (initialVaultFolder) selectFolderLocation(initialVaultFolder);
+if (initialVaultFolder === null) showNotice(t(257));
 loadFolders();
+loadFavorites();
 renderFolders();
+if (appMode === "duplicates") loadDuplicatePage();
 tick();
 setInterval(tick, 1000);
-setInterval(loadFolders, 8000);
 </script>
 </body>
 </html>

@@ -1,0 +1,75 @@
+name: Dependencies
+
+on:
+  push:
+    branches: [deps, main]
+  schedule:
+    - cron: '0 9 * * 5'
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  sync-main:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: oubi-dependency-updates
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Synchronize the dependency branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          sh scripts/sync-deps.sh
+
+  update-pins:
+    if: ${{ github.event_name != 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: oubi-dependency-updates
+      cancel-in-progress: false
+    outputs:
+      ref: ${{ steps.update.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Synchronize deps and resolve compatible PyTorch CPU wheels
+        id: update
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          sh scripts/sync-deps.sh
+          git fetch origin deps
+          git switch --detach origin/deps
+          report_dir=$(mktemp -d)
+          docker run --rm -v "$report_dir:/report" python:3.12-slim-bookworm \
+            python -m pip install --quiet --dry-run --ignore-installed --only-binary=:all: \
+            --index-url https://download.pytorch.org/whl/cpu --report /report/resolve.json torch torchvision
+          python3 scripts/update-torch-pins.py "$report_dir/resolve.json"
+          if ! git diff --quiet -- Dockerfile; then
+            git add Dockerfile
+            git commit -m 'Update the PyTorch CPU wheels'
+            git push origin HEAD:refs/heads/deps
+            echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+  prerelease:
+    needs: update-pins
+    if: ${{ !cancelled() && (github.ref == 'refs/heads/deps' || needs.update-pins.outputs.ref != '') }}
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      channel: deps
+      ref: ${{ needs.update-pins.outputs.ref || github.sha }}

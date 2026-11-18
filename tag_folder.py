@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """Пакетная разметка папки с картинками через PixAI Tagger v1.0.
 Пример: python tag_folder.py /путь/к/картинкам --model ./pixai-tagger-v1.0
-Для каждой картинки рядом пишется .txt с тегами через запятую, плюс общий tags.csv.
+Для каждой картинки .txt с тегами пишется в подпапку tags, плюс общий tags.csv.
 Уже размеченные картинки (есть .txt) пропускаются, так что скрипт можно прерывать и запускать снова.
 """
 import argparse
 import csv
+import json
 import os
 import sys
 import time
 from pathlib import Path
 
+from oubi_files import JPEG_XL_SUFFIX, image_files, open_image, sidecar_path, stored_image_path
+from oubi_gpu import GpuError
+from oubi_index import report_changes
+from oubi_nvidia import GPU_UUID, nvidia_device
+from oubi_rocm import amd_device
+
 # ===== SETTINGS =====
-EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 ORDER = ["rating", "character", "copyright", "style", "general", "meta"]
 DEFAULT_BATCH_SIZE = 1
 
@@ -283,7 +289,7 @@ def categories_of(result):
 
 
 # ===== LOAD THE MODEL =====
-def load_tagger(model):
+def load_tagger(model, device="auto", architecture=None):
     import torch
     from transformers import pipeline
 
@@ -294,66 +300,115 @@ def load_tagger(model):
         download_model(model)
         source = model
     print(say(57), flush=True)
-    device = 0 if torch.cuda.is_available() else -1
-    if device == 0:
-        print(say(58, name=torch.cuda.get_device_name(0)), flush=True)
+    if device == "amd":
+        index = amd_device(torch, architecture)
+    elif device == "nvidia":
+        index = nvidia_device(torch)
     else:
-        print(say(59), flush=True)
+        index = 0 if device == "auto" and torch.cuda.is_available() else -1
+    if index >= 0:
+        print(say(58, name=torch.cuda.get_device_name(index)), flush=True)
+    else:
+        print(say(58, name="CPU") if device == "cpu" else say(59), flush=True)
     tagger = pipeline(
         model=source,
         image_processor=source,
         trust_remote_code=True,
-        device=device,
-        dtype=torch.float16 if device == 0 else torch.float32,
+        device=index,
+        dtype=torch.float16 if index >= 0 else torch.float32,
     )
     print(say(60), flush=True)
     return tagger
 
 
 # ===== TAG THE FOLDER =====
+def find_pending_images(folders, exclude, force, report=None):
+    last_report = float("-inf")
+
+    def update(stage, done, total=None, *, immediate=False):
+        nonlocal last_report
+        if report is None:
+            return
+        now = time.monotonic()
+        if immediate or now - last_report >= 0.5:
+            report(stage, done, total)
+            last_report = now
+
+    update("discover", 0, immediate=True)
+    files = set()
+    for folder in folders:
+        for path in image_files(folder, exclude):
+            if path not in files:
+                files.add(path)
+                update("discover", len(files))
+    ordered = sorted(files)
+    total = len(ordered)
+    if force or not total:
+        return total, list(enumerate(ordered, 1))
+
+    update("checking", 0, total, immediate=True)
+    pending = []
+    for index, path in enumerate(ordered, 1):
+        if not sidecar_path(path).is_file():
+            pending.append((index, path))
+        update("checking", index, total, immediate=index == total)
+    return total, pending
+
+
 def main():
+    from oubi_web import TAG_PREVIEW_EVENT, TAG_SCAN_EVENT
+
+    report_preview = os.environ.get("OUBI_WEB_TAG_PREVIEW") == "1"
+
+    def report_scan(stage, done, total):
+        print(TAG_SCAN_EVENT + json.dumps([stage, done, total]), flush=True)
+
     ap = argparse.ArgumentParser()
     ap.add_argument("folder", nargs="+")
     ap.add_argument("--model", default="pixai-labs/pixai-tagger-v1.0")
     ap.add_argument("--csv", default="tags.csv")
-    ap.add_argument("--no-txt", action="store_true", help="не писать .txt рядом с картинками")
+    ap.add_argument("--no-txt", action="store_true", help="не писать .txt в подпапку tags")
+    ap.add_argument("--exclude")
     ap.add_argument("--force", action="store_true", help="переразметить уже размеченные")
     ap.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    ap.add_argument("--device", choices=("auto", "cpu", "amd", "nvidia"), default="auto")
+    ap.add_argument("--gpu-arch")
+    ap.add_argument("--gpu-uuid")
     args = ap.parse_args()
     if args.batch_size < 1:
         print(say(61), file=sys.stderr)
         return 1
 
+    if args.device == "amd":
+        os.environ.pop("HSA_OVERRIDE_GFX_VERSION", None)
+    elif args.device == "nvidia":
+        if not args.gpu_uuid or not GPU_UUID.fullmatch(args.gpu_uuid):
+            print(say(129), file=sys.stderr, flush=True)
+            return 1
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_uuid
     gfx = apply_gfx_override()
     if gfx:
         print("HSA_OVERRIDE_GFX_VERSION:", gfx)
     print(say(62, count=args.batch_size), flush=True)
     print(say(63), flush=True)
 
-    tagger = load_tagger(args.model)
-    from PIL import Image
-
-    print(say(64), flush=True)
-    files = []
-    seen = set()
-    for folder in args.folder:
-        for path in Path(folder).rglob("*"):
-            if path.suffix.lower() not in EXTS or path in seen:
-                continue
-            seen.add(path)
-            files.append(path)
-    files.sort()
-    pending = []
-    for index, path in enumerate(files, 1):
-        if path.with_suffix(".txt").exists() and not args.force:
-            continue
-        pending.append((index, path))
-    print(say(65, total=len(files), done=len(files) - len(pending), left=len(pending)), flush=True)
+    try:
+        tagger = load_tagger(args.model, args.device, args.gpu_arch)
+    except GpuError as error:
+        print(say(error.message_id), file=sys.stderr, flush=True)
+        return 1
+    if not report_preview:
+        print(say(64), flush=True)
+    total, pending = find_pending_images(args.folder, args.exclude, args.force, report_scan if report_preview else None)
+    print(say(65, total=total, done=total - len(pending), left=len(pending)), flush=True)
+    if report_preview:
+        report_scan(None, 0, None)
     if not pending:
         print(say(66), flush=True)
 
     csv_path = Path(args.csv)
     new_csv = not csv_path.exists()
+    progress_root = os.environ.get("OUBI_PROGRESS_ROOT")
     started = time.time()
     done = 0
     with open(csv_path, "a", newline="", encoding="utf-8") as handle:
@@ -364,17 +419,22 @@ def main():
             loaded = []
             for index, path in batch:
                 try:
-                    loaded.append((index, path, Image.open(path).convert("RGB")))
+                    with open_image(path, jpeg_xl=path.suffix.lower() == JPEG_XL_SUFFIX) as image:
+                        loaded.append((index, path, image.convert("RGB")))
                 except Exception as error:
                     print(say(67, path=path, error=error), file=sys.stderr)
             if not loaded:
                 continue
             if len(loaded) == 1:
                 index, path, _image = loaded[0]
-                print(say(68, path=path, index=index, total=len(files)), flush=True)
+                display_path = ("/" + path.relative_to(progress_root).as_posix()
+                                if progress_root and path.is_relative_to(progress_root) else path)
+                print(say(68, path=display_path, index=index, total=total), flush=True)
             else:
-                print(say(69, start=loaded[0][0], end=loaded[-1][0], total=len(files)), flush=True)
+                print(say(69, start=loaded[0][0], end=loaded[-1][0], total=total), flush=True)
             results = tag_images(tagger, [image for _, _, image in loaded])
+            report_changes(path for (_, path, _), result in zip(loaded, results) if not isinstance(result, Exception))
+            last_tagged = None
             for (index, path, image), result in zip(loaded, results):
                 image.close()
                 if isinstance(result, Exception):
@@ -382,11 +442,14 @@ def main():
                     continue
                 cats = categories_of(result)
                 if not args.no_txt:
-                    path.with_suffix(".txt").write_text(
+                    sidecar = sidecar_path(path)
+                    sidecar.parent.mkdir(exist_ok=True)
+                    sidecar.write_text(
                         ", ".join(tag for name in ORDER for tag in cats[name]),
                         encoding="utf-8",
                     )
-                writer.writerow([str(path)] + [", ".join(cats[name]) for name in ORDER])
+                writer.writerow([str(stored_image_path(path))] + [", ".join(cats[name]) for name in ORDER])
+                last_tagged = path
                 done += 1
                 if done % 50 == 0:
                     handle.flush()
@@ -405,6 +468,9 @@ def main():
                     ),
                     flush=True,
                 )
+            if report_preview and last_tagged is not None:
+                handle.flush()
+                print(TAG_PREVIEW_EVENT + json.dumps(str(last_tagged)), flush=True)
     print(say(71, count=done))
     return 0
 

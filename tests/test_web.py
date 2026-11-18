@@ -1,17 +1,22 @@
+import json
 import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from oubi_files import sidecar_path
 from oubi_web import (
     App,
+    TAG_SCAN_EVENT,
     absolute_folders,
     first_character,
     flag_on,
     folder_names,
     mark,
+    merge_favorites,
     parse_progress,
     preflight,
     reject_reason,
@@ -27,18 +32,35 @@ from oubi_web import (
     write_layout,
     images_with_tag,
     images_with_tags,
+    recent_tagged,
     tags_in_folders,
     detect_lang,
     read_lang,
+    read_language_choice,
+    page_bytes,
     write_lang,
     load_catalogs,
     text,
-    placeholder_names,
+    placeholder_fields,
 )
 from sort_images import under_roots
 
 
 class WebTests(unittest.TestCase):
+    def test_identify_scan_progress_keeps_phase_time_and_stays_out_of_history(self):
+        app = App()
+        with patch("oubi_web.time.monotonic", side_effect=[2, 7, 8, 10]):
+            app.note(TAG_SCAN_EVENT + '["discover", 0, null]', echo=False)
+            app.note(TAG_SCAN_EVENT + '["discover", 120, null]', echo=False)
+            self.assertEqual(app.status()["tag_scan"],
+                             {"stage": "discover", "done": 120, "total": None, "elapsed": 5})
+            app.note(TAG_SCAN_EVENT + '["checking", 18, 120]', echo=False)
+            self.assertEqual(app.status()["tag_scan"],
+                             {"stage": "checking", "done": 18, "total": 120, "elapsed": 2})
+        app.note(TAG_SCAN_EVENT + '[null, 0, null]', echo=False)
+        self.assertNotIn("tag_scan", app.status())
+        self.assertEqual(app.status()["log"], [])
+
     def test_parse_download_tag_and_sort(self):
         self.assertEqual(parse_progress("Скачивание: 25% (1.0 КБ из 4.0 КБ), сейчас 1.0 КБ/с")["percent"], 25)
         self.assertEqual(parse_progress("Разметка: 10% (2 из 20), 0.20 карт./с, осталось ~1.0 ч")["kind"], "tag")
@@ -99,7 +121,8 @@ class WebTests(unittest.TestCase):
             folder.mkdir()
             image = folder / "a.jpg"
             image.write_bytes(b"jpg")
-            image.with_suffix(".txt").write_text("1girl", encoding="utf-8")
+            sidecar_path(image).parent.mkdir()
+            sidecar_path(image).write_text("1girl", encoding="utf-8")
             self.assertEqual(resolve_under(base, "pack"), folder.resolve())
             with self.assertRaises(ValueError):
                 resolve_under(base, "../outside")
@@ -115,7 +138,7 @@ class WebTests(unittest.TestCase):
             paths, error = absolute_folders(["pack"], base)
             self.assertIsNone(error)
             self.assertEqual(paths, [str(folder.resolve())])
-            self.assertEqual(absolute_folders([], base)[1], "Нужно выбрать папки.")
+            self.assertEqual(absolute_folders([], base, language="ru")[1], "Нужно выбрать папки.")
             (base / "b.jpg").write_bytes(b"jpg")
             self.assertEqual(folder_names(base / "empty" if False else base), ["pack"])
             only = base / "loose"
@@ -152,6 +175,8 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(len(read_genres(path)), 20)
                 self.assertFalse(write_genres(["y"] * 21, path))
                 self.assertEqual(len(read_genres(path)), 20)
+                self.assertTrue(write_genres([""], path))
+                self.assertEqual(read_genres(path), [])
                 os.environ["OUBI_GENRE_20"] = "last"
                 empty = Path(tmp) / "missing.txt"
                 self.assertEqual(read_genres(empty)[-1], "last")
@@ -162,8 +187,30 @@ class WebTests(unittest.TestCase):
             else:
                 os.environ["OUBI_GENRE_1"] = previous
 
+    def test_genre_controls_use_the_server_limit(self):
+        with patch("oubi_web.MAX_GENRES", 24):
+            page = page_bytes([], genres=["example"] * 25)
+        self.assertIn(b"const maxGenres = 24;", page)
+        self.assertEqual(page.count(b'"example"'), 24)
+
 
 class LayoutTests(unittest.TestCase):
+    def test_layout_moves_only_the_legacy_default_and_keeps_saved_sizes(self):
+        import tempfile
+        old = {"left": ["buttons", "folders", "progress", "log"], "mid": ["preview", "genres"],
+               "right": ["info", "filter"]}
+        new = {**old, "mid": ["preview", "filter"], "right": ["info", "genres"]}
+        custom = {**old, "left": ["folders", "buttons", "progress", "log"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layout.json"
+            sizes = {"left": 300, "mid": 400, "right": 500, "heights": {"genres": 160}}
+            path.write_text(json.dumps({**sizes, "blocks": old}), encoding="utf-8")
+            self.assertEqual(read_layout(path), {**sizes, "blocks": new})
+            path.write_text(json.dumps({**sizes, "blocks": custom}), encoding="utf-8")
+            self.assertEqual(read_layout(path), {**sizes, "blocks": custom})
+            self.assertTrue(write_layout({**sizes, "blocks": old}, path, replace=True))
+            self.assertEqual(read_layout(path), {**sizes, "blocks": old})
+
     def test_layout_is_kept_on_disk(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
@@ -192,6 +239,30 @@ class LayoutTests(unittest.TestCase):
             self.assertTrue(write_layout({"heights": {"folders": 240, "nope": 10}}, path))
             self.assertEqual(read_layout(path)["heights"], {"folders": 240})
 
+    def test_imported_layout_replaces_old_sizes_and_validates_the_whole_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layout.json"
+            self.assertTrue(write_layout({"heights": {"folders": 240}, "preview": 700}, path))
+            layout = {
+                "left": 240, "mid": 460, "right": 300,
+                "blocks": {"left": ["log"], "mid": ["buttons", "folders", "progress"],
+                           "right": ["preview", "genres", "info", "filter"]},
+                "heights": {},
+            }
+            self.assertFalse(write_layout({**layout, "heights": {"folders": -1}}, path, replace=True))
+            self.assertEqual(read_layout(path)["heights"], {"folders": 240})
+            self.assertTrue(write_layout(layout, path, replace=True))
+            self.assertEqual(read_layout(path), {key: value for key, value in layout.items() if key != "heights"})
+
+    def test_imported_favorites_merge_without_duplicates_across_groups(self):
+        current = {"character": ["Existing"], "event": ["Festive"]}
+        incoming = {"character": [" festive ", "New"], "event": ["EXISTING", "new", "Summer"]}
+        self.assertEqual(merge_favorites(current, incoming),
+                         {"character": ["Existing", "New"], "event": ["Festive", "Summer"]})
+        with self.assertRaises(ValueError):
+            merge_favorites(current, {"character": ["ok"], "event": [50]})
+
     def test_images_with_tag(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
@@ -199,7 +270,8 @@ class LayoutTests(unittest.TestCase):
             root.mkdir()
             picture = root / "a.jpg"
             picture.write_bytes(b"x")
-            other = root / "b.jpg"
+            other = root / "other" / "b.jpg"
+            other.parent.mkdir()
             other.write_bytes(b"x")
             csv_path = Path(tmp) / "tags.csv"
             csv_path.write_text(
@@ -212,6 +284,9 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(images_with_tag("missing", csv_path, root), [])
             self.assertEqual(images_with_tags(["comic", "1girl"], csv_path, root), ["a.jpg"])
             self.assertEqual(images_with_tags(["comic", "portrait"], csv_path, root), [])
+            self.assertEqual(images_with_tags(["comic"], csv_path, root, folders=["other"]), [])
+            self.assertEqual(images_with_tags(["1girl"], csv_path, root, folders=["other"]), ["other/b.jpg"])
+            self.assertEqual(recent_tagged(["other"], root=root, csv=csv_path), ["other/b.jpg"])
 
     def test_vocabulary_comes_from_selected_folders(self):
         import tempfile
@@ -236,7 +311,8 @@ class LayoutTests(unittest.TestCase):
     def test_language_detects_browser_and_keeps_a_choice(self):
         import tempfile
         self.assertEqual(detect_lang("ru-RU,ru;q=0.9,en;q=0.8"), "ru")
-        self.assertEqual(detect_lang("fr-FR,fr;q=0.9"), "en")
+        self.assertEqual(detect_lang("fr-FR,fr;q=0.9", {}), "en")
+        self.assertEqual(detect_lang("ru;q=0,en;q=0.8,ru-RU;q=0.4", {}), "en")
         self.assertEqual(detect_lang("", {"LANG": "ru_RU.UTF-8"}), "ru")
         packs = load_catalogs()
         self.assertEqual(packs["ru"]["1"], "Опознать")
@@ -248,9 +324,36 @@ class LayoutTests(unittest.TestCase):
             self.assertTrue(write_lang("ru", path))
             self.assertEqual(read_lang(path, "en-US"), "ru")
             self.assertFalse(write_lang("de", path))
-        self.assertNotEqual(placeholder_names("Опознать {missing}"), placeholder_names("Identify"))
+            self.assertTrue(write_lang("auto", path))
+            self.assertEqual(read_language_choice(path), "auto")
+            self.assertEqual(read_lang(path, "en-US"), "en")
+            self.assertEqual(read_lang(path, "ru-RU"), "ru")
+        rendered = page_bytes([], lang="en", language_choice="auto")
+        self.assertIn(b'<html lang="en">', rendered)
+        self.assertIn(b'let languageChoice = "auto";', rendered)
         self.assertIn("1", packs["en"])
         self.assertTrue(text(1))
+
+    def test_catalog_falls_back_for_invalid_fields_or_format_specs(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            english = root / "English.ini"
+            original = "{name} {0:03d} {value:{width}}"
+            rows = "\n".join(f"{number} = {original} = {original}" for number in range(1, 7))
+            english.write_text(f"; code = en\n{rows}", encoding="utf-8-sig")
+            russian = root / "Russian.ini"
+            valid = "{0:03d} {value:{width}} {name}"
+            candidates = [valid, "{name} {1:03d} {value:{width}}", "{name} {0:d} {value:{width}}", "{name} {0:03d} {value:{size}}", "", "{name"]
+            rows = "\n".join(f"{number} = {original} = {value}" for number, value in enumerate(candidates, 1))
+            russian.write_text(f"; code = ru\n{rows}", encoding="utf-8-sig")
+            actual = load_catalogs(root)["ru"]
+            self.assertEqual(actual["1"], valid)
+            for number in range(2, 7):
+                self.assertEqual(actual[str(number)], original)
+        self.assertNotEqual(placeholder_fields("{:d} {:s}"), placeholder_fields("{:s} {:d}"))
+        self.assertEqual(placeholder_fields("{{name}}"), placeholder_fields("literal"))
 
 
 if __name__ == "__main__":

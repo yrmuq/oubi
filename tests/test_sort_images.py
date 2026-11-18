@@ -1,6 +1,8 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -10,6 +12,7 @@ from sort_images import (
     majority_tag,
     series_folder_name,
     series_targets,
+    sort_history,
     stick_character,
 )
 
@@ -26,6 +29,21 @@ def page(char, girls="1girl", copy="evangelion"):
 
 
 class SeriesTests(unittest.TestCase):
+    def test_sort_history_opens_once_and_flushes_full_and_partial_batches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            history = root / "sorted.txt"
+            images = [root / f"{number}.jpg" for number in range(26)]
+            with patch("sort_images.open", wraps=open, create=True) as open_history:
+                with self.assertRaises(KeyboardInterrupt), sort_history(history) as record:
+                    self.assertFalse(history.exists())
+                    for image in images:
+                        record(image)
+                    self.assertEqual(history.read_text().splitlines(), [str(image) for image in images[:25]])
+                    raise KeyboardInterrupt()
+                open_history.assert_called_once_with(history, "a", encoding="utf-8")
+            self.assertEqual(history.read_text().splitlines(), [str(image) for image in images])
+
     def test_pages_group_and_three_digit_number_stays_out(self):
         stem = "/images/pack/138092568-1e90743ef45f5c9b5e3f02759210c71c_p{}_master1200.jpg"
         paths = [stem.format(n) for n in (1, 2, 3, 4, 5)]
