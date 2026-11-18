@@ -93,11 +93,12 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .duplicate-keep { position: absolute; z-index: 1; bottom: 8px; max-width: calc(100% - 16px); overflow-wrap: anywhere; }
 #duplicate-keep-left { right: 8px; }
 #duplicate-keep-right { left: 8px; }
-.duplicate-card figcaption { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
+.duplicate-card figcaption { block-size: 2.8em; overflow: auto; scrollbar-width: thin; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; line-height: 1.4; }
 .duplicate-difference { color: #111; }
 .duplicate-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
 #duplicate-different { margin-inline-start: auto; }
-#duplicate-status { margin: 0; font-size: 0.9rem; }
+#duplicate-nav:not([hidden]) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+#duplicate-status { margin: 0; overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
 #duplicate-notice:empty { display: none; }
 @media (max-width: 650px) {
   .top.duplicates { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: minmax(150px, 34%) minmax(180px, 1fr); }
@@ -795,6 +796,7 @@ function renderDuplicateCaption(info, file, other) {
     mark.textContent = value;
     info.append(mark);
   });
+  info.title = info.textContent;
 }
 
 function renderDuplicatePage() {
@@ -815,6 +817,7 @@ function renderDuplicatePage() {
     if (!pair) {
       button.onclick = null;
       info.textContent = "";
+      info.removeAttribute("title");
       continue;
     }
     const file = pair.images[index];
@@ -833,7 +836,8 @@ function renderDuplicatePage() {
   document.getElementById("duplicate-actions").hidden = !pair;
   document.getElementById("duplicate-prev").disabled = !pair || duplicateBusy || page.index === 0;
   document.getElementById("duplicate-next").disabled = !pair || duplicateBusy || page.index + 1 >= page.count;
-  document.getElementById("duplicate-status").textContent = pair ?
+  const status = document.getElementById("duplicate-status");
+  status.title = status.textContent = pair ?
     t(271).replace("{current}", page.index + 1).replace("{total}", page.count).replace("{distance}", pair.distance) : "";
   document.getElementById("duplicate-notice").textContent =
     duplicateError || (duplicateSearching ? t(299) : pair ? "" : t(page?.searched ? 269 : 270));
