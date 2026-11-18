@@ -1,9 +1,12 @@
 import tempfile
+import threading
 import unittest
 from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from oubi_cryptomator import Vault
 from oubi_duplicates import DuplicateError, DuplicateStore, duplicate_file, matching_pairs
 from oubi_files import sidecar_path
 from oubi_web import App, Workspace
@@ -16,6 +19,82 @@ class DuplicateTests(unittest.TestCase):
             set(matching_pairs(entries, lambda: False)),
             {("a", "b", 8), ("b", "c", 1), ("a", "d", 0), ("b", "d", 8)},
         )
+
+    def test_slow_deletion_leaves_other_pairs_browsable_and_pauses_on_vault_close(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = Workspace.encrypted(root)
+            app = App(workspace)
+            store = app.duplicate_results()
+            self.addCleanup(store.db.close)
+            vault = Vault(root, root)
+            vault.app = app
+            vault.review_identity = b"same-vault"
+            vault.process = SimpleNamespace(poll=lambda: None)
+            names = ("a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg")
+            with closing(store.copy()) as db:
+                for name in names:
+                    (root / name).write_bytes(b"image")
+                    _, revision, _, size = duplicate_file(workspace, name)
+                    db.execute("INSERT INTO images VALUES (?, ?, 0, 20, 20, ?)", (name, revision, size))
+                db.executemany("INSERT INTO pairs VALUES (?, ?, 0)", [
+                    ("a.jpg", "b.jpg"), ("b.jpg", "c.jpg"), ("c.jpg", "d.jpg"), ("e.jpg", "f.jpg"),
+                ])
+                store.install(db)
+
+            def current_pair():
+                images = app.duplicate_page(0)["pair"]["images"]
+                return [image[key] for key in ("path", "revision", "live_revision") for image in images]
+
+            started, release = threading.Event(), threading.Event()
+            remove = app._remove_images
+
+            def slow_remove(files, **kwargs):
+                started.set()
+                if not release.wait(5):
+                    raise TimeoutError("test did not release the deletion")
+                return remove(files, **kwargs)
+
+            with patch.object(app, "_remove_images", side_effect=slow_remove), patch.object(vault, "_unmount"):
+                try:
+                    app.queue_duplicate_review(current_pair(), "left", "en")
+                    self.assertTrue(started.wait(3))
+                    self.assertEqual(app.deletion_status()["items"][0]["state"], "running")
+                    self.assertTrue((root / "b.jpg").exists())
+                    self.assertEqual(current_pair()[:2], ["c.jpg", "d.jpg"])
+                    app.queue_duplicate_review(current_pair(), "both", "en")
+                    self.assertEqual(current_pair()[:2], ["e.jpg", "f.jpg"])
+                    app.queue_duplicate_review(current_pair(), "left", "en")
+                    self.assertEqual(app.duplicate_page(0)["count"], 0)
+                    close = threading.Thread(target=vault.close, daemon=True)
+                    close.start()
+                    with app.review_ready:
+                        self.assertTrue(app.review_ready.wait_for(lambda: app.review_paused, timeout=3))
+                finally:
+                    release.set()
+                close.join(timeout=3)
+                self.assertFalse(close.is_alive())
+            self.assertFalse((root / "b.jpg").exists())
+            self.assertTrue((root / "d.jpg").exists())
+            self.assertTrue((root / "f.jpg").exists())
+            (root / "d.jpg").write_bytes(b"replacement during vault lock")
+
+            reopened = App(workspace)
+            vault.app = reopened
+            vault.review_identity = b"same-vault"
+            vault.process = SimpleNamespace(poll=lambda: None)
+            with patch.object(vault, "is_mounted", return_value=True):
+                vault.resume_duplicate_reviews()
+                with reopened.review_ready:
+                    self.assertTrue(reopened.review_ready.wait_for(lambda: reopened.review_worker is None, timeout=3))
+            self.addCleanup(reopened.duplicate_store.db.close)
+            failures = reopened.deletion_status()["items"]
+            self.assertEqual([(item["files"], item["state"]) for item in failures],
+                             [(('c.jpg', 'd.jpg'), "failed")])
+            self.assertIn("[284]", failures[0]["message"])
+            self.assertTrue((root / "c.jpg").exists())
+            self.assertEqual((root / "d.jpg").read_bytes(), b"replacement during vault lock")
+            self.assertFalse((root / "f.jpg").exists())
 
     def test_dismissal_persists_and_deletion_rejects_replaced_survivor(self):
         with tempfile.TemporaryDirectory() as tmp:

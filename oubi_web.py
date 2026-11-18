@@ -1184,6 +1184,14 @@ class App:
         self.duplicate_store = None
         self.duplicate_lock = threading.Lock()
         self.lock = threading.Lock()
+        self.review_ready = threading.Condition(self.lock)
+        self.reviews = []
+        self.review_worker = None
+        self.review_paused = False
+        self.review_version = 0
+        self.review_removed = 0
+        self.review_failed = 0
+        self.review_mount = None
         self.gpu_lock = threading.Lock()
         self.rocm, self.nvidia = devices or (RocmRuntime(), NvidiaRuntime())
         self.gpu_prompt = None
@@ -1467,6 +1475,8 @@ class App:
                 return False
             if self.folder_scan or ((self.catalog is not None or self.folder_cache is not None) and not refresh):
                 return True
+            if self.review_worker is not None:
+                return False
             self.gallery_removed.clear()
             cancel = threading.Event()
             scan_id = uuid4().hex
@@ -1513,70 +1523,179 @@ class App:
 
     def duplicate_page(self, index):
         store = self.duplicate_results()
-        with store.lock:
-            while True:
-                page = store.page(index)
-                try:
-                    for pair in (page["pair"], page["next"]):
-                        if pair is not None:
-                            for item in pair["images"]:
-                                item["live_revision"] = self.check_duplicate_image(item["path"], item["revision"])
-                except DuplicateError as error:
+        while True:
+            with store.lock:
+                with self.lock:
+                    files, pairs = self._review_exclusions()
+                page = store.page(index, files, pairs)
+            try:
+                for pair in (page["pair"], page["next"]):
+                    if pair is not None:
+                        for item in pair["images"]:
+                            item["live_revision"] = self.check_duplicate_image(item["path"], item["revision"])
+            except DuplicateError as error:
+                with store.lock:
                     store.drop_pairs(error.values["path"])
+            else:
+                return page
+
+    def _review_exclusions(self):
+        pending = [item for item in self.reviews if item["state"] in ("waiting", "running")]
+        return ({path for item in pending for path in item["files"]},
+                [item["pair"][:2] for item in pending if not item["files"]])
+
+    def queue_duplicate_review(self, pair, decision, language):
+        pair = tuple(pair)
+        store = self.duplicate_results()
+        with store.lock, self.review_ready:
+            if self.job_running or self.review_paused:
+                raise DuplicateError(283)
+            files, pairs = self._review_exclusions()
+            if (files.intersection(pair[:2]) or pair[:2] in pairs or not store.contains(*pair[:4])):
+                raise DuplicateError(295)
+            targets = {"left": [pair[1]], "right": [pair[0]], "both": pair[:2], "different": []}[decision]
+            item = {"pair": pair, "decision": decision, "language": language, "files": targets, "state": "waiting"}
+            self.reviews.append(item)
+            try:
+                self._start_review_worker()
+            except RuntimeError as error:
+                self.reviews.remove(item)
+                raise DuplicateError(315, error=str(error)) from error
+            self.review_version += 1
+
+    def _start_review_worker(self):
+        if self.review_worker is None and any(item["state"] == "waiting" for item in self.reviews):
+            worker = threading.Thread(target=self._work_duplicate_reviews, daemon=True)
+            worker.start()
+            self.review_worker = worker
+
+    def _work_duplicate_reviews(self):
+        while True:
+            with self.review_ready:
+                self.review_ready.wait_for(lambda: self.review_paused or self.folder_scan is None)
+                item = next((item for item in self.reviews if item["state"] == "waiting"), None)
+                if self.review_paused or item is None:
+                    self.review_worker = None
+                    self.review_version += 1
+                    self.review_ready.notify_all()
+                    return
+                item["state"] = "running"
+                self.review_version += 1
+            language = item["language"]
+            try:
+                self._check_review_mount()
+                pair = item["pair"]
+                if item.get("remounted"):
+                    left, right, left_revision, right_revision = pair[:4]
+                    pair = [*pair[:4], self.check_duplicate_image(left, left_revision),
+                            self.check_duplicate_image(right, right_revision)]
+                message = self.review_duplicate(pair, item["decision"], language)
+                state = "warning" if message else "done"
+            except DuplicateError as error:
+                state = "failed"
+                message = f"[{error.code}] " + text(error.code, language=language, **error.values)
+            except Exception as error:
+                state = "failed"
+                message = "[316] " + text(316, language=language, error=str(error))
+            with self.review_ready:
+                if message:
+                    self._append_line(message)
+                if item["files"] and state != "failed":
+                    self.review_removed += 1
+                    if self.workspace is None:
+                        self.folder_cache = None
+                if state == "failed":
+                    self.review_failed += 1
+                if item["files"] and state in ("warning", "failed"):
+                    item.update(state=state, message=message)
                 else:
-                    return page
+                    self.reviews.remove(item)
+                self.review_version += 1
+
+    def pause_duplicate_reviews(self):
+        with self.review_ready:
+            self.review_paused = True
+            self.review_ready.notify_all()
+            self.review_ready.wait_for(lambda: self.review_worker is None)
+            return self.reviews
+
+    def resume_duplicate_reviews(self, reviews=None, mounted=None):
+        with self.review_ready:
+            if reviews is not None:
+                self.reviews = reviews
+                self.review_mount = mounted
+                for item in reviews:
+                    item["remounted"] = True
+            self.review_paused = False
+            self._start_review_worker()
+
+    def deletion_status(self):
+        with self.lock:
+            return self._deletion_status()
+
+    def _deletion_status(self):
+        items = [{"files": item["files"], "state": item["state"], "message": item.get("message", "")}
+                 for item in self.reviews if item["files"]]
+        return {"items": items, "busy": self.review_worker is not None, "version": self.review_version,
+                "removed": self.review_removed, "failed": self.review_failed}
 
     def review_duplicate(self, pair, decision, language):
         store = self.duplicate_results()
         with store.lock:
             if not store.contains(*pair[:4]):
                 raise DuplicateError(295)
-            left, right, left_revision, right_revision, left_live, right_live = pair
-            self.check_duplicate_image(left, left_revision, left_live)
-            self.check_duplicate_image(right, right_revision, right_live)
-            if decision == "different":
-                try:
-                    store.dismiss(pair[:4])
-                except (OSError, sqlite3.Error) as error:
-                    raise DuplicateError(285, error=str(error)) from error
-                return ""
-            validate_keep = None
-            if decision == "both":
-                files = [(left, left_live), (right, right_live)]
-            else:
-                keep, keep_revision, keep_live, remove, revision = (
-                    (left, left_revision, left_live, right, right_live) if decision == "left"
-                    else (right, right_revision, right_live, left, left_live)
-                )
-                files = [(remove, revision)]
-
-                def validate_keep():
-                    self.check_duplicate_image(keep, keep_revision, keep_live)
-
-            paths = [relative for relative, _ in files]
+        self._check_review_mount()
+        left, right, left_revision, right_revision, left_live, right_live = pair
+        self.check_duplicate_image(left, left_revision, left_live)
+        self.check_duplicate_image(right, right_revision, right_live)
+        if decision == "different":
             try:
-                cleanup, thumbnail_errors = self._remove_images(files, validate_keep=validate_keep)
-            except ImageChangedError as error:
-                raise DuplicateError(284, path=str(error)) from error
-            except (OSError, ValueError, sqlite3.Error, csv.Error) as error:
-                if decision == "both":
-                    raise DuplicateError(303, left=left, right=right, error=str(error)) from error
-                raise DuplicateError(286, path=paths[0], error=str(error)) from error
-            warnings = []
-            try:
-                store.remove(*paths)
+                store.dismiss(pair[:4])
             except (OSError, sqlite3.Error) as error:
+                raise DuplicateError(285, error=str(error)) from error
+            return ""
+        validate_keep = None
+        if decision == "both":
+            files = [(left, left_live), (right, right_live)]
+        else:
+            keep, keep_revision, keep_live, remove, revision = (
+                (left, left_revision, left_live, right, right_live) if decision == "left"
+                else (right, right_revision, right_live, left, left_live)
+            )
+            files = [(remove, revision)]
+
+            def validate_keep():
+                self.check_duplicate_image(keep, keep_revision, keep_live)
+
+        paths = [relative for relative, _ in files]
+        try:
+            cleanup, thumbnail_errors = self._remove_images(files, validate_keep=validate_keep)
+        except ImageChangedError as error:
+            raise DuplicateError(284, path=str(error)) from error
+        except (OSError, ValueError, sqlite3.Error, csv.Error) as error:
+            if decision == "both":
+                raise DuplicateError(303, left=left, right=right, error=str(error)) from error
+            raise DuplicateError(286, path=paths[0], error=str(error)) from error
+        warnings = []
+        try:
+            store.remove(*paths)
+        except (OSError, sqlite3.Error) as error:
+            with store.lock:
                 store.drop_pairs(*paths)
-                if decision == "both":
-                    warnings.append("[304] " + text(304, language=language, error=str(error)))
-                else:
-                    warnings.append("[287] " + text(287, language=language, path=paths[0], error=str(error)))
-            if cleanup:
-                code = 305 if decision == "both" else 189
-                warnings.append(f"[{code}] " + text(code, language=language))
-            for relative, error in thumbnail_errors:
-                warnings.append("[306] " + text(306, language=language, path=relative, error=error))
-            return " ".join(warnings)
+            if decision == "both":
+                warnings.append("[304] " + text(304, language=language, error=str(error)))
+            else:
+                warnings.append("[287] " + text(287, language=language, path=paths[0], error=str(error)))
+        if cleanup:
+            code = 305 if decision == "both" else 189
+            warnings.append(f"[{code}] " + text(code, language=language))
+        for relative, error in thumbnail_errors:
+            warnings.append("[306] " + text(306, language=language, path=relative, error=error))
+        return " ".join(warnings)
+
+    def _check_review_mount(self):
+        if self.review_mount is not None and not self.review_mount():
+            raise DuplicateError(317)
 
     def remove_image(self, relative, revision, *, validate_keep=None):
         cleanup, thumbnail_errors = self._remove_images([(relative, revision)], validate_keep=validate_keep)
@@ -1587,6 +1706,7 @@ class App:
         catalog = self.catalog
 
         def before_commit():
+            self._check_review_mount()
             if validate_keep is not None:
                 validate_keep()
             if catalog is not None:
@@ -1731,6 +1851,7 @@ class App:
                     self.scan_progress = None
                 self.folder_scan = None
                 self.gallery_removed.clear()
+                self.review_ready.notify_all()
 
     def gallery(self, directories, tags=None):
         paths = self.paths
@@ -1764,6 +1885,7 @@ class App:
                 "preview_file": "",
                 "scan_progress": self.scan_progress,
                 "log": self.lines[-80:],
+                "deletions": self._deletion_status(),
             }
         if tag_scan:
             payload["tag_scan"] = {"stage": tag_scan["stage"], "done": tag_scan["done"], "total": tag_scan["total"],
@@ -1839,6 +1961,8 @@ class App:
         with self.lock:
             if self.job_running:
                 return text(33, language=language)
+            if self.review_worker is not None:
+                return "[314] " + text(314, language=language)
             try:
                 python = gpu_runtime.acquire(gpu_target, uuid) if gpu_runtime else None
             except GpuError as error:
@@ -2066,16 +2190,14 @@ class Handler(BaseHTTPRequestHandler):
             app = self._scoped_app(scope)
             if app is None:
                 return self._error_response(409, 172)
-            if app.status()["job_running"]:
-                return self._duplicate_error(409, 283)
             try:
-                warning = app.review_duplicate(pair, decision, self._language())
+                app.queue_duplicate_review(pair, decision, self._language())
             except DuplicateError as error:
                 status = 409 if error.code in {284, 295} else 500
                 return self._duplicate_error(status, error.code, **error.values)
             except sqlite3.Error as error:
                 return self._duplicate_error(500, 297, error=str(error))
-            return 200, {"ok": True, "warning": warning}
+            return 202, {"ok": True}
 
     def _delete_image(self, payload):
         scope = payload.get("scope")
@@ -2094,8 +2216,14 @@ class Handler(BaseHTTPRequestHandler):
             if app.status()["job_running"]:
                 self._error(409, 188)
                 return
+            if app.deletion_status()["busy"]:
+                self._send(*self._duplicate_error(409, 314))
+                return
             try:
                 cleanup_pending = app.remove_image(path, revision)
+            except DuplicateError as error:
+                self._send(*self._duplicate_error(409, error.code, **error.values))
+                return
             except ImageChangedError:
                 self._error(409, 187)
                 return
@@ -2125,6 +2253,7 @@ class Handler(BaseHTTPRequestHandler):
                         if refresh:
                             vault.app.note(text(263))
                         vault.app._ensure_count(refresh=refresh)
+                        vault.resume_duplicate_reviews()
                     except (OSError, ValueError, VaultError) as error:
                         vault.close()
                         if isinstance(error, VaultError):
@@ -2251,6 +2380,13 @@ class Handler(BaseHTTPRequestHandler):
                 if preview is not None:
                     with suppress(OSError):
                         thumbnails.write(name, revision, preview)
+                    try:
+                        if image_revision(file) != revision:
+                            raise ValueError(relative)
+                    except (OSError, ValueError):
+                        with suppress(OSError):
+                            thumbnails.remove(name)
+                        raise
                     return 200, preview, "image/webp"
             return 200, original, content_type(file)
         except (OSError, ValueError):
@@ -2498,6 +2634,7 @@ def main():
         server.serve_forever()
     finally:
         server.server_close()
+        app.pause_duplicate_reviews()
         with app.vault.lock:
             if opened := app.vault.app:
                 opened.stop()

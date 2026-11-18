@@ -192,12 +192,19 @@ body.arrange .block * { pointer-events: none; }
 .block.dragging { opacity: 0.4; }
 .block.drop-before { box-shadow: inset 0 3px 0 var(--pick); }
 .block.drop-after { box-shadow: inset 0 -3px 0 var(--pick); }
-.head-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; margin-inline-start: auto; }
+.head-tools { position: relative; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; margin-inline-start: auto; }
 .head-tools select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
 .settings-control { position: relative; }
 .settings-menu { position: absolute; inset-inline-end: 0; top: calc(100% + 6px); z-index: 5; min-width: 140px; padding: 4px; background: var(--pane); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 3px 12px #0003; }
 .settings-menu button { display: block; width: 100%; border-radius: 5px; background: transparent; color: var(--text); text-align: start; white-space: nowrap; }
 .settings-menu button:hover, .settings-menu button:focus-visible { background: var(--btn-2); }
+#deletion-control { position: static; }
+#deletion-menu { width: min(430px, calc(100vw - 32px)); max-height: 55vh; overflow: auto; padding: 8px; box-sizing: border-box; }
+#deletion-menu p, #deletion-items { margin: 0; }
+#deletion-items { padding: 0; list-style: none; }
+#deletion-items li { padding: 6px; overflow-wrap: anywhere; }
+#deletion-items li + li { border-top: 1px solid var(--line); }
+#deletion-items small { display: block; color: var(--muted); }
 #arrange { width: 32px; height: 32px; padding: 0; background: var(--btn-2); color: var(--text); }
 #arrange.on { background: var(--pick); color: #111; }
 #lang { height: 32px; padding: 0 8px; background: var(--btn-2); color: var(--text); }
@@ -329,6 +336,13 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   <button id="app-mode" type="button" class="secondary" aria-pressed="false">Sorting</button>
   <div class="head-tools">
     <button id="arrange" type="button" title="Move blocks">✎</button>
+    <div id="deletion-control" class="settings-control">
+      <button id="deletion-toggle" class="secondary" type="button" aria-expanded="false" aria-controls="deletion-menu"></button>
+      <div id="deletion-menu" class="settings-menu" hidden>
+        <p id="deletion-empty"></p>
+        <ul id="deletion-items"></ul>
+      </div>
+    </div>
     <div class="settings-control">
       <button id="import-settings" class="secondary" type="button" aria-expanded="false" aria-controls="settings-menu">Import</button>
       <div id="settings-menu" class="settings-menu" hidden>
@@ -561,6 +575,11 @@ const modeToggle = document.getElementById("app-mode");
 const importSettings = document.getElementById("import-settings");
 const exportSettings = document.getElementById("export-settings");
 const settingsMenu = document.getElementById("settings-menu");
+const deletionToggle = document.getElementById("deletion-toggle");
+const deletionMenu = document.getElementById("deletion-menu");
+const deletionItems = document.getElementById("deletion-items");
+const deletionEmpty = document.getElementById("deletion-empty");
+let deletionStatus = null;
 const settingsFile = document.getElementById("settings-file");
 let settingsTrigger = null;
 let settingsImport = null;
@@ -817,11 +836,7 @@ async function reviewDuplicate(decision) {
     if (scope !== vaultScope) return;
     if (response.ok) {
       await loadDuplicatePage(index);
-      if (decision !== "different") {
-        workspaceMutation++;
-        loadFolders();
-      }
-      if (data.warning) showNotice(data.warning);
+      tick().catch(() => {});
     } else {
       if (response.status === 409 || decision === "both") await loadDuplicatePage(index);
       duplicateError = data.error || "[289] " + t(289);
@@ -832,6 +847,46 @@ async function reviewDuplicate(decision) {
     duplicateBusy = false;
     renderDuplicatePage();
   }
+}
+
+function renderDeletionQueue() {
+  const items = deletionStatus?.items || [];
+  const count = items.reduce((sum, item) => sum + item.files.length, 0);
+  deletionToggle.textContent = t(307) + (count ? ` (${new Intl.NumberFormat(lang).format(count)})` : "");
+  if (deletionMenu.hidden) return;
+  deletionEmpty.hidden = items.length > 0;
+  deletionEmpty.textContent = t(308);
+  deletionItems.replaceChildren();
+  for (const item of items) {
+    const entry = document.createElement("li");
+    const state = document.createElement("small");
+    state.textContent = t({ waiting: 309, running: 310, failed: 311, warning: 312 }[item.state]);
+    entry.append(state);
+    for (const file of item.files) {
+      const path = document.createElement("div");
+      path.textContent = file;
+      entry.append(path);
+    }
+    if (item.message) {
+      const message = document.createElement("small");
+      message.textContent = item.message;
+      entry.append(message);
+    }
+    deletionItems.append(entry);
+  }
+}
+
+function updateDeletionQueue(data) {
+  if (!data || deletionStatus?.version === data.version) return;
+  const previous = deletionStatus;
+  deletionStatus = data;
+  renderDeletionQueue();
+  if (previous && (previous.removed !== data.removed || (previous.busy && !data.busy && data.removed))) {
+    workspaceMutation++;
+    loadFolders();
+    if (appMode !== "duplicates" && !workPreview) loadGallery(true);
+  }
+  if (previous && previous.failed !== data.failed && appMode === "duplicates" && !duplicateBusy) loadDuplicatePage();
 }
 
 function cancelPreviewRequest() {
@@ -886,6 +941,7 @@ function applyI18n() {
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   importSettings.textContent = t(223);
+  renderDeletionQueue();
   exportSettings.textContent = t(224);
   settingsMenu.querySelector('[data-settings="favorites"]').textContent = t(212);
   settingsMenu.querySelector('[data-settings="layout"]').textContent = t(225);
@@ -1158,6 +1214,9 @@ function useVault(scope, folder) {
   if (scope === vaultScope) return;
   if (deleteDialog.open && !deleteBusy) deleteDialog.close();
   vaultScope = scope;
+  deletionStatus = null;
+  closeDeletionMenu();
+  renderDeletionQueue();
   duplicatePage = null;
   duplicateRequest++;
   duplicateError = "";
@@ -1739,6 +1798,7 @@ async function tick() {
   statusShown = request;
   vaultToggle.hidden = !data.vault_enabled;
   useVault(data.vault_scope || "", data.vault_folder);
+  updateDeletionQueue(data.deletions);
   rocmState = data.rocm;
   nvidiaState = data.nvidia;
   if (gpuPrompt?.id !== data.gpu_prompt?.id) {
@@ -1774,7 +1834,7 @@ async function tick() {
   const ready = data.model === "ready";
   const picked = selected.size > 0;
   for (const id of ["tag", "sort", "plan"]) {
-    document.getElementById(id).disabled = busy || !picked ||
+    document.getElementById(id).disabled = busy || data.deletions?.busy || !picked ||
       (id === "tag" && appMode !== "duplicates" && (!ready || !readyDevices[deviceInput.value]));
   }
   document.getElementById("stop").disabled = !busy;
@@ -1790,7 +1850,7 @@ async function tick() {
   } else if (jobFinished && !workPreview && (!jobChanged || appMode === "gallery")) loadGallery();
   else if ((galleryMessage === 204 && (!scan || scan.stage === "done")) ||
            (scanFinished && vaultScope && selected.size && !pinned.length)) loadGallery();
-  recountFolders.disabled = recountPending || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
+  recountFolders.disabled = recountPending || data.deletions?.busy || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
   wasBusy = !!busy;
   workFile = data.preview_file || "";
   if (data.phase !== "duplicates" && jobChanged && (busy || lastJob !== null)) setPreviewMode(true);
@@ -2251,11 +2311,31 @@ async function exportSettingsFile(type, scope) {
 }
 
 importSettings.onclick = exportSettings.onclick = toggleSettingsMenu;
+function closeDeletionMenu(restoreFocus = false) {
+  if (deletionMenu.hidden) return;
+  deletionMenu.hidden = true;
+  deletionItems.replaceChildren();
+  deletionToggle.setAttribute("aria-expanded", "false");
+  if (restoreFocus) deletionToggle.focus();
+}
+deletionToggle.onclick = () => {
+  if (!deletionMenu.hidden) {
+    closeDeletionMenu();
+    return;
+  }
+  closeSettingsMenu();
+  deletionMenu.hidden = false;
+  deletionToggle.setAttribute("aria-expanded", "true");
+  renderDeletionQueue();
+  tick().catch(() => {});
+};
 document.addEventListener("click", event => {
   if (!event.target.closest(".settings-control")) closeSettingsMenu();
+  if (!event.target.closest("#deletion-control")) closeDeletionMenu();
 });
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && settingsTrigger) closeSettingsMenu(true);
+  if (event.key === "Escape") closeDeletionMenu(true);
 });
 settingsMenu.onclick = event => {
   const type = event.target.dataset.settings;

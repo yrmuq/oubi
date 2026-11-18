@@ -43,6 +43,7 @@
 | Image tile | Click to open the image in the preview. Press and hold, right-click, or press Shift+F10 on a focused tile to open its delete action. Confirm the file name before deleting. |
 | Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
+| Deletion queue | Show pending duplicate removals and errors. Review advances immediately while the server works through the queue in the current workspace. |
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
 | `Identify` | Show the live count of images found in the selected folders, then the progress of checking existing tags and tagging the remaining images. |
 | `Tagging device` | Choose CPU, AMD, or NVIDIA. Oubi selects an available installed GPU when the page opens. |
@@ -181,6 +182,8 @@ If opening fails, the password dialog identifies the failed step and shows the r
 Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
 
 Oubi saves gallery thumbnails on demand in `.oubi/thumbnails/`. Open a preview to load the full-size image. For JPEG XL, Oubi serves a PNG rendition if the browser lacks native JPEG XL support. Existing vault indexes refresh once to discover JPEG XL files. Deletion through Oubi removes the corresponding thumbnail, and a recount removes cached thumbnails whose originals were deleted elsewhere.
+
+Locking Cryptomator waits for the active duplicate removal to finish and pauses the remaining queue until the same vault is unlocked. Pending removals stay in server memory until the container stops.
 
 ---
 

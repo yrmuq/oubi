@@ -1,4 +1,5 @@
 """Perceptual image matching and the per-workspace review queue."""
+import json
 import os
 import sqlite3
 import stat
@@ -169,17 +170,26 @@ class DuplicateStore:
         with self.lock:
             self.db.deserialize(snapshot)
 
-    def page(self, index):
-        count, = self.db.execute("SELECT COUNT(*) FROM pairs").fetchone()
+    def page(self, index, pending_files=(), pending_pairs=()):
+        where = ""
+        params = []
+        if pending_files or pending_pairs:
+            where = """WHERE p.left_path NOT IN (SELECT value FROM json_each(?1))
+                         AND p.right_path NOT IN (SELECT value FROM json_each(?1))
+                         AND (p.left_path, p.right_path) NOT IN (
+                             SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?2)
+                         )"""
+            params = [json.dumps(list(pending_files)), json.dumps(pending_pairs)]
+        count, = self.db.execute(f"SELECT COUNT(*) FROM pairs AS p {where}", params).fetchone()
         completed, = self.db.execute("SELECT completed FROM search").fetchone()
         index = min(index, max(0, count - 1))
-        rows = self.db.execute("""
+        rows = self.db.execute(f"""
             SELECT a.path, a.revision, a.width, a.height, a.size,
                    b.path, b.revision, b.width, b.height, b.size, p.distance
             FROM pairs AS p JOIN images AS a ON a.path = p.left_path
             JOIN images AS b ON b.path = p.right_path
-            ORDER BY p.distance, p.left_path, p.right_path LIMIT 2 OFFSET ?
-        """, (index,)).fetchall()
+            {where} ORDER BY p.distance, p.left_path, p.right_path LIMIT 2 OFFSET ?
+        """, (*params, index)).fetchall()
         pairs = [{"images": [dict(zip(PAIR_COLUMNS, row[i:i+5])) for i in (0, 5)],
                   "distance": row[-1]} for row in rows]
         return {"searched": bool(completed), "count": count, "index": index, "pair": pairs[0] if pairs else None,
