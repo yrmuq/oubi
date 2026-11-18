@@ -23,6 +23,7 @@ from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
 from oubi_files import IMAGE_EXTS, JPEG_XL_SUFFIX, ImageChangedError, delete_source_image, direct_image_files, image_files, image_revision, indexed_image_path, sidecar_path
+from oubi_duplicates import DATABASE_NAME, DuplicateError, DuplicateStore, duplicate_file, scan_duplicates
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
 from oubi_gpu import GPU_BUSY_STATES, GpuError
 from oubi_nvidia import NvidiaRuntime
@@ -40,7 +41,7 @@ LAYOUT_PATH = "/data/layout.json"
 GENRES_PATH = "/data/genres.txt"
 MAX_GENRES = 20
 THEMES = {"light", "dark", "auto"}
-MODES = {"all", "tag", "sort", "plan"}
+MODES = {"all", "tag", "sort", "plan", "duplicates"}
 PAGE_PATH = HERE / "oubi_page.html"
 APP_ASSETS = {
     "/assets/oubi.svg": "image/svg+xml",
@@ -80,7 +81,8 @@ class Workspace:
                 or (output.exists() and not output.is_dir())):
             raise VaultError(168)
         data.mkdir(mode=0o700, exist_ok=True)
-        for name in ("tags.csv", "sorted.txt", "genders.csv", "unknown_genders.txt", INDEX_NAME, DIRTY_NAME, FAVORITES_NAME):
+        for name in ("tags.csv", "sorted.txt", "genders.csv", "unknown_genders.txt",
+                     INDEX_NAME, DIRTY_NAME, FAVORITES_NAME, DATABASE_NAME):
             if (data / name).is_symlink():
                 raise VaultError(168)
         start_folder = os.environ.get("OUBI_CRYPT_FOLDER", "")
@@ -1179,6 +1181,8 @@ class App:
         self.workspace = workspace
         self.vault = None if workspace else Vault()
         self.thumbnails = VaultThumbnails(workspace.data) if workspace is not None else None
+        self.duplicate_store = None
+        self.duplicate_lock = threading.Lock()
         self.lock = threading.Lock()
         self.gpu_lock = threading.Lock()
         self.rocm, self.nvidia = devices or (RocmRuntime(), NvidiaRuntime())
@@ -1492,16 +1496,88 @@ class App:
             self.catalog.db.close()
             self.catalog = None
 
-    def remove_image(self, relative, revision):
+    def duplicate_results(self):
+        with self.duplicate_lock:
+            if self.duplicate_store is None:
+                self.duplicate_store = DuplicateStore(self.paths)
+            return self.duplicate_store
+
+    def check_duplicate_image(self, relative, revision, live_revision=None):
+        try:
+            _, saved, live, _ = duplicate_file(self.paths, relative)
+            if saved == revision and (live_revision is None or live == live_revision):
+                return live
+        except (OSError, ValueError):
+            pass
+        raise DuplicateError(284, path=relative)
+
+    def duplicate_page(self, index):
+        store = self.duplicate_results()
+        with store.lock:
+            while True:
+                page = store.page(index)
+                try:
+                    for pair in (page["pair"], page["next"]):
+                        if pair is not None:
+                            for item in pair["images"]:
+                                item["live_revision"] = self.check_duplicate_image(item["path"], item["revision"])
+                except DuplicateError as error:
+                    store.drop_pairs(error.values["path"])
+                else:
+                    return page
+
+    def review_duplicate(self, pair, decision, language):
+        store = self.duplicate_results()
+        with store.lock:
+            if not store.contains(*pair[:4]):
+                raise DuplicateError(295)
+            left, right, left_revision, right_revision, left_live, right_live = pair
+            self.check_duplicate_image(left, left_revision, left_live)
+            self.check_duplicate_image(right, right_revision, right_live)
+            if decision == "different":
+                try:
+                    store.dismiss(pair[:4])
+                except (OSError, sqlite3.Error) as error:
+                    raise DuplicateError(285, error=str(error)) from error
+                return ""
+            keep, keep_revision, keep_live, remove, revision = (
+                (left, left_revision, left_live, right, right_live) if decision == "left"
+                else (right, right_revision, right_live, left, left_live)
+            )
+            try:
+                cleanup = self.remove_image(remove, revision,
+                                            validate_keep=lambda: self.check_duplicate_image(keep, keep_revision, keep_live))
+            except ImageChangedError as error:
+                raise DuplicateError(284, path=remove) from error
+            except (OSError, ValueError, sqlite3.Error, csv.Error) as error:
+                raise DuplicateError(286, path=remove, error=str(error)) from error
+            try:
+                store.remove(remove)
+            except (OSError, sqlite3.Error) as error:
+                store.drop_pairs(remove)
+                return "[287] " + text(287, language=language, path=remove, error=str(error))
+            return text(189, language=language) if cleanup else ""
+
+    def remove_image(self, relative, revision, *, validate_keep=None):
         workspace = self.paths
         catalog = self.catalog
+
+        def before_commit():
+            if validate_keep is not None:
+                validate_keep()
+            if catalog is not None:
+                catalog.mark_dirty()
+
         cleanup_pending = delete_source_image(workspace.images, relative, revision, index=workspace.csv,
                                               sorted_list=workspace.sorted_list, excluded=workspace.excluded,
-                                              before_commit=catalog.mark_dirty if catalog is not None else None)
+                                              before_commit=before_commit)
         relative = Path(relative).as_posix()
-        if self.thumbnails is not None:
+        cache = self.thumbnails
+        if cache is None and self.duplicate_store is not None:
+            cache = VaultThumbnails(Path(workspace.csv).parent)
+        if cache is not None:
             try:
-                self.thumbnails.remove(relative)
+                cache.remove(relative)
             except OSError:
                 cleanup_pending = True
         removed = Path(workspace.images).resolve() / relative
@@ -1747,9 +1823,9 @@ class App:
             self.percent = None
             self.detail = ""
             self.tag_scan = None
-            self.phase = "sort" if mode in {"sort", "plan"} else "tag"
+            self.phase = mode if mode == "duplicates" else "sort" if mode in {"sort", "plan"} else "tag"
             self.step = text(25, language=language)
-            if mode != "plan":
+            if mode not in {"plan", "duplicates"}:
                 if self.catalog is None:
                     self._invalidate_folders()
                 elif self.folder_scan:
@@ -1771,6 +1847,9 @@ class App:
         return None
 
     def _run(self, mode, folders, language, tagging, *, output=None, gpu_usage=None):
+        if mode == "duplicates":
+            self._run_duplicates(folders, language)
+            return
         workspace = self.paths
         code = 0
         catalog = self.catalog if mode != "plan" else None
@@ -1833,6 +1912,46 @@ class App:
                 self.note(text(81, language=language))
             else:
                 self.note(text(82, code=code, language=language))
+
+    def _run_duplicates(self, folders, language):
+        last_report = 0
+        last_step = None
+
+        def progress(step, done, total):
+            nonlocal last_report, last_step
+            now = time.monotonic()
+            if step == last_step and now - last_report < 0.15 and done != total:
+                return
+            message = text(step, language=language, done=done, total=total)
+            with self.lock:
+                self.step = message
+                self.percent = (round(done * 100 / total) if total else None) if step != 274 else None
+            last_report, last_step = now, step
+
+        def report_error(code, **values):
+            self.note(f"[{code}] " + text(code, language=language, **values))
+
+        try:
+            count = scan_duplicates(self.duplicate_results(), self.paths, folders, lambda: self.cancel_requested,
+                                    progress, report_error)
+            message = text(81 if count is None else 275, language=language, count=count)
+            self.note(message)
+            with self.lock:
+                self.step = message
+                self.percent = None if count is None else 100
+        except DuplicateError as error:
+            report_error(error.code, **error.values)
+            with self.lock:
+                self.step = f"[{error.code}] " + text(error.code, language=language, **error.values)
+        except (sqlite3.Error, ImportError) as error:
+            code = 292 if isinstance(error, sqlite3.Error) else 296
+            report_error(code, error=str(error))
+            with self.lock:
+                self.step = f"[{code}] " + text(code, language=language, error=str(error))
+        finally:
+            with self.lock:
+                self.job_running = False
+                self.job_mode = None
 
     def stop(self):
         with self.lock:
@@ -1903,6 +2022,33 @@ class Handler(BaseHTTPRequestHandler):
         if scope == vault.scope and self._vault_owner():
             return vault.app
         return None
+
+    def _duplicate_error(self, status, code, **values):
+        return status, {"error": f"[{code}] " + text(code, language=self._language(), **values)}
+
+    def _review_duplicate(self, payload):
+        scope = payload.get("scope", "")
+        pair = payload.get("pair")
+        decision = payload.get("decision")
+        if (self.headers.get_content_type() != "application/json" or not isinstance(scope, str)
+                or not isinstance(pair, list) or len(pair) != 6
+                or not all(isinstance(value, str) and value for value in pair)
+                or decision not in ("left", "different", "right")):
+            return self._duplicate_error(400, 282)
+        with self.app.vault.lock:
+            app = self._scoped_app(scope)
+            if app is None:
+                return self._error_response(409, 172)
+            if app.status()["job_running"]:
+                return self._duplicate_error(409, 283)
+            try:
+                warning = app.review_duplicate(pair, decision, self._language())
+            except DuplicateError as error:
+                status = 409 if error.code in {284, 295} else 500
+                return self._duplicate_error(status, error.code, **error.values)
+            except sqlite3.Error as error:
+                return self._duplicate_error(500, 297, error=str(error))
+            return 200, {"ok": True, "warning": warning}
 
     def _delete_image(self, payload):
         scope = payload.get("scope")
@@ -2023,7 +2169,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, page, "text/html; charset=utf-8")
             return
         if path == "/api/thumbnail":
-            self._send(*self._thumbnail_response(query.get("path", [""])[0], scope))
+            self._send(*self._thumbnail_response(query.get("path", [""])[0], scope,
+                                                 duplicates=query.get("duplicates") == ["1"],
+                                                 expected_revision=query.get("revision", [None])[0]))
             return
         with vault.lock if scope else nullcontext():
             app = self._scoped_app(scope)
@@ -2041,8 +2189,8 @@ class Handler(BaseHTTPRequestHandler):
                     response = (200, display, "image/png") if display else self._error_response(404, 87)
         self._send(*response)
 
-    def _thumbnail_response(self, relative, scope):
-        if not scope:
+    def _thumbnail_response(self, relative, scope, *, duplicates=False, expected_revision=None):
+        if not scope and not duplicates:
             return self._error_response(404, 87)
         vault = self.app.vault
         try:
@@ -2053,13 +2201,16 @@ class Handler(BaseHTTPRequestHandler):
                 workspace = app.paths
                 root = Path(workspace.images).resolve()
                 file = resolve_under(root, relative)
-                if file.suffix.lower() not in IMAGE_EXTS or file.is_relative_to(workspace.excluded):
+                if file.suffix.lower() not in IMAGE_EXTS or in_output(file, workspace.excluded):
                     raise ValueError(relative)
                 name = file.relative_to(root).as_posix()
                 revision = image_revision(file)
+                if expected_revision is not None and expected_revision != revision:
+                    return self._duplicate_error(409, 284, path=name)
+                thumbnails = app.thumbnails or VaultThumbnails(Path(workspace.csv).parent)
                 cached = None
                 with suppress(OSError):
-                    cached = app.thumbnails.read(name, revision)
+                    cached = thumbnails.read(name, revision)
                 if cached is not None:
                     return 200, cached, "image/webp"
                 original = file.read_bytes()
@@ -2072,7 +2223,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError(relative)
                 if preview is not None:
                     with suppress(OSError):
-                        app.thumbnails.write(name, revision, preview)
+                        thumbnails.write(name, revision, preview)
                     return 200, preview, "image/webp"
             return 200, original, content_type(file)
         except (OSError, ValueError):
@@ -2085,6 +2236,17 @@ class Handler(BaseHTTPRequestHandler):
         from_output = query.get("root", ["output" if path == "/api/browse" else "images"])[0] == "output"
         root = workspace.output if from_output else workspace.images
         excluded = None if from_output else workspace.excluded
+
+        if path == "/api/duplicates":
+            index = query.get("index", ["0"])[0]
+            if not index.isascii() or not index.isdigit() or len(index) > 9:
+                return self._duplicate_error(400, 281)
+            try:
+                return 200, app.duplicate_page(int(index))
+            except DuplicateError as error:
+                return self._duplicate_error(500, error.code, **error.values)
+            except sqlite3.Error as error:
+                return self._duplicate_error(500, 298, error=str(error))
 
         try:
             if path == "/api/folders":
@@ -2125,6 +2287,8 @@ class Handler(BaseHTTPRequestHandler):
                 file = resolve_under(root, rel)
                 if not file.is_file() or file.suffix.lower() not in IMAGE_EXTS or in_output(file, excluded):
                     raise ValueError(rel)
+                if "revision" in query and image_revision(file) != query["revision"][0]:
+                    return self._duplicate_error(409, 284, path=rel)
                 return 200, file.read_bytes(), content_type(file)
         except (OSError, ValueError):
             return self._error_response(404, 87 if path in {"/api/tags", "/api/file"} else 86)
@@ -2201,6 +2365,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/image/delete":
             self._delete_image(payload)
+            return
+        if parsed.path == "/api/duplicates/review":
+            self._send(*self._review_duplicate(payload))
             return
         if parsed.path == "/api/folders/recount":
             scope = payload.get("scope", "")

@@ -78,7 +78,10 @@ class ImageChangedError(Exception):
 
 
 def image_revision(path):
-    info = path.lstat()
+    return file_revision(path.lstat())
+
+
+def file_revision(info):
     if not stat.S_ISREG(info.st_mode):
         raise ValueError("Image must be a regular file")
     fields = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)

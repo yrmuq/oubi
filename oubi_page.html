@@ -78,6 +78,22 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .brand { display: inline-flex; align-items: center; gap: 6px; font-size: 18px; font-weight: 650; }
 #theme { padding: 4px 10px; background: var(--btn-2); color: var(--btn-2-text); }
 .top { display: grid; grid-template-columns: minmax(0, 1.15fr) 8px minmax(0, 1fr) 8px minmax(0, 1.15fr); min-height: 0; height: 100%; padding: 0 8px; }
+.top.duplicates { grid-template-columns: minmax(190px, 1fr) minmax(0, 2.2fr) !important; gap: 8px; }
+.top.duplicates > .split-v, .top.duplicates > #right, .top.duplicates [data-block="preview"],
+.top.duplicates [data-block="filter"], .top.duplicates .block-split,
+.top.duplicates .edge-split { display: none; }
+#duplicates-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 10px; padding: 8px 0; }
+#duplicates-panel[hidden], #duplicate-pair[hidden], .duplicate-controls[hidden] { display: none; }
+#duplicate-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex: 1; min-height: 0; }
+.duplicate-card { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 6px; min-width: 0; margin: 0; }
+.duplicate-image { display: grid; place-items: center; min-height: 0; padding: 0; overflow: hidden; background: var(--bg); }
+.duplicate-image img { width: 100%; height: 100%; object-fit: contain; min-height: 0; }
+.duplicate-card figcaption { overflow-wrap: anywhere; font-size: 0.85rem; }
+.duplicate-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+#duplicate-status { margin: 0; font-size: 0.9rem; }
+@media (max-width: 650px) {
+  .top.duplicates { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: minmax(150px, 34%) minmax(0, 1fr); }
+}
 .pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -387,6 +403,29 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   </section>
   <div class="split split-v" id="split-left"></div>
   <section class="pane mid" id="mid">
+    <section id="duplicates-panel" hidden>
+      <div id="duplicate-pair" hidden>
+        <figure class="duplicate-card">
+          <button id="duplicate-left-image" class="duplicate-image" type="button"></button>
+          <figcaption id="duplicate-left-info"></figcaption>
+        </figure>
+        <figure class="duplicate-card">
+          <button id="duplicate-right-image" class="duplicate-image" type="button"></button>
+          <figcaption id="duplicate-right-info"></figcaption>
+        </figure>
+      </div>
+      <div class="duplicate-controls" id="duplicate-nav" hidden>
+        <button id="duplicate-prev" class="secondary" type="button">❮</button>
+        <p id="duplicate-status" role="status"></p>
+        <button id="duplicate-next" class="secondary" type="button">❯</button>
+      </div>
+      <div class="duplicate-controls" id="duplicate-actions" hidden>
+        <button id="duplicate-keep-left" type="button"></button>
+        <button id="duplicate-different" class="secondary" type="button"></button>
+        <button id="duplicate-keep-right" type="button"></button>
+      </div>
+      <p id="duplicate-notice" role="status"></p>
+    </section>
     <div class="block grow" data-block="preview">
       <div id="preview">
         <div id="shot-frame">
@@ -489,7 +528,17 @@ let tagText = "";
 let hasFile = false;
 let pinned = [];
 let vocab = [];
-let appMode = readPreference("oubi.mode") === "gallery" ? "gallery" : "sorting";
+const appModes = ["sorting", "gallery", "duplicates"];
+const savedMode = readPreference("oubi.mode");
+let appMode = appModes.includes(savedMode) ? savedMode : "sorting";
+let regularLayout;
+let duplicatePage = null;
+let duplicateRequest = 0;
+let duplicateBusy = false;
+let duplicateSearching = false;
+let duplicateError = "";
+const duplicatePreviews = new Map();
+const duplicateButtons = ["duplicate-keep-left", "duplicate-different", "duplicate-keep-right"];
 let manualDevice = null;
 let preferredGpu = readPreference("oubi.gpu");
 let favorites = { character: [], event: [] };
@@ -579,22 +628,40 @@ function savePreference(key, value) {
 
 function renderAppMode() {
   const gallery = appMode === "gallery";
-  modeToggle.textContent = t(gallery ? 211 : 210);
-  modeToggle.setAttribute("aria-pressed", String(gallery));
-  modeToggle.setAttribute("aria-label", t(218));
-  modeToggle.title = t(218);
-  document.querySelector('[data-block="genres"]').hidden = gallery;
+  const duplicates = appMode === "duplicates";
+  const top = document.querySelector(".top");
+  if (duplicates && !top.classList.contains("duplicates")) {
+    regularLayout = captureLayout();
+    const left = document.getElementById("left");
+    for (const name of ["buttons", "folders", "progress", "log"]) {
+      left.appendChild(document.querySelector('.block[data-block="' + name + '"]'));
+    }
+  } else if (!duplicates && top.classList.contains("duplicates")) {
+    placeBlocks(layout.blocks || regularLayout.blocks);
+  }
+  top.classList.toggle("duplicates", duplicates);
+  document.getElementById("duplicates-panel").hidden = !duplicates;
+  document.getElementById("arrange").hidden = duplicates;
+  document.getElementById("tag").textContent = t(duplicates ? 264 : 1);
+  modeToggle.textContent = t(duplicates ? 264 : gallery ? 211 : 210);
+  modeToggle.removeAttribute("aria-pressed");
+  modeToggle.setAttribute("aria-label", modeToggle.textContent + " · " + t(265));
+  modeToggle.title = t(265);
+  document.querySelector('[data-block="genres"]').hidden = gallery || duplicates;
+  document.querySelector('[data-block="info"]').hidden = duplicates;
   document.getElementById("favorites").hidden = !gallery;
-  document.getElementById("sort").hidden = gallery;
-  document.getElementById("plan").hidden = gallery;
-  folderBox.classList.toggle("gallery", gallery);
+  document.getElementById("sort").hidden = gallery || duplicates;
+  document.getElementById("plan").hidden = gallery || duplicates;
+  folderBox.classList.toggle("gallery", gallery || duplicates);
   renderVault();
   renderFavorites();
+  renderDuplicatePage();
   fitSplits();
 }
 
 modeToggle.onclick = () => {
-  appMode = appMode === "sorting" ? "gallery" : "sorting";
+  if (appMode === "duplicates") closeZoom();
+  appMode = appModes[(appModes.indexOf(appMode) + 1) % appModes.length];
   savePreference("oubi.mode", appMode);
   if (appMode === "sorting") {
     pinned = [];
@@ -607,7 +674,131 @@ modeToggle.onclick = () => {
   }
   if (hasFile) paintTags(tagText);
   renderAppMode();
+  if (appMode === "duplicates") loadDuplicatePage();
 };
+
+function duplicatePreview(file) {
+  const path = encodeURIComponent(file.path);
+  const query = "path=" + path + "&revision=" + encodeURIComponent(file.live_revision);
+  const url = workspaceUrl("/api/thumbnail?duplicates=1&" + query);
+  if (duplicatePreviews.has(url)) return [url, duplicatePreviews.get(url)];
+  const image = new Image();
+  image.alt = file.path;
+  image.dataset.original = workspaceUrl("/api/file?display=1&" + query);
+  image.onload = updateDuplicateControls;
+  image.onerror = updateDuplicateControls;
+  image.src = url;
+  duplicatePreviews.set(url, image);
+  return [url, image];
+}
+
+function updateDuplicateControls() {
+  const images = [...document.querySelectorAll("#duplicate-pair img")];
+  const loaded = images.length === 2 && images.every(image => image.complete && image.naturalWidth);
+  for (const id of duplicateButtons) {
+    document.getElementById(id).disabled = !duplicatePage?.pair || wasBusy || duplicateBusy || !loaded;
+  }
+  const failed = images.find(image => image.complete && !image.naturalWidth);
+  if (failed && !duplicateError) {
+    document.getElementById("duplicate-notice").textContent = "[290] " + t(290).replace("{path}", () => failed.alt);
+  }
+}
+
+function renderDuplicatePage() {
+  const page = appMode === "duplicates" ? duplicatePage : null;
+  const pair = page?.pair;
+  const keep = new Set();
+  for (const [index, side] of ["left", "right"].entries()) {
+    const button = document.getElementById("duplicate-" + side + "-image");
+    const info = document.getElementById("duplicate-" + side + "-info");
+    button.replaceChildren();
+    if (!pair) {
+      button.onclick = null;
+      info.textContent = "";
+      continue;
+    }
+    const file = pair.images[index];
+    const [url, image] = duplicatePreview(file);
+    keep.add(url);
+    button.appendChild(image);
+    button.onclick = () => { if (image.naturalWidth) { showZoomImage(image); zoom.hidden = false; } };
+    info.textContent =
+      file.path + " · " + file.width + "×" + file.height + " · " +
+      new Intl.NumberFormat(lang).format(Math.round(file.size / 1024)) + " KiB";
+  }
+  for (const file of page?.next?.images || []) keep.add(duplicatePreview(file)[0]);
+  for (const url of duplicatePreviews.keys()) {
+    if (!keep.has(url)) duplicatePreviews.delete(url);
+  }
+  document.getElementById("duplicate-pair").hidden = !pair;
+  document.getElementById("duplicate-nav").hidden = !pair;
+  document.getElementById("duplicate-actions").hidden = !pair;
+  document.getElementById("duplicate-prev").disabled = !pair || duplicateBusy || page.index === 0;
+  document.getElementById("duplicate-next").disabled = !pair || duplicateBusy || page.index + 1 >= page.count;
+  document.getElementById("duplicate-status").textContent = pair ?
+    t(271).replace("{current}", page.index + 1).replace("{total}", page.count).replace("{distance}", pair.distance) : "";
+  document.getElementById("duplicate-notice").textContent =
+    duplicateError || (duplicateSearching ? t(299) : pair ? "" : t(page?.searched ? 269 : 270));
+  updateDuplicateControls();
+}
+
+async function loadDuplicatePage(index = duplicatePage?.index || 0) {
+  const id = ++duplicateRequest;
+  const scope = vaultScope;
+  try {
+    const response = await fetch(workspaceUrl("/api/duplicates?index=" + index, scope));
+    const data = await response.json();
+    if (id !== duplicateRequest || scope !== vaultScope || appMode !== "duplicates") return;
+    if (response.ok) {
+      duplicatePage = data;
+      duplicateError = "";
+    } else {
+      duplicatePage = null;
+      duplicateError = data.error || "[288] " + t(288);
+    }
+  } catch {
+    if (id !== duplicateRequest || scope !== vaultScope || appMode !== "duplicates") return;
+    duplicatePage = null;
+    duplicateError = "[288] " + t(288);
+  }
+  renderDuplicatePage();
+}
+
+async function reviewDuplicate(decision) {
+  const pair = duplicatePage?.pair;
+  if (!pair || duplicateBusy || wasBusy) return;
+  const scope = vaultScope;
+  const index = duplicatePage.index;
+  const [left, right] = pair.images;
+  duplicateBusy = true;
+  renderDuplicatePage();
+  try {
+    const response = await fetch("/api/duplicates/review", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope, decision, pair: [left.path, right.path, left.revision, right.revision, left.live_revision, right.live_revision],
+      }),
+    });
+    const data = await response.json();
+    if (scope !== vaultScope) return;
+    if (response.ok) {
+      await loadDuplicatePage(index);
+      if (decision !== "different") {
+        workspaceMutation++;
+        loadFolders();
+      }
+      if (data.warning) showNotice(data.warning);
+    } else {
+      if (response.status === 409) await loadDuplicatePage(index);
+      duplicateError = data.error || "[289] " + t(289);
+    }
+  } catch {
+    if (scope === vaultScope) duplicateError = "[289] " + t(289);
+  } finally {
+    duplicateBusy = false;
+    renderDuplicatePage();
+  }
+}
 
 function cancelPreviewRequest() {
   if (!previewRequest) return;
@@ -637,6 +828,9 @@ function showEmpty() {
 function applyI18n() {
   document.documentElement.lang = lang;
   document.getElementById("tag").textContent = t(1);
+  duplicateButtons.forEach((id, index) => { document.getElementById(id).textContent = t(266 + index); });
+  document.getElementById("duplicate-prev").setAttribute("aria-label", t(300));
+  document.getElementById("duplicate-next").setAttribute("aria-label", t(301));
   document.getElementById("sort").textContent = t(2);
   document.getElementById("plan").textContent = t(3);
   document.getElementById("stop").textContent = t(4);
@@ -883,7 +1077,7 @@ function renderVault() {
   vaultCancel.disabled = vaultBusy;
   vaultUnlock.textContent = t(219);
   vaultPassword.disabled = vaultBusy;
-  sortTarget.hidden = !opened || appMode === "gallery";
+  sortTarget.hidden = !opened || appMode !== "sorting";
 }
 
 function selectFolderLocation(path) {
@@ -930,6 +1124,13 @@ function useVault(scope, folder) {
   if (scope === vaultScope) return;
   if (deleteDialog.open && !deleteBusy) deleteDialog.close();
   vaultScope = scope;
+  duplicatePage = null;
+  duplicateRequest++;
+  duplicateError = "";
+  duplicateSearching = false;
+  duplicatePreviews.clear();
+  renderDuplicatePage();
+  if (appMode === "duplicates") loadDuplicatePage();
   favoritesVersion++;
   favorites = { character: [], event: [] };
   renderFavorites();
@@ -1522,7 +1723,8 @@ async function tick() {
   }
   const tagScan = data.tag_scan ? tagScanDisplay(data.tag_scan) : null;
   tagScanMessage = tagScan ? tagScan.step + " " + tagScan.detail : "";
-  const searching = !gpuProgress && tagScan?.percent === null;
+  const searching = !gpuProgress && (tagScan?.percent === null ||
+    (data.job_mode === "duplicates" && data.percent === null));
   document.getElementById("step").textContent = gpuProgress?.step || tagScan?.step || step;
   document.getElementById("detail").textContent = (gpuProgress?.detail ?? tagScan?.detail ?? data.detail) || "";
   const fill = document.getElementById("fill");
@@ -1539,22 +1741,30 @@ async function tick() {
   const picked = selected.size > 0;
   for (const id of ["tag", "sort", "plan"]) {
     document.getElementById(id).disabled = busy || !picked ||
-      (id === "tag" && (!ready || !readyDevices[deviceInput.value]));
+      (id === "tag" && appMode !== "duplicates" && (!ready || !readyDevices[deviceInput.value]));
   }
   document.getElementById("stop").disabled = !busy;
   document.getElementById("retry").hidden = data.model !== "error";
   if (jobFinished || scanFinished) loadFolders();
-  if (jobFinished && !workPreview && (!jobChanged || appMode === "gallery")) loadGallery();
+  if (appMode === "duplicates") {
+    const searchingDuplicates = busy && data.job_mode === "duplicates";
+    if (duplicateSearching !== searchingDuplicates) {
+      duplicateSearching = searchingDuplicates;
+      renderDuplicatePage();
+    }
+    if (jobFinished) loadDuplicatePage(data.phase === "duplicates" ? 0 : duplicatePage?.index || 0);
+  } else if (jobFinished && !workPreview && (!jobChanged || appMode === "gallery")) loadGallery();
   else if ((galleryMessage === 204 && (!scan || scan.stage === "done")) ||
            (scanFinished && vaultScope && selected.size && !pinned.length)) loadGallery();
   recountFolders.disabled = recountPending || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
   wasBusy = !!busy;
   workFile = data.preview_file || "";
-  if (jobChanged && (busy || lastJob !== null)) setPreviewMode(true);
+  if (data.phase !== "duplicates" && jobChanged && (busy || lastJob !== null)) setPreviewMode(true);
   lastJob = data.job_id;
   renderTerminal();
   renderDeleteControls();
-  if (workPreview && (workFile || hasFile || previewRequest)) renderWorkPreview();
+  if (appMode === "duplicates") updateDuplicateControls();
+  else if (workPreview && (workFile || hasFile || previewRequest)) renderWorkPreview();
 }
 
 function showTerminalInput() {
@@ -1725,7 +1935,10 @@ async function start(mode) {
       if (data.job_id !== lastJob) {
         statusShown = ++statusRequest;
         lastJob = data.job_id;
-        setPreviewMode(true);
+        if (mode === "duplicates") {
+          duplicateSearching = true;
+          renderDuplicatePage();
+        } else setPreviewMode(true);
         wasBusy = true;
       }
     }
@@ -1885,7 +2098,7 @@ function placeBlocks(order) {
 }
 
 function applyLayout() {
-  placeBlocks(layout.blocks);
+  if (appMode !== "duplicates") placeBlocks(layout.blocks);
   for (const block of document.querySelectorAll(".block")) {
     const height = layout.heights?.[block.dataset.block];
     block.style.flex = height ? "0 0 " + height + "px" : "";
@@ -1916,6 +2129,9 @@ function blockOrder() {
 }
 
 function captureLayout() {
+  if (document.querySelector(".top").classList.contains("duplicates")) {
+    return { ...regularLayout, ...layout };
+  }
   return {
     left: Math.round(document.getElementById("left").getBoundingClientRect().width),
     mid: Math.round(document.getElementById("mid").getBoundingClientRect().width),
@@ -2065,7 +2281,14 @@ document.getElementById("theme").onclick = () => {
     body: JSON.stringify({ theme: next }),
   });
 };
-for (const id of ["tag", "sort", "plan"]) document.getElementById(id).onclick = () => start(id);
+for (const id of ["tag", "sort", "plan"]) {
+  document.getElementById(id).onclick = () => start(id === "tag" && appMode === "duplicates" ? "duplicates" : id);
+}
+duplicateButtons.forEach((id, index) => {
+  document.getElementById(id).onclick = () => reviewDuplicate(["left", "different", "right"][index]);
+});
+document.getElementById("duplicate-prev").onclick = () => loadDuplicatePage(duplicatePage.index - 1);
+document.getElementById("duplicate-next").onclick = () => loadDuplicatePage(duplicatePage.index + 1);
 if (!Array.isArray(genres) || !genres.length) genres = [""];
 let genreTimer = 0;
 let genreDrag = -1;
@@ -2578,6 +2801,7 @@ if (initialVaultFolder === null) showNotice(t(257));
 loadFolders();
 loadFavorites();
 renderFolders();
+if (appMode === "duplicates") loadDuplicatePage();
 tick();
 setInterval(tick, 1000);
 </script>

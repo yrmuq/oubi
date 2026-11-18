@@ -75,12 +75,13 @@ with sqlite3.connect(":memory:") as catalog:
     assert catalog.execute("SELECT value FROM json_each('[1]')").fetchone() == (1,)
 
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw
 from sys import path
 from pathlib import Path
 from tempfile import TemporaryDirectory
 path.insert(0, "/opt/oubi")
 from oubi_files import open_image
+from oubi_duplicates import MAX_DISTANCE, fingerprint
 from oubi_thumbnails import render_jpeg_xl_for_browser, render_thumbnail
 from tag_folder import find_pending_images
 original = BytesIO()
@@ -103,6 +104,16 @@ with TemporaryDirectory() as directory:
     with Image.open(BytesIO(render_jpeg_xl_for_browser(file.read_bytes()))) as image:
         assert image.format == "PNG" and image.size == (1200, 900)
         assert image.getpixel((0, 0)) == (32, 64, 96, 127)
+
+    drawing = Image.new("RGB", (480, 360), "#89aacc")
+    draw = ImageDraw.Draw(drawing)
+    draw.ellipse((31, 50, 264, 275), fill="#ba2233")
+    draw.rectangle((217, 106, 434, 333), fill="#efdf66")
+    draw.polygon(((301, 41), (407, 194), (193, 251)), fill="#2a575c")
+    drawing.save(file, "JXL", lossless=True)
+    smaller = folder / "smaller.jpg"
+    drawing.resize((240, 180), Image.Resampling.LANCZOS).save(smaller, quality=65)
+    assert (fingerprint(file)[0] ^ fingerprint(smaller)[0]).bit_count() <= MAX_DISTANCE
 
 import torch
 assert not torch.cuda.is_available(), "CPU image loaded CUDA"

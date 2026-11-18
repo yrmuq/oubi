@@ -7,6 +7,7 @@
 - [assets/](../assets/) contains the shared Oubi bell logo and shortcut icons served with the web interface.
 - [oubi_cryptomator.py](../oubi_cryptomator.py) runs Cryptomator CLI, detects the FUSE mount, and owns the browser session that opened it. `Workspace` in [oubi_web.py](../oubi_web.py) selects image, index, and output paths for that session.
 - [oubi_index.py](../oubi_index.py) stores vault folders, images, and searchable tags in a SQLite snapshot inside the vault. It supplies immediate-child file names and tagging status to the folder browser. The tagger and sorter report affected paths to the web process so it can refresh the corresponding entries.
+- [oubi_duplicates.py](../oubi_duplicates.py) computes perceptual hashes, finds direct matches, and stores the latest review queue and decisions in the active workspace's SQLite database.
 - [oubi_thumbnails.py](../oubi_thumbnails.py) encodes WebP thumbnails and full-size PNG renditions of JPEG XL. It removes encrypted thumbnail cache entries when source files disappear.
 - [oubi_files.py](../oubi_files.py) shares image walking, JPEG XL decoding, and tag sidecar paths, and removes preview images and their index entries.
 - [oubi_gpu.py](../oubi_gpu.py) manages optional Python environments, installation progress, and GPU smoke tests. [oubi_rocm.py](../oubi_rocm.py) detects AMD architectures through Linux KFD and selects ROCm packages. [oubi_nvidia.py](../oubi_nvidia.py) lists NVIDIA cards through `nvidia-smi` and selects CUDA packages by compute capability and driver.
