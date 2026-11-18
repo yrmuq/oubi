@@ -198,15 +198,17 @@ class DuplicateStore:
             connection.execute("DELETE FROM pairs WHERE left_path = ? AND right_path = ?", pair[:2])
             self.install(connection)
 
-    def drop_pairs(self, relative):
-        self.db.execute("DELETE FROM pairs WHERE left_path = ? OR right_path = ?", (relative, relative))
+    def drop_pairs(self, *relatives):
+        self.db.executemany("DELETE FROM pairs WHERE left_path = ? OR right_path = ?",
+                            ((relative, relative) for relative in relatives))
         self.db.commit()
 
-    def remove(self, relative):
+    def remove(self, *relatives):
         with closing(self.copy()) as connection:
             for table in ("pairs", "dismissed"):
-                connection.execute(f"DELETE FROM {table} WHERE left_path = ? OR right_path = ?", (relative, relative))
-            connection.execute("DELETE FROM images WHERE path = ?", (relative,))
+                connection.executemany(f"DELETE FROM {table} WHERE left_path = ? OR right_path = ?",
+                                       ((relative, relative) for relative in relatives))
+            connection.executemany("DELETE FROM images WHERE path = ?", ((relative,) for relative in relatives))
             self.install(connection, retain_on_error=True)
 
 

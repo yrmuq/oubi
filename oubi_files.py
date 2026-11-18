@@ -88,7 +88,7 @@ def file_revision(info):
     return "-".join(str(field) for field in fields)
 
 
-def _updated_index(index, root, image, *, table, cleanup):
+def _updated_index(index, root, images, *, table, cleanup):
     if index.is_symlink():
         raise ValueError("Image index must be a regular file")
     if not index.exists():
@@ -100,7 +100,7 @@ def _updated_index(index, root, image, *, table, cleanup):
     removed = False
 
     def matches(raw):
-        return bool(raw) and Path(os.path.normpath(indexed_image_path(raw, root))) == image
+        return bool(raw) and Path(os.path.normpath(indexed_image_path(raw, root))) in images
 
     with index.open(encoding="utf-8", newline="") as source, updated.open("w", encoding="utf-8", newline="") as output:
         if table:
@@ -157,39 +157,49 @@ def _apply_removal(changes):
 
 
 def delete_source_image(root, relative, revision, *, index, sorted_list, excluded=None, before_commit=None):
-    root = Path(root).resolve()
-    path = Path(relative)
-    if (path.is_absolute() or not path.parts or any(part in {"..", "tags", ".oubi"} for part in path.parts)
-            or path.suffix.lower() not in IMAGE_EXTS):
-        raise ValueError("Invalid source image")
-    image = root / path
-    if image.parent.resolve() != image.parent or (excluded and image.is_relative_to(Path(excluded).resolve())):
-        raise ValueError("Invalid source image")
+    return delete_source_images(root, [(relative, revision)], index=index, sorted_list=sorted_list,
+                                excluded=excluded, before_commit=before_commit)
 
-    def check_revision():
+
+def delete_source_images(root, files, *, index, sorted_list, excluded=None, before_commit=None):
+    root = Path(root).resolve()
+    excluded = Path(excluded).resolve() if excluded else None
+    images = {}
+    changes = []
+
+    def check_revision(image, relative, revision):
         if image.parent.resolve() != image.parent:
-            raise ImageChangedError()
+            raise ImageChangedError(relative)
         try:
             current = image_revision(image)
         except FileNotFoundError as error:
-            raise ImageChangedError() from error
+            raise ImageChangedError(relative) from error
         if current != revision:
-            raise ImageChangedError()
+            raise ImageChangedError(relative)
 
-    check_revision()
-    tags = sidecar_path(image)
-    if tags.parent.is_symlink() or tags.is_symlink() or (tags.exists() and not tags.is_file()):
-        raise ValueError("Invalid image sidecar")
-
-    with ExitStack() as cleanup:
-        changes = [(image, None)]
+    for relative, revision in files:
+        path = Path(relative)
+        image = root / path
+        if (path.is_absolute() or not path.parts or any(part in {"..", "tags", ".oubi"} for part in path.parts)
+                or path.suffix.lower() not in IMAGE_EXTS or image.parent.resolve() != image.parent
+                or (excluded and image.is_relative_to(excluded)) or image in images):
+            raise ValueError("Invalid source image")
+        check_revision(image, relative, revision)
+        images[image] = (relative, revision)
+        changes.append((image, None))
+        tags = sidecar_path(image)
+        if tags.parent.is_symlink() or tags.is_symlink() or (tags.exists() and not tags.is_file()):
+            raise ValueError("Invalid image sidecar")
         if tags.is_file():
             changes.append((tags, None))
+
+    with ExitStack() as cleanup:
         for path, table in ((Path(index), True), (Path(sorted_list), False)):
-            updated = _updated_index(path, root, image, table=table, cleanup=cleanup)
+            updated = _updated_index(path, root, images, table=table, cleanup=cleanup)
             if updated is not None:
                 changes.append((path, updated))
-        check_revision()
+        for image, (relative, revision) in images.items():
+            check_revision(image, relative, revision)
         if before_commit is not None:
             before_commit()
         return _apply_removal(changes)

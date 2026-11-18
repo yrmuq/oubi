@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
-from oubi_files import IMAGE_EXTS, JPEG_XL_SUFFIX, ImageChangedError, delete_source_image, direct_image_files, image_files, image_revision, indexed_image_path, sidecar_path
+from oubi_files import IMAGE_EXTS, JPEG_XL_SUFFIX, ImageChangedError, delete_source_images, direct_image_files, image_files, image_revision, indexed_image_path, sidecar_path
 from oubi_duplicates import DATABASE_NAME, DuplicateError, DuplicateStore, duplicate_file, scan_duplicates
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
 from oubi_gpu import GPU_BUSY_STATES, GpuError
@@ -1540,25 +1540,49 @@ class App:
                 except (OSError, sqlite3.Error) as error:
                     raise DuplicateError(285, error=str(error)) from error
                 return ""
-            keep, keep_revision, keep_live, remove, revision = (
-                (left, left_revision, left_live, right, right_live) if decision == "left"
-                else (right, right_revision, right_live, left, left_live)
-            )
+            validate_keep = None
+            if decision == "both":
+                files = [(left, left_live), (right, right_live)]
+            else:
+                keep, keep_revision, keep_live, remove, revision = (
+                    (left, left_revision, left_live, right, right_live) if decision == "left"
+                    else (right, right_revision, right_live, left, left_live)
+                )
+                files = [(remove, revision)]
+
+                def validate_keep():
+                    self.check_duplicate_image(keep, keep_revision, keep_live)
+
+            paths = [relative for relative, _ in files]
             try:
-                cleanup = self.remove_image(remove, revision,
-                                            validate_keep=lambda: self.check_duplicate_image(keep, keep_revision, keep_live))
+                cleanup, thumbnail_errors = self._remove_images(files, validate_keep=validate_keep)
             except ImageChangedError as error:
-                raise DuplicateError(284, path=remove) from error
+                raise DuplicateError(284, path=str(error)) from error
             except (OSError, ValueError, sqlite3.Error, csv.Error) as error:
-                raise DuplicateError(286, path=remove, error=str(error)) from error
+                if decision == "both":
+                    raise DuplicateError(303, left=left, right=right, error=str(error)) from error
+                raise DuplicateError(286, path=paths[0], error=str(error)) from error
+            warnings = []
             try:
-                store.remove(remove)
+                store.remove(*paths)
             except (OSError, sqlite3.Error) as error:
-                store.drop_pairs(remove)
-                return "[287] " + text(287, language=language, path=remove, error=str(error))
-            return text(189, language=language) if cleanup else ""
+                store.drop_pairs(*paths)
+                if decision == "both":
+                    warnings.append("[304] " + text(304, language=language, error=str(error)))
+                else:
+                    warnings.append("[287] " + text(287, language=language, path=paths[0], error=str(error)))
+            if cleanup:
+                code = 305 if decision == "both" else 189
+                warnings.append(f"[{code}] " + text(code, language=language))
+            for relative, error in thumbnail_errors:
+                warnings.append("[306] " + text(306, language=language, path=relative, error=error))
+            return " ".join(warnings)
 
     def remove_image(self, relative, revision, *, validate_keep=None):
+        cleanup, thumbnail_errors = self._remove_images([(relative, revision)], validate_keep=validate_keep)
+        return cleanup or bool(thumbnail_errors)
+
+    def _remove_images(self, files, *, validate_keep=None):
         workspace = self.paths
         catalog = self.catalog
 
@@ -1568,34 +1592,37 @@ class App:
             if catalog is not None:
                 catalog.mark_dirty()
 
-        cleanup_pending = delete_source_image(workspace.images, relative, revision, index=workspace.csv,
-                                              sorted_list=workspace.sorted_list, excluded=workspace.excluded,
-                                              before_commit=before_commit)
-        relative = Path(relative).as_posix()
+        cleanup_pending = delete_source_images(workspace.images, files, index=workspace.csv,
+                                               sorted_list=workspace.sorted_list, excluded=workspace.excluded,
+                                               before_commit=before_commit)
+        relatives = [Path(relative).as_posix() for relative, _ in files]
         cache = self.thumbnails
         if cache is None and self.duplicate_store is not None:
             cache = VaultThumbnails(Path(workspace.csv).parent)
+        thumbnail_errors = []
         if cache is not None:
-            try:
-                cache.remove(relative)
-            except OSError:
-                cleanup_pending = True
-        removed = Path(workspace.images).resolve() / relative
+            for relative in relatives:
+                try:
+                    cache.remove(relative)
+                except OSError as error:
+                    thumbnail_errors.append((relative, str(error)))
+        root = Path(workspace.images).resolve()
         with self.lock:
             if self.folder_scan is not None:
-                self.gallery_removed.add(relative)
-            if Path(self.preview_file) == removed:
+                self.gallery_removed.update(relatives)
+            if any(Path(self.preview_file) == root / relative for relative in relatives):
                 self.preview_file = ""
         if catalog is not None:
             try:
-                catalog.remove(relative)
+                for relative in relatives:
+                    catalog.remove(relative)
                 self._save_catalog(catalog)
             except sqlite3.Error:
                 self.close_catalog()
                 with self.lock:
                     self._invalidate_folders()
                 self.note(text(208))
-        return cleanup_pending
+        return cleanup_pending, thumbnail_errors
 
     def _save_catalog(self, catalog):
         try:
@@ -2033,7 +2060,7 @@ class Handler(BaseHTTPRequestHandler):
         if (self.headers.get_content_type() != "application/json" or not isinstance(scope, str)
                 or not isinstance(pair, list) or len(pair) != 6
                 or not all(isinstance(value, str) and value for value in pair)
-                or decision not in ("left", "different", "right")):
+                or decision not in ("left", "both", "different", "right")):
             return self._duplicate_error(400, 282)
         with self.app.vault.lock:
             app = self._scoped_app(scope)

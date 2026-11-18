@@ -423,6 +423,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       </div>
       <div class="duplicate-controls" id="duplicate-actions" hidden>
         <button id="duplicate-keep-left" type="button"></button>
+        <button id="duplicate-delete-both" class="danger" type="button"></button>
         <button id="duplicate-different" class="secondary" type="button"></button>
         <button id="duplicate-keep-right" type="button"></button>
       </div>
@@ -540,7 +541,12 @@ let duplicateBusy = false;
 let duplicateSearching = false;
 let duplicateError = "";
 const duplicatePreviews = new Map();
-const duplicateButtons = ["duplicate-keep-left", "duplicate-different", "duplicate-keep-right"];
+const duplicateButtons = [
+  ["duplicate-keep-left", 266, "left"],
+  ["duplicate-delete-both", 302, "both"],
+  ["duplicate-different", 267, "different"],
+  ["duplicate-keep-right", 268, "right"],
+];
 let manualDevice = null;
 let preferredGpu = readPreference("oubi.gpu");
 let favorites = { character: [], event: [] };
@@ -697,7 +703,7 @@ function duplicatePreview(file) {
 function updateDuplicateControls() {
   const images = [...document.querySelectorAll("#duplicate-pair img")];
   const loaded = images.length === 2 && images.every(image => image.complete && image.naturalWidth);
-  for (const id of duplicateButtons) {
+  for (const [id] of duplicateButtons) {
     document.getElementById(id).disabled = !duplicatePage?.pair || wasBusy || duplicateBusy || !loaded;
   }
   const failed = images.find(image => image.complete && !image.naturalWidth);
@@ -816,7 +822,7 @@ async function reviewDuplicate(decision) {
       }
       if (data.warning) showNotice(data.warning);
     } else {
-      if (response.status === 409) await loadDuplicatePage(index);
+      if (response.status === 409 || decision === "both") await loadDuplicatePage(index);
       duplicateError = data.error || "[289] " + t(289);
     }
   } catch {
@@ -855,7 +861,7 @@ function showEmpty() {
 function applyI18n() {
   document.documentElement.lang = lang;
   document.getElementById("tag").textContent = t(1);
-  duplicateButtons.forEach((id, index) => { document.getElementById(id).textContent = t(266 + index); });
+  for (const [id, label] of duplicateButtons) document.getElementById(id).textContent = t(label);
   document.getElementById("duplicate-prev").setAttribute("aria-label", t(300));
   document.getElementById("duplicate-next").setAttribute("aria-label", t(301));
   document.getElementById("sort").textContent = t(2);
@@ -2311,9 +2317,9 @@ document.getElementById("theme").onclick = () => {
 for (const id of ["tag", "sort", "plan"]) {
   document.getElementById(id).onclick = () => start(id === "tag" && appMode === "duplicates" ? "duplicates" : id);
 }
-duplicateButtons.forEach((id, index) => {
-  document.getElementById(id).onclick = () => reviewDuplicate(["left", "different", "right"][index]);
-});
+for (const [id, , decision] of duplicateButtons) {
+  document.getElementById(id).onclick = () => reviewDuplicate(decision);
+}
 document.getElementById("duplicate-prev").onclick = () => loadDuplicatePage(duplicatePage.index - 1);
 document.getElementById("duplicate-next").onclick = () => loadDuplicatePage(duplicatePage.index + 1);
 if (!Array.isArray(genres) || !genres.length) genres = [""];

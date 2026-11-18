@@ -25,7 +25,7 @@
 
 - Select source folders, identify images, and preview saved tags in the browser.
 - Tag JPEG, PNG, WebP, BMP, GIF, and JPEG XL images. Resume from `tags/<image filename>.txt`, such as `tags/photo.jpg.txt`. Set `OUBI_FORCE=1` to tag those images again.
-- Find visually similar images across selected folders with Duplicates. Compare pairs side by side and keep either copy or mark the pair as different.
+- Find visually similar images across selected folders with Duplicates. Compare pairs side by side, keep either copy, delete both, or mark the pair as different.
 - Plan a sort from `tags.csv`, then copy or move images. Numbered pages stay in their series and original art can be sorted by configured genres.
 - Open a Cryptomator vault and choose whether sorted images stay inside it or go to the usual output folder.
 - Filter the preview by tags, correct character genders through `genders.csv`, and customize the layout, theme, and language.
