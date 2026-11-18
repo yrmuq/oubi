@@ -86,12 +86,17 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 #duplicates-panel[hidden], #duplicate-pair[hidden], .duplicate-controls[hidden] { display: none; }
 #duplicate-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex: 1 0 auto; }
 .duplicate-card { display: grid; grid-template-rows: minmax(96px, 1fr) auto; gap: 6px; min-width: 0; margin: 0; }
-.duplicate-image { position: relative; padding: 0; overflow: hidden; background: var(--bg); }
+.duplicate-preview { position: relative; min-width: 0; min-height: 0; }
+.duplicate-image { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; overflow: hidden; background: var(--bg); }
 .duplicate-image img, .comparison-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
 #duplicate-pair.zoomed .duplicate-image { cursor: grab; touch-action: none; }
+.duplicate-keep { position: absolute; z-index: 1; bottom: 8px; max-width: calc(100% - 16px); overflow-wrap: anywhere; }
+#duplicate-keep-left { right: 8px; }
+#duplicate-keep-right { left: 8px; }
 .duplicate-card figcaption { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
 .duplicate-difference { color: #111; }
 .duplicate-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+#duplicate-different { margin-inline-start: auto; }
 #duplicate-status { margin: 0; font-size: 0.9rem; }
 #duplicate-notice:empty { display: none; }
 @media (max-width: 650px) {
@@ -434,11 +439,17 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     <section id="duplicates-panel" hidden>
       <div id="duplicate-pair" hidden>
         <figure class="duplicate-card">
-          <button id="duplicate-left-image" class="duplicate-image" type="button"></button>
+          <div class="duplicate-preview">
+            <button id="duplicate-left-image" class="duplicate-image" type="button"></button>
+            <button id="duplicate-keep-left" class="duplicate-keep" type="button"></button>
+          </div>
           <figcaption id="duplicate-left-info"></figcaption>
         </figure>
         <figure class="duplicate-card">
-          <button id="duplicate-right-image" class="duplicate-image" type="button"></button>
+          <div class="duplicate-preview">
+            <button id="duplicate-right-image" class="duplicate-image" type="button"></button>
+            <button id="duplicate-keep-right" class="duplicate-keep" type="button"></button>
+          </div>
           <figcaption id="duplicate-right-info"></figcaption>
         </figure>
       </div>
@@ -448,10 +459,8 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <button id="duplicate-next" class="secondary" type="button">❯</button>
       </div>
       <div class="duplicate-controls" id="duplicate-actions" hidden>
-        <button id="duplicate-keep-left" type="button"></button>
         <button id="duplicate-delete-both" class="danger" type="button"></button>
         <button id="duplicate-different" class="secondary" type="button"></button>
-        <button id="duplicate-keep-right" type="button"></button>
       </div>
       <p id="duplicate-notice" role="status"></p>
     </section>
