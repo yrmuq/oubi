@@ -88,7 +88,8 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .duplicate-card { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 6px; min-width: 0; margin: 0; }
 .duplicate-image { display: grid; place-items: center; min-height: 0; padding: 0; overflow: hidden; background: var(--bg); }
 .duplicate-image img { width: 100%; height: 100%; object-fit: contain; min-height: 0; }
-.duplicate-card figcaption { overflow-wrap: anywhere; font-size: 0.85rem; }
+.duplicate-card figcaption { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
+.duplicate-difference { color: #111; }
 .duplicate-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
 #duplicate-status { margin: 0; font-size: 0.9rem; }
 @media (max-width: 650px) {
@@ -234,7 +235,8 @@ body.arrange .block * { pointer-events: none; }
 #suggest button.on { background: var(--line); }
 .ghost-tail { color: var(--muted); }
 .genre-field input { position: relative; display: block; width: 100%; min-width: 0; max-width: 100%; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 6px; }
-.tag-hit { cursor: pointer; border-radius: 4px; padding: 0 3px; }
+.tag-hit, .duplicate-difference { border-radius: 4px; padding: 0 3px; }
+.tag-hit { cursor: pointer; }
 .filter-find { margin: 0 0 8px; background: var(--search-bg); border: 1px solid var(--search-edge); border-radius: 6px; }
 .filter-find input, .filter-find .genre-ghost { border: 0; background: transparent; padding-right: 30px; }
 .search-icon { position: absolute; right: 8px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
@@ -704,6 +706,33 @@ function updateDuplicateControls() {
   }
 }
 
+function renderDuplicateCaption(info, file, other) {
+  const fields = image => {
+    const path = image.path.split("/");
+    return [path.at(-2) || "", path.at(-1), image.width + "×" + image.height, image.size];
+  };
+  const current = fields(file);
+  const comparison = fields(other);
+  const kib = Math.round(file.size / 1024);
+  const showBytes = file.size !== other.size && kib === Math.round(other.size / 1024);
+  const number = new Intl.NumberFormat(lang);
+  const values = [current[0] || "—", current[1], current[2],
+    showBytes ? number.format(file.size) + " B" : number.format(kib) + " KiB"];
+  info.replaceChildren();
+  values.forEach((value, index) => {
+    if (index) info.append("  ·  ");
+    if (current[index] === comparison[index]) {
+      info.append(value);
+      return;
+    }
+    const mark = document.createElement("mark");
+    mark.className = "duplicate-difference";
+    mark.style.background = rainbow(index);
+    mark.textContent = value;
+    info.append(mark);
+  });
+}
+
 function renderDuplicatePage() {
   const page = appMode === "duplicates" ? duplicatePage : null;
   const pair = page?.pair;
@@ -722,9 +751,7 @@ function renderDuplicatePage() {
     keep.add(url);
     button.appendChild(image);
     button.onclick = () => { if (image.naturalWidth) { showZoomImage(image); zoom.hidden = false; } };
-    info.textContent =
-      file.path + " · " + file.width + "×" + file.height + " · " +
-      new Intl.NumberFormat(lang).format(Math.round(file.size / 1024)) + " KiB";
+    renderDuplicateCaption(info, file, pair.images[1 - index]);
   }
   for (const file of page?.next?.images || []) keep.add(duplicatePreview(file)[0]);
   for (const url of duplicatePreviews.keys()) {
