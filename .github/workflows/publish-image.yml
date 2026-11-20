@@ -23,15 +23,15 @@ jobs:
       IMAGE: ghcr.io/yrmuq/oubi
       CHANNEL: ${{ inputs.channel }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -46,7 +46,7 @@ jobs:
         run: sh scripts/check.sh
       - name: Build the candidate
         if: ${{ steps.image.outputs.source != '' && inputs.channel != 'dev' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -66,7 +66,7 @@ jobs:
         run: git push origin "$SOURCE_SHA:refs/tags/v$RELEASE_VERSION"
       - name: Publish immutable tags
         if: ${{ steps.image.outputs.tags != '' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
