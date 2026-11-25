@@ -41,9 +41,9 @@
 | Square selection button | Select all visible folders or select the current folder when it has no subfolders. |
 | Tile size and order | Resize tiles with the slider. Folders always come first, with untagged images first among the files by default. The order button switches between this order and name order. Both modes compare names by symbols, numbers, then letters. |
 | Image tile | Click to open the image in the preview. Press and hold, right-click, or press Shift+F10 on a focused tile to open its delete action. Confirm the file name before deleting. |
-| Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
+| Trash icon on the preview | Confirm permanent removal of the current image and add it to the deletion queue. |
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
-| Deletion queue | Show pending duplicate removals and errors. Review advances immediately while the server works through the queue in the current workspace. |
+| Deletion queue | Show pending removals from the preview, image tiles, and Duplicates, along with any errors. Browsing continues while the server works through the queue in the current workspace. |
 | Duplicate previews | Scroll over either image to zoom both and drag either zoomed image to move both. Click to open the full-screen comparison with the same controls. |
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
 | `Identify` | Show the live count of images found in the selected folders, then the progress of checking existing tags and tagging the remaining images. |

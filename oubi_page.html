@@ -931,12 +931,23 @@ function updateDeletionQueue(data) {
   const previous = deletionStatus;
   deletionStatus = data;
   renderDeletionQueue();
-  if (previous && (previous.removed !== data.removed || (previous.busy && !data.busy && data.removed))) {
+  const newlyQueued = data.items.filter(item => item.state === "waiting" || item.state === "running")
+    .flatMap(item => item.files);
+  const oldPending = new Set((previous?.items || []).filter(item => item.state === "waiting" || item.state === "running")
+    .flatMap(item => item.files));
+  const added = new Set(newlyQueued.filter(path => !oldPending.has(path)));
+  const removed = (previous?.removed || 0) !== data.removed || (previous?.busy && !data.busy && data.removed);
+  const failed = (previous?.failed || 0) !== data.failed;
+  if (added.size || removed || failed) {
     workspaceMutation++;
+    if (added.size) discardQueuedImages(added);
     loadFolders();
-    if (appMode !== "duplicates" && !workPreview) loadGallery(true);
+    if (appMode !== "duplicates" && !workPreview) loadGallery();
   }
-  if (previous && previous.failed !== data.failed && appMode === "duplicates" && !duplicateBusy) loadDuplicatePage();
+  if (appMode === "duplicates" && !duplicateBusy &&
+      (failed || duplicatePage?.pair?.images.some(image => added.has(image.path)))) {
+    loadDuplicatePage();
+  }
 }
 
 function cancelPreviewRequest() {
@@ -1198,13 +1209,13 @@ function workspaceUrl(path, scope = vaultScope) {
   return path + (path.includes("?") ? "&" : "?") + "scope=" + encodeURIComponent(scope);
 }
 
-async function workspaceData(path, signal) {
+async function workspaceData(path, signal, { trackMutations = true } = {}) {
   const scope = vaultScope;
   const mutation = workspaceMutation;
   const response = await fetch(workspaceUrl(path, scope), { signal });
   if (!response.ok) return null;
   const data = await response.json();
-  return scope === vaultScope && mutation === workspaceMutation ? data : null;
+  return scope === vaultScope && (!trackMutations || mutation === workspaceMutation) ? data : null;
 }
 
 function renderVault() {
@@ -1687,7 +1698,8 @@ async function showImage(root, path) {
   document.getElementById("tags").replaceChildren();
   tagText = "";
   if (root !== "images") return;
-  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(path), request.controller.signal)
+  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(path), request.controller.signal,
+    { trackMutations: false })
     .catch(() => null);
   if (!data || previewRequest !== request) return;
   document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
@@ -1732,7 +1744,7 @@ async function openTileDeletion() {
   imageActions.hidePopover();
   if (!target || !openDeleteDialog(target)) return;
   const data = await workspaceData("/api/tags?path=" + encodeURIComponent(target.path),
-    AbortSignal.timeout(galleryTimeoutMs)).catch(() => null);
+    AbortSignal.timeout(galleryTimeoutMs), { trackMutations: false }).catch(() => null);
   if (deleteTarget !== target || !deleteDialog.open) return;
   target.revision = data?.revision;
   if (!target.revision) {
@@ -1742,16 +1754,17 @@ async function openTileDeletion() {
   renderDeleteControls();
 }
 
-function discardDeletedImage(path) {
+function discardQueuedImages(paths) {
   const activePath = reel[reelAt];
-  const index = reel.indexOf(path);
-  reel = reel.filter(item => item !== path);
-  if (workFile === path) workFile = "";
-  reelAt = activePath === path ? Math.min(index, reel.length - 1) : reel.indexOf(activePath);
+  const nextIndex = reel.slice(0, Math.max(0, reelAt)).filter(path => !paths.has(path)).length;
+  reel = reel.filter(path => !paths.has(path));
+  if (paths.has(workFile)) workFile = "";
+  reelAt = paths.has(activePath) ? Math.min(nextIndex, reel.length - 1) : reel.indexOf(activePath);
   if (!reel.length) galleryMessage = 195;
-  if (folderPreview === path) folderPreview = "";
-  const key = "images:" + path;
-  if (shown === key || previewRequest?.key === key) showEmpty();
+  if (paths.has(folderPreview)) folderPreview = "";
+  takeFolderFiles(folderFiles.filter(file => !paths.has(file.path)));
+  if (appMode === "duplicates") return;
+  if ([...paths].some(path => shown === "images:" + path || previewRequest?.key === "images:" + path)) showEmpty();
   if (workPreview) renderWorkPreview();
   else renderGallery();
 }
@@ -1777,11 +1790,9 @@ async function confirmDelete() {
       workspaceMutation++;
       galleryRequest++;
       statusShown = ++statusRequest;
-      discardDeletedImage(target.path);
-      takeFolderFiles(folderFiles.filter(file => file.path !== target.path));
-      showNotice(data.warning || "");
+      discardQueuedImages(new Set([target.path]));
+      showNotice(t(323));
       vocab = [];
-      if (vaultScope) loadFolders();
       tick();
     }
   } catch {

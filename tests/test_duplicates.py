@@ -4,12 +4,13 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from oubi_cryptomator import Vault
 from oubi_duplicates import DuplicateError, DuplicateStore, duplicate_file, matching_pairs
-from oubi_files import sidecar_path
-from oubi_web import App, Workspace
+from oubi_files import image_revision, sidecar_path
+from oubi_index import VaultIndex
+from oubi_web import App, Handler, Workspace
 
 
 class DuplicateTests(unittest.TestCase):
@@ -19,6 +20,81 @@ class DuplicateTests(unittest.TestCase):
             set(matching_pairs(entries, lambda: False)),
             {("a", "b", 8), ("b", "c", 1), ("a", "d", 0), ("b", "d", 8)},
         )
+
+    def test_trash_joins_duplicate_queue_and_hides_pending_images(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = Workspace.encrypted(root)
+            app = App(workspace)
+            handler = Handler.__new__(Handler)
+            handler.app = SimpleNamespace(vault=Vault(root, root))
+            handler._scoped_app = Mock(return_value=app)
+            handler._language = Mock(return_value="en")
+            handler._send = Mock()
+            handler.headers = Mock()
+            handler.headers.get_content_type.return_value = "application/json"
+            store = app.duplicate_results()
+            self.addCleanup(store.db.close)
+            app.catalog = VaultIndex(workspace).initialize()
+            app.catalog.add_folder("")
+            self.addCleanup(app.close_catalog)
+            first, second, third, changed = [root / f"{name}.png" for name in ("a", "b", "c", "d")]
+            live_revisions = {}
+            with closing(store.copy()) as db:
+                for file in (first, second, third, changed):
+                    file.write_bytes(b"image")
+                    sidecar = sidecar_path(file)
+                    sidecar.parent.mkdir(exist_ok=True)
+                    sidecar.write_text("tag")
+                    _, stored_revision, revision, size = duplicate_file(workspace, file.name)
+                    live_revisions[file.name] = revision
+                    app.thumbnails.write(file.name, revision, b"preview")
+                    app.catalog.set_image(file.name, True, False, 0, "", "tag", {})
+                    db.execute("INSERT INTO images VALUES (?, ?, 0, 20, 20, ?)", (file.name, stored_revision, size))
+                db.executemany("INSERT INTO pairs VALUES (?, ?, 0)", [(first.name, second.name), (first.name, third.name)])
+                store.install(db)
+            started, release = threading.Event(), threading.Event()
+            remove = app._remove_images
+            order = []
+
+            def slow_remove(files, **kwargs):
+                order.append(files[0][0])
+                started.set()
+                if not release.wait(5):
+                    raise TimeoutError("test did not release the deletion")
+                return remove(files, **kwargs)
+
+            def trash(file):
+                handler._delete_image({"scope": "", "path": file.name, "revision": image_revision(file)})
+                return handler._send.call_args.args
+
+            with patch.object(app, "_remove_images", side_effect=slow_remove):
+                try:
+                    pair = app.duplicate_page(0)["pair"]["images"]
+                    app.queue_duplicate_review([file[key] for key in ("path", "revision", "live_revision") for file in pair],
+                                               "left", "en")
+                    self.assertTrue(started.wait(3))
+                    self.assertEqual(trash(third), (202, {"ok": True}))
+                    self.assertEqual(trash(third)[0], 409)
+                    self.assertEqual(trash(changed)[0], 202)
+                    changed.write_bytes(b"replacement")
+                    self.assertTrue(third.exists())
+                    self.assertEqual(app.duplicate_page(0)["count"], 0)
+                    self.assertEqual(app.gallery([""])["files"], [first.name])
+                    self.assertEqual([item["path"] for item in app.folder_images()["files"]], [first.name])
+                finally:
+                    release.set()
+                with app.review_ready:
+                    self.assertTrue(app.review_ready.wait_for(lambda: app.review_worker is None, timeout=3))
+            self.assertEqual(order, [second.name, third.name, changed.name])
+            self.assertFalse(third.exists())
+            self.assertFalse(sidecar_path(third).exists())
+            self.assertIsNone(app.thumbnails.read(third.name, live_revisions[third.name]))
+            self.assertEqual(store.page(0)["count"], 0)
+            self.assertEqual(changed.read_bytes(), b"replacement")
+            pending, = app.deletion_status()["items"]
+            self.assertEqual(pending["state"], "failed")
+            self.assertIn("[187]", pending["message"])
 
     def test_slow_deletion_leaves_other_pairs_browsable_and_pauses_on_vault_close(self):
         with tempfile.TemporaryDirectory() as tmp:

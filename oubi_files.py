@@ -161,6 +161,16 @@ def delete_source_image(root, relative, revision, *, index, sorted_list, exclude
                                 excluded=excluded, before_commit=before_commit)
 
 
+def source_image_path(root, relative, excluded=None):
+    path = Path(relative)
+    image = root / path
+    if (path.is_absolute() or not path.parts or any(part in {"..", "tags", ".oubi"} for part in path.parts)
+            or path.suffix.lower() not in IMAGE_EXTS or image.parent.resolve() != image.parent
+            or (excluded and image.is_relative_to(excluded))):
+        raise ValueError("Invalid source image")
+    return image
+
+
 def delete_source_images(root, files, *, index, sorted_list, excluded=None, before_commit=None):
     root = Path(root).resolve()
     excluded = Path(excluded).resolve() if excluded else None
@@ -178,11 +188,8 @@ def delete_source_images(root, files, *, index, sorted_list, excluded=None, befo
             raise ImageChangedError(relative)
 
     for relative, revision in files:
-        path = Path(relative)
-        image = root / path
-        if (path.is_absolute() or not path.parts or any(part in {"..", "tags", ".oubi"} for part in path.parts)
-                or path.suffix.lower() not in IMAGE_EXTS or image.parent.resolve() != image.parent
-                or (excluded and image.is_relative_to(excluded)) or image in images):
+        image = source_image_path(root, relative, excluded)
+        if image in images:
             raise ValueError("Invalid source image")
         check_revision(image, relative, revision)
         images[image] = (relative, revision)

@@ -22,7 +22,8 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
-from oubi_files import IMAGE_EXTS, JPEG_XL_SUFFIX, ImageChangedError, delete_source_images, direct_image_files, image_files, image_revision, indexed_image_path, sidecar_path
+from oubi_files import (IMAGE_EXTS, JPEG_XL_SUFFIX, ImageChangedError, delete_source_images, direct_image_files,
+                        file_revision, image_files, image_revision, indexed_image_path, sidecar_path, source_image_path)
 from oubi_duplicates import DATABASE_NAME, DuplicateError, DuplicateStore, duplicate_file, scan_duplicates
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
 from oubi_gpu import GPU_BUSY_STATES, GpuError
@@ -1467,7 +1468,8 @@ class App:
             prefix = relative + "/" if relative else ""
             files = ((prefix + image.name, sidecar_path(image).name in sidecars or prefix + image.name in tagged)
                      for image in images)
-        return {"files": [{"path": path, "tagged": bool(tagged)} for path, tagged in files]}
+        pending = self.pending_deletion_paths()
+        return {"files": [{"path": path, "tagged": bool(tagged)} for path, tagged in files if path not in pending]}
 
     def _ensure_count(self, *, refresh=False):
         with self.lock:
@@ -1544,6 +1546,34 @@ class App:
         return ({path for item in pending for path in item["files"]},
                 [item["pair"][:2] for item in pending if not item["files"]])
 
+    def pending_deletion_paths(self):
+        with self.lock:
+            return self._review_exclusions()[0]
+
+    def _source_image_revision(self, relative):
+        workspace = self.paths
+        root = Path(workspace.images).resolve()
+        excluded = Path(workspace.excluded).resolve() if workspace.excluded else None
+        info = source_image_path(root, relative, excluded).lstat()
+        return file_revision(info), (info.st_size, info.st_mtime_ns)
+
+    def queue_image_deletion(self, relative, revision, language):
+        relative = Path(relative).as_posix()
+        try:
+            live, saved = self._source_image_revision(relative)
+        except FileNotFoundError as error:
+            raise DuplicateError(187) from error
+        except OSError as error:
+            raise DuplicateError(321, path=relative, error=str(error)) from error
+        if revision != live:
+            raise DuplicateError(187)
+        with self.review_ready:
+            if self.job_running or self.review_paused:
+                raise DuplicateError(188)
+            if relative in self._review_exclusions()[0]:
+                raise DuplicateError(320, path=relative)
+            self._enqueue_review({"files": (relative,), "revision": revision, "saved": saved, "language": language})
+
     def queue_duplicate_review(self, pair, decision, language):
         pair = tuple(pair)
         store = self.duplicate_results()
@@ -1554,14 +1584,17 @@ class App:
             if (files.intersection(pair[:2]) or pair[:2] in pairs or not store.contains(*pair[:4])):
                 raise DuplicateError(295)
             targets = {"left": [pair[1]], "right": [pair[0]], "both": pair[:2], "different": []}[decision]
-            item = {"pair": pair, "decision": decision, "language": language, "files": targets, "state": "waiting"}
-            self.reviews.append(item)
-            try:
-                self._start_review_worker()
-            except RuntimeError as error:
-                self.reviews.remove(item)
-                raise DuplicateError(315, error=str(error)) from error
-            self.review_version += 1
+            self._enqueue_review({"pair": pair, "decision": decision, "language": language, "files": targets})
+
+    def _enqueue_review(self, item):
+        item["state"] = "waiting"
+        self.reviews.append(item)
+        try:
+            self._start_review_worker()
+        except RuntimeError as error:
+            self.reviews.remove(item)
+            raise DuplicateError(315, error=str(error)) from error
+        self.review_version += 1
 
     def _start_review_worker(self):
         if self.review_worker is None and any(item["state"] == "waiting" for item in self.reviews):
@@ -1584,12 +1617,15 @@ class App:
             language = item["language"]
             try:
                 self._check_review_mount()
-                pair = item["pair"]
-                if item.get("remounted"):
-                    left, right, left_revision, right_revision = pair[:4]
-                    pair = [*pair[:4], self.check_duplicate_image(left, left_revision),
-                            self.check_duplicate_image(right, right_revision)]
-                message = self.review_duplicate(pair, item["decision"], language)
+                if "pair" in item:
+                    pair = item["pair"]
+                    if item.get("remounted"):
+                        left, right, left_revision, right_revision = pair[:4]
+                        pair = [*pair[:4], self.check_duplicate_image(left, left_revision),
+                                self.check_duplicate_image(right, right_revision)]
+                    message = self.review_duplicate(pair, item["decision"], language)
+                else:
+                    message = self._delete_queued_image(item)
                 state = "warning" if message else "done"
             except DuplicateError as error:
                 state = "failed"
@@ -1676,18 +1712,41 @@ class App:
             if decision == "both":
                 raise DuplicateError(303, left=left, right=right, error=str(error)) from error
             raise DuplicateError(286, path=paths[0], error=str(error)) from error
-        warnings = []
+        return self._finish_image_removal(paths, cleanup, thumbnail_errors, language)
+
+    def _delete_queued_image(self, item):
+        relative, = item["files"]
+        revision = item["revision"]
         try:
-            store.remove(*paths)
-        except (OSError, sqlite3.Error) as error:
-            with store.lock:
-                store.drop_pairs(*paths)
-            if decision == "both":
-                warnings.append("[304] " + text(304, language=language, error=str(error)))
-            else:
-                warnings.append("[287] " + text(287, language=language, path=paths[0], error=str(error)))
+            if item.get("remounted"):
+                revision, saved = self._source_image_revision(relative)
+                if saved != item["saved"]:
+                    raise ImageChangedError(relative)
+            cleanup, thumbnail_errors = self._remove_images([(relative, revision)])
+        except (ImageChangedError, FileNotFoundError) as error:
+            raise DuplicateError(187) from error
+        except (OSError, ValueError, sqlite3.Error, csv.Error) as error:
+            raise DuplicateError(322, path=relative, error=str(error)) from error
+        return self._finish_image_removal(item["files"], cleanup, thumbnail_errors, item["language"])
+
+    def _finish_image_removal(self, paths, cleanup, thumbnail_errors, language):
+        warnings = []
+        store = self.duplicate_store
+        try:
+            if store is None and (Path(self.paths.csv).parent / DATABASE_NAME).exists():
+                store = self.duplicate_results()
+            if store is not None:
+                store.remove(*paths)
+        except (OSError, sqlite3.Error, DuplicateError) as error:
+            if store is not None:
+                with store.lock:
+                    with suppress(sqlite3.Error):
+                        store.drop_pairs(*paths)
+            detail = text(error.code, language=language, **error.values) if isinstance(error, DuplicateError) else str(error)
+            code = 304 if len(paths) == 2 else 287
+            warnings.append(f"[{code}] " + text(code, language=language, path=paths[0], error=detail))
         if cleanup:
-            code = 305 if decision == "both" else 189
+            code = 305 if len(paths) == 2 else 189
             warnings.append(f"[{code}] " + text(code, language=language))
         for relative, error in thumbnail_errors:
             warnings.append("[306] " + text(306, language=language, path=relative, error=error))
@@ -1716,16 +1775,13 @@ class App:
                                                sorted_list=workspace.sorted_list, excluded=workspace.excluded,
                                                before_commit=before_commit)
         relatives = [Path(relative).as_posix() for relative, _ in files]
-        cache = self.thumbnails
-        if cache is None and self.duplicate_store is not None:
-            cache = VaultThumbnails(Path(workspace.csv).parent)
+        cache = self.thumbnails or VaultThumbnails(Path(workspace.csv).parent)
         thumbnail_errors = []
-        if cache is not None:
-            for relative in relatives:
-                try:
-                    cache.remove(relative)
-                except OSError as error:
-                    thumbnail_errors.append((relative, str(error)))
+        for relative in relatives:
+            try:
+                cache.remove(relative)
+            except OSError as error:
+                thumbnail_errors.append((relative, str(error)))
         root = Path(workspace.images).resolve()
         with self.lock:
             if self.folder_scan is not None:
@@ -1858,16 +1914,18 @@ class App:
         if self.catalog is not None:
             folders = [""] if directories is None else directories
             files = self.catalog.gallery(folders) if tags is None else self.catalog.search(folders, tags)
-            return {"files": files}
-        with self.lock:
-            scanning = self.workspace is not None and self.folder_scan and not self.folder_scan[0].is_set()
-        if scanning:
-            return {"scanning": True}
-        if tags is not None:
-            return {"files": images_with_tags(tags, path=paths.csv, root=paths.images, exclude=paths.excluded,
-                                              folders=directories)}
-        return {"files": recent_tagged(directories, limit=None, root=paths.images, exclude=paths.excluded,
-                                       csv=paths.csv)}
+        else:
+            with self.lock:
+                scanning = self.workspace is not None and self.folder_scan and not self.folder_scan[0].is_set()
+            if scanning:
+                return {"scanning": True}
+            if tags is not None:
+                files = images_with_tags(tags, path=paths.csv, root=paths.images, exclude=paths.excluded,
+                                         folders=directories)
+            else:
+                files = recent_tagged(directories, limit=None, root=paths.images, exclude=paths.excluded, csv=paths.csv)
+        pending = self.pending_deletion_paths()
+        return {"files": [path for path in files if path not in pending]}
 
     def status(self):
         with self.lock:
@@ -1892,7 +1950,9 @@ class App:
                                    "elapsed": int(time.monotonic() - tag_scan["started"])}
         if preview:
             try:
-                payload["preview_file"] = str(Path(preview).relative_to(self.paths.images))
+                relative = Path(preview).relative_to(self.paths.images).as_posix()
+                if relative not in self.pending_deletion_paths():
+                    payload["preview_file"] = relative
             except ValueError:
                 payload["preview_file"] = ""
         return payload
@@ -2213,28 +2273,16 @@ class Handler(BaseHTTPRequestHandler):
             if app is None:
                 self._error(409, 172)
                 return
-            if app.status()["job_running"]:
-                self._error(409, 188)
-                return
-            if app.deletion_status()["busy"]:
-                self._send(*self._duplicate_error(409, 314))
-                return
             try:
-                cleanup_pending = app.remove_image(path, revision)
+                app.queue_image_deletion(path, revision, self._language())
             except DuplicateError as error:
-                self._send(*self._duplicate_error(409, error.code, **error.values))
-                return
-            except ImageChangedError:
-                self._error(409, 187)
-                return
-            except (OSError, UnicodeError, csv.Error):
-                self._error(500, 186)
+                status = 409 if error.code in (187, 188, 320) else 500
+                self._send(*self._duplicate_error(status, error.code, **error.values))
                 return
             except ValueError:
                 self._error(404, 87)
                 return
-            warning = text(189, language=self._language()) if cleanup_pending else ""
-            self._send(200, {"ok": True, "warning": warning})
+        self._send(202, {"ok": True})
 
     def _vault_action(self, path, payload):
         if self.headers.get_content_type() != "application/json":
