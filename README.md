@@ -201,7 +201,7 @@ docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker
 docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker-compose.tpm.yml up -d
 ```
 
-Enter the Cryptomator password when adding a vault schedule. Oubi generates the key automatically in `/data` and uses TPM 2.0 and the host's machine ID to protect the saved password. Keep the `/data` volume when updating the container. After moving the setup to another host, replacing or resetting the TPM, or losing the key, use **Replace password** to set up the vault schedule again.
+Enter the Cryptomator password when adding a vault schedule. Oubi generates the key automatically in `/data` and protects the password with TPM 2.0, the host's machine ID, and the Secure Boot policy (PCR 7). Keep the `/data` volume when updating the container. If you move the setup to another host, replace or reset the TPM, change the Secure Boot policy, or lose the key, use **Replace password** to configure the schedule again.
 
 Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
 

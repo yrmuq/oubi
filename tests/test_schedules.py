@@ -108,6 +108,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(vault_credential(directory, "rule", "encrypt", "my password"), "sealed")
         command = run.call_args.args[0]
         self.assertIn("--with-key=host+tpm2", command)
+        self.assertIn("--tpm2-pcrs=7", command)
         self.assertIn("--tpm2-device=/dev/tpmrm0", command)
         self.assertNotIn("my password", command)
         self.assertEqual(run.call_args.kwargs["input"], b"my password")

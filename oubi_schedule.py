@@ -80,7 +80,8 @@ def vault_credential(directory, id_, operation, value):
     code = 327 if operation == "encrypt" else 328
     command = ["systemd-creds", f"--name=oubi-schedule-{id_}", f"--tpm2-device={TPM_DEVICE}"]
     if operation == "encrypt":
-        command.extend(("--with-key=host+tpm2", "--tpm2-pcrs="))
+        # Bookworm's systemd-creds 252 cannot decrypt credentials sealed with an empty PCR mask.
+        command.extend(("--with-key=host+tpm2", "--tpm2-pcrs=7"))
     try:
         secret_dir.mkdir(mode=0o700, exist_ok=True)
         if secret_dir.is_symlink():
