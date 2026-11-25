@@ -29,6 +29,7 @@ from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_
 from oubi_gpu import GPU_BUSY_STATES, GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
+from oubi_schedule import ScheduleError, Schedules, tpm_available
 from oubi_thumbnails import VaultThumbnails, render_jpeg_xl_for_browser, render_thumbnail
 
 # ===== SETTINGS =====
@@ -1199,6 +1200,8 @@ class App:
         self.lines = []
         self.model_state = "downloading"
         self.job_running = False
+        self.job_result = None
+        self.schedule_scope = None
         self.cancel_requested = False
         self.job_mode = None
         self.job_id = ""
@@ -1473,6 +1476,8 @@ class App:
 
     def _ensure_count(self, *, refresh=False):
         with self.lock:
+            if self.schedule_scope == "images":
+                return False
             if self.job_running and self.job_mode != "plan":
                 return False
             if self.folder_scan or ((self.catalog is not None or self.folder_cache is not None) and not refresh):
@@ -2028,6 +2033,7 @@ class App:
             except GpuError as error:
                 return text(error.message_id, language=language)
             self.job_running = True
+            self.job_result = None
             self.cancel_requested = False
             self.job_mode = mode
             self.job_id = uuid4().hex
@@ -2098,6 +2104,9 @@ class App:
         except OSError as error:
             code = 1
             self.note(text(26, path=workspace.data or workspace.images, error=error, language=language))
+        except Exception:
+            code = 1
+            raise
         finally:
             if gpu_usage:
                 runtime, target = gpu_usage
@@ -2111,6 +2120,7 @@ class App:
                             self.close_catalog()
                     self.note(text(208, language=language))
             with self.lock:
+                self.job_result = code
                 self.job_running = False
                 self.job_mode = None
                 self.tag_scan = None
@@ -2127,6 +2137,7 @@ class App:
     def _run_duplicates(self, folders, language):
         last_report = 0
         last_step = None
+        code = 1
 
         def progress(step, done, total):
             nonlocal last_report, last_step
@@ -2145,6 +2156,7 @@ class App:
         try:
             count = scan_duplicates(self.duplicate_results(), self.paths, folders, lambda: self.cancel_requested,
                                     progress, report_error)
+            code = -15 if count is None else 0
             message = text(81 if count is None else 275, language=language, count=count)
             self.note(message)
             with self.lock:
@@ -2161,6 +2173,7 @@ class App:
                 self.step = f"[{code}] " + text(code, language=language, error=str(error))
         finally:
             with self.lock:
+                self.job_result = code
                 self.job_running = False
                 self.job_mode = None
 
@@ -2176,7 +2189,92 @@ class App:
             return
 
 
+def reserve_schedule(app, rule):
+    with app.vault.lock, app.lock:
+        opened = app.vault.app
+        if (app.schedule_scope or app.job_running or app.review_worker is not None
+                or (opened and (opened.job_running or opened.review_worker is not None))
+                or (rule["source"] == "vault" and app.vault.process is not None)
+                or (rule["source"] == "images" and app.folder_scan is not None)
+                or (rule["action"] != "duplicates" and app.model_state == "downloading")):
+            return False
+        app.schedule_scope = rule["source"]
+        return True
+
+
+def release_schedule(app, rule):
+    with app.vault.lock, app.lock:
+        if rule["source"] == "images" and rule["action"] != "duplicates":
+            app.folder_cache = None
+            app.character_cache.clear()
+        app.schedule_scope = None
+
+
+def run_scheduled_operations(app, background, rule, stopping):
+    workspace = background.paths
+    try:
+        _, folder = resolve_source_folder(workspace.images, rule["folder"], workspace.excluded)
+    except (OSError, ValueError):
+        return 338
+    modes = ("duplicates", "tag") if rule["action"] == "both" else (rule["action"],)
+    failures = []
+    for mode in modes:
+        if stopping.is_set():
+            return 336
+        if mode == "tag" and app.model_state != "ready":
+            failures.append(339)
+            continue
+        if mode == "duplicates" and rule["source"] == "images":
+            background.duplicate_store = app.duplicate_results()
+        failure = background.start(mode, [folder], device="cpu")
+        if not failure:
+            while background.job_running:
+                if stopping.wait(0.2):
+                    background.stop()
+                    time.sleep(0.05)
+            if stopping.is_set():
+                return 336
+        if failure or background.job_result != 0:
+            failures.append(341 if mode == "duplicates" else 340)
+    return 346 if len(failures) == 2 else failures[0] if failures else 337
+
+
+def execute_schedule(app, rule, password, stopping):
+    if stopping.is_set():
+        return 336
+    encrypted = rule["source"] == "vault"
+    if encrypted and app.vault.path is None:
+        return 345
+    private_vault = Vault(app.vault.path, app.vault.mount) if encrypted else None
+    if private_vault is not None:
+        try:
+            private_vault.unlock(password)
+        except VaultError as error:
+            return 164 if error.message_id == 164 else 343
+    background = None
+    try:
+        workspace = Workspace.encrypted(private_vault.mount) if private_vault else None
+        background = App(workspace, devices=(app.rocm, app.nvidia))
+        result = run_scheduled_operations(app, background, rule, stopping)
+    except (OSError, ValueError, VaultError, DuplicateError, sqlite3.Error):
+        result = 335
+    finally:
+        if private_vault is not None:
+            try:
+                if background is not None:
+                    background.close_catalog()
+                    if background.duplicate_store is not None:
+                        background.duplicate_store.db.close()
+            finally:
+                try:
+                    private_vault.close()
+                except (VaultError, OSError):
+                    result = 344
+    return result
+
+
 class Handler(BaseHTTPRequestHandler):
+    schedules = None
     app = None
 
     def log_message(self, fmt, *args):
@@ -2250,6 +2348,8 @@ class Handler(BaseHTTPRequestHandler):
             app = self._scoped_app(scope)
             if app is None:
                 return self._error_response(409, 172)
+            if app is self.app and app.schedule_scope == "images":
+                return self._error_response(409, 342)
             try:
                 app.queue_duplicate_review(pair, decision, self._language())
             except DuplicateError as error:
@@ -2273,6 +2373,9 @@ class Handler(BaseHTTPRequestHandler):
             if app is None:
                 self._error(409, 172)
                 return
+            if app is self.app and app.schedule_scope == "images":
+                self._error(409, 342)
+                return
             try:
                 app.queue_image_deletion(path, revision, self._language())
             except DuplicateError as error:
@@ -2292,6 +2395,8 @@ class Handler(BaseHTTPRequestHandler):
         with vault.lock:
             try:
                 if path == "/api/vault/unlock":
+                    if getattr(self.app, "schedule_scope", None) == "vault":
+                        raise VaultError(342)
                     vault.unlock(payload.get("password"))
                     try:
                         workspace = Workspace.encrypted(vault.mount)
@@ -2330,6 +2435,14 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query, keep_blank_values=True)
         path = parsed.path
+        if path == "/api/schedules" and self.schedules is not None:
+            try:
+                rules = self.schedules.public()
+            except ScheduleError as error:
+                self._error(500, error.code)
+                return
+            self._send(200, {"rules": rules, "vault": self.app.vault.path is not None, "tpm": tpm_available()})
+            return
         if path in APP_ASSETS:
             try:
                 asset = (HERE / path.lstrip("/")).read_bytes()
@@ -2519,6 +2632,9 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._error(400, 89)
             return
+        if parsed.path == "/api/schedules" and self.schedules is not None:
+            self._schedule_action(payload)
+            return
         if parsed.path == "/api/theme":
             if not write_theme(payload.get("theme")):
                 self._error(400, 90)
@@ -2642,6 +2758,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(409, 172)
                 return
             mode = payload.get("mode")
+            if self.app.schedule_scope:
+                self._error(409, 342)
+                return
             normal = self.app.status()
             vault_app = self.app.vault.app
             busy = normal["job_running"] or bool(vault_app and vault_app.status()["job_running"])
@@ -2658,12 +2777,44 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, {"ok": True, "job_id": app.status()["job_id"]})
 
+    def _schedule_action(self, payload):
+        if self.headers.get_content_type() != "application/json":
+            self._error(400, 89)
+            return
+        operation = payload.get("operation")
+        id_ = payload.get("id")
+        try:
+            if operation == "add":
+                source = payload.get("source")
+                if source == "vault" and self.app.vault.path is None:
+                    raise ScheduleError(345)
+                id_ = self.schedules.add(payload.get("cron"), source, payload.get("folder"),
+                                         payload.get("action"), payload.get("password"))
+            elif not isinstance(id_, str) or re.fullmatch(r"[0-9a-f]{32}", id_) is None:
+                raise ScheduleError(332)
+            elif operation == "reset":
+                self.schedules.reset(id_)
+            elif operation == "password":
+                self.schedules.replace_password(id_, payload.get("password"))
+            else:
+                raise ScheduleError(331)
+        except ScheduleError as error:
+            status = 500 if error.code in (327, 329, 330) else 409 if error.code in (326, 334, 345) else 400
+            self._error(status, error.code)
+            return
+        self._send(201 if operation == "add" else 200, {"id": id_})
+
 
 def main():
     app = App()
     Handler.app = app
     port = int(os.environ.get("OUBI_LISTEN", "8080"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    schedules = Schedules(Path(app.paths.csv).parent / "schedules.json", write_json_file,
+                          lambda rule: reserve_schedule(app, rule),
+                          lambda rule, password, stopping: execute_schedule(app, rule, password, stopping),
+                          lambda rule: release_schedule(app, rule), lambda code: print(f"[{code}] {text(code)}", flush=True))
+    Handler.schedules = schedules
     threading.Thread(target=app.download, daemon=True).start()
     app._ensure_count()
     print(text(28, port=port), flush=True)
@@ -2679,9 +2830,11 @@ def main():
 
     signal.signal(signal.SIGTERM, shutdown)
     try:
+        schedules.start()
         server.serve_forever()
     finally:
         server.server_close()
+        schedules.close()
         app.pause_duplicate_reviews()
         with app.vault.lock:
             if opened := app.vault.app:

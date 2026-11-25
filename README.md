@@ -55,6 +55,7 @@
 | Hold an image tag | Add or remove the tag from favorites. The Gallery groups saved tags by character or event. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | Lock icon | Unlock or lock the Cryptomator vault from the folder controls. |
+| Schedules | Run identification, duplicate search, or both in the background. View the last run and its result. |
 | `Sort destination` | With the vault open, choose the destination for both sorting and its plan. |
 | `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
 | `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
@@ -179,6 +180,28 @@ Set `OUBI_CRYPT_FOLDER` in `.env` when using the Cryptomator override, for examp
 Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, favorite tags, and gender overrides use the vault’s `.oubi/` folder.
 
 If opening fails, the password dialog identifies the failed step and shows the relevant error from Cryptomator or FUSE when available. Use that message when reporting a vault problem. If Oubi has to rebuild the index on unlock, the terminal shows the reason before discovery starts.
+
+#### Scheduled jobs
+
+Open **Schedules** in the header, choose a workspace, and enter a folder path relative to that workspace. Leave the folder blank to process the whole workspace. The five cron fields are minute, hour, day of the month, month, and day of the week. For example, `0 3 * * *` runs daily at 03:00 in the container's `TZ` time zone. Scheduled identification uses the CPU. Duplicate search saves pairs for review in **Duplicates**. File deletion still requires a manual decision.
+
+Jobs run with the container and wait for an active operation to finish. A scheduled vault job waits until the manually opened vault is locked. It then unlocks and locks the vault on its own, independently of the browser. **Schedules** shows the last run's time and result. **Reset** deletes the rule and its saved password. A run that already started can finish.
+
+Schedules in regular folders work with the standard Compose setup. For scheduled Cryptomator jobs, also use the [TPM Compose override](docker-compose.tpm.yml). Run these commands on the Linux server that runs Docker:
+
+```sh
+cat /sys/class/tpm/tpm0/tpm_version_major
+stat -c '%g' /dev/tpmrm0
+```
+
+The first command should print `2`. Put the number from the second command in `.env` as `OUBI_TPM_GID`, then add the TPM override to your usual Compose command.
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker-compose.tpm.yml pull
+docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker-compose.tpm.yml up -d
+```
+
+Enter the Cryptomator password when adding a vault schedule. Oubi generates the key automatically in `/data` and uses TPM 2.0 and the host's machine ID to protect the saved password. Keep the `/data` volume when updating the container. After moving the setup to another host, replacing or resetting the TPM, or losing the key, use **Replace password** to set up the vault schedule again.
 
 Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
 

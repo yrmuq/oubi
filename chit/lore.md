@@ -47,6 +47,8 @@
 - Enable vault controls at startup when `/crypt/vault.cryptomator` is present. The container path is fixed so operators only configure the host bind mount.
 - Return vault unlock errors to the requesting browser with the failed stage and a concise Cryptomator or FUSE diagnostic, redacting the submitted password.
 - Open the Cryptomator password form outside the native modal top layer so browser password managers can display their inline autofill controls.
+- Run scheduled jobs in a separate workspace context. A scheduled vault mount waits for the manual session to close and never grants browser access to the unlocked vault.
+- Protect scheduled Cryptomator passwords with both TPM 2.0 and an automatically generated host key. Deletion decisions remain manual.
 
 ## Compatibility Workarounds
 

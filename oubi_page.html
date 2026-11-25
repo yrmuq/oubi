@@ -131,6 +131,16 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #delete-error { margin-top: 10px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 #vault-dialog .dialog-actions button { flex: 1 1 0; }
+#schedule-dialog { width: min(540px, calc(100vw - 56px)); max-height: calc(100dvh - 56px); background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+#schedule-dialog::backdrop { background: #0009; }
+#schedule-dialog h2 { margin: 0 0 12px; }
+#schedule-dialog form:not([hidden]), #schedule-dialog label:not([hidden]) { display: grid; gap: 6px; }
+#schedule-dialog input, #schedule-dialog select { box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#schedule-error, #schedule-tpm-note { margin: 0; }
+#schedule-rules { display: grid; gap: 8px; padding: 0; list-style: none; }
+#schedule-rules li { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+#schedule-rules p { overflow-wrap: anywhere; margin: 0 0 6px; }
+#schedule-rules button + button { margin-inline-start: 6px; }
 .folder-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 #folder-navigation { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
 #folder-up { height: 28px; padding: 0 8px; }
@@ -349,6 +359,9 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <select id="nvidia-card"><option value="auto">Auto</option></select>
       <button type="button" class="secondary" id="nvidia-install">Install</button>
     </div>
+    <div class="compute">
+      <button type="button" class="secondary" id="schedule-open" aria-haspopup="dialog">Schedules</button>
+    </div>
   </div>
   <button id="app-mode" type="button" class="secondary" aria-pressed="false">Sorting</button>
   <div class="head-tools">
@@ -535,6 +548,49 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   </div>
   <p id="delete-error" role="alert" hidden></p>
 </dialog>
+<dialog id="schedule-dialog" aria-labelledby="schedule-title">
+  <h2 id="schedule-title" data-schedule-text="347"></h2>
+  <form id="schedule-form">
+    <label><span id="schedule-workspace-text" data-schedule-text="348"></span>
+      <select id="schedule-source" name="source" aria-labelledby="schedule-workspace-text">
+        <option value="images" data-schedule-text="349"></option>
+        <option value="vault" data-schedule-text="350" disabled>Cryptomator</option>
+      </select>
+    </label>
+    <label><span data-schedule-text="351"></span>
+      <input type="text" name="folder" maxlength="4096">
+    </label>
+    <label><span data-schedule-text="352"></span>
+      <input type="text" name="cron" maxlength="128" placeholder="0 3 * * *" required>
+    </label>
+    <label><span id="schedule-action-text" data-schedule-text="353"></span>
+      <select name="action" aria-labelledby="schedule-action-text">
+        <option value="tag" data-schedule-text="1"></option>
+        <option value="duplicates" data-schedule-text="264"></option>
+        <option value="both" data-schedule-text="354"></option>
+      </select>
+    </label>
+    <p id="schedule-tpm-note" data-schedule-text="326" hidden></p>
+    <label id="schedule-password-add" hidden><span data-schedule-text="174"></span>
+      <input type="password" name="password" autocomplete="current-password" disabled>
+    </label>
+    <button type="submit" data-schedule-text="355"></button>
+  </form>
+  <form id="schedule-password-form" hidden>
+    <label><span data-schedule-text="174"></span>
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <div class="dialog-actions">
+      <button type="submit" data-schedule-text="360"></button>
+      <button type="button" class="secondary" id="schedule-password-cancel" data-schedule-text="175"></button>
+    </div>
+  </form>
+  <ul id="schedule-rules"></ul>
+  <p id="schedule-error" role="alert" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="secondary" id="schedule-close" data-schedule-text="362"></button>
+  </div>
+</dialog>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
   <img id="zoom-img" alt="">
@@ -645,6 +701,12 @@ const vaultPassword = document.getElementById("vault-password");
 const vaultError = document.getElementById("vault-error");
 const vaultUnlock = document.getElementById("vault-unlock");
 const vaultCancel = document.getElementById("vault-cancel");
+const scheduleDialog = document.getElementById("schedule-dialog");
+const scheduleForm = document.getElementById("schedule-form");
+const scheduleSource = document.getElementById("schedule-source");
+const schedulePassword = document.getElementById("schedule-password-form");
+const scheduleList = document.getElementById("schedule-rules");
+const scheduleError = document.getElementById("schedule-error");
 const vaultBackground = document.querySelectorAll("body > .topbar, body > .top");
 const sortTarget = document.getElementById("sort-target");
 const folderBox = document.getElementById("folders");
@@ -673,6 +735,122 @@ let gpuProgress = null;
 let sendingGpuRequest = false;
 let statusRequest = 0;
 let statusShown = 0;
+let scheduleData = { rules: [], vault: false, tpm: false };
+let changingSchedule = false;
+let readingSchedules = false;
+let scheduleRevision = 0;
+let replacingSchedule = "";
+
+function showScheduleError(message = "") {
+  scheduleError.textContent = message;
+  scheduleError.hidden = !message;
+}
+
+function showSchedulePassword() {
+  const encrypted = scheduleSource.value === "vault";
+  const password = scheduleForm.elements.password;
+  password.disabled = !encrypted;
+  password.required = encrypted;
+  if (!encrypted) password.value = "";
+  document.getElementById("schedule-password-add").hidden = !encrypted;
+  document.getElementById("schedule-tpm-note").hidden = !encrypted || scheduleData.tpm;
+}
+
+function editSchedulePassword(id = "") {
+  replacingSchedule = id;
+  schedulePassword.reset();
+  schedulePassword.hidden = !id;
+  scheduleForm.hidden = Boolean(id);
+  if (id) schedulePassword.elements.password.focus();
+}
+
+function renderSchedules() {
+  scheduleSource.options[1].disabled = !scheduleData.vault;
+  showSchedulePassword();
+  const date = new Intl.DateTimeFormat(lang, { dateStyle: "short", timeStyle: "short" });
+  const entries = scheduleData.rules.map(rule => {
+    const row = document.createElement("li");
+    const target = document.createElement("p");
+    const result = document.createElement("p");
+    const action = { tag: 1, duplicates: 264, both: 354 }[rule.action];
+    target.textContent = [t(rule.source === "vault" ? 350 : 349), "/" + rule.folder, rule.cron, t(action)].join(" · ");
+    result.textContent = rule.last_run
+      ? [t(357), date.format(rule.last_run * 1000), t(rule.result)].join(" · ")
+      : t(358);
+    if (rule.pending) result.textContent += " · " + t(359);
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "danger";
+    reset.textContent = t(356);
+    reset.onclick = () => {
+      if (window.confirm(t(361))) submitSchedule({ operation: "reset", id: rule.id });
+    };
+    row.append(target, result, reset);
+    if (rule.source === "vault") {
+      const replace = document.createElement("button");
+      replace.type = "button";
+      replace.className = "secondary";
+      replace.textContent = t(360);
+      replace.disabled = rule.result === 333 || !scheduleData.vault || !scheduleData.tpm;
+      replace.onclick = () => {
+        showScheduleError();
+        editSchedulePassword(rule.id);
+      };
+      row.append(replace);
+    }
+    return row;
+  });
+  scheduleList.replaceChildren(...entries);
+}
+
+async function loadSchedules() {
+  if (!scheduleDialog.open || changingSchedule || readingSchedules) return;
+  readingSchedules = true;
+  const revision = scheduleRevision;
+  try {
+    const response = await fetch("/api/schedules");
+    const data = await response.json();
+    if (revision !== scheduleRevision || !scheduleDialog.open) return;
+    if (!response.ok) {
+      if (scheduleError.hidden) showScheduleError(data.error || t(363));
+      return;
+    }
+    if (JSON.stringify(data) !== JSON.stringify(scheduleData)) {
+      scheduleData = data;
+      renderSchedules();
+    }
+  } catch {
+    if (scheduleDialog.open && revision === scheduleRevision && scheduleError.hidden) showScheduleError(t(363));
+  } finally {
+    readingSchedules = false;
+  }
+}
+
+async function submitSchedule(payload) {
+  if (changingSchedule) return false;
+  changingSchedule = true;
+  scheduleRevision++;
+  showScheduleError();
+  try {
+    const response = await fetch("/api/schedules", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      if (scheduleDialog.open) showScheduleError(data.error || t(364));
+      return false;
+    }
+    return true;
+  } catch {
+    if (scheduleDialog.open) showScheduleError(t(364));
+    return false;
+  } finally {
+    changingSchedule = false;
+    loadSchedules();
+  }
+}
 
 function fileName(path) {
   const parts = String(path || "").split("/");
@@ -977,6 +1155,9 @@ function showEmpty() {
 
 function applyI18n() {
   document.documentElement.lang = lang;
+  document.getElementById("schedule-open").textContent = t(347);
+  for (const node of scheduleDialog.querySelectorAll("[data-schedule-text]")) node.textContent = t(node.dataset.scheduleText);
+  renderSchedules();
   document.getElementById("tag").textContent = t(1);
   for (const [id, label] of duplicateButtons) document.getElementById(id).textContent = t(label);
   document.getElementById("duplicate-prev").setAttribute("aria-label", t(300));
@@ -3102,6 +3283,33 @@ window.addEventListener("mousemove", (event) => {
   paintZoom();
 });
 window.addEventListener("mouseup", () => { view.drag = null; });
+document.getElementById("schedule-open").onclick = () => {
+  showScheduleError();
+  scheduleDialog.showModal();
+  loadSchedules();
+};
+document.getElementById("schedule-close").onclick = () => scheduleDialog.close();
+document.getElementById("schedule-password-cancel").onclick = () => editSchedulePassword();
+scheduleDialog.addEventListener("close", () => {
+  scheduleForm.elements.password.value = "";
+  editSchedulePassword();
+});
+scheduleSource.onchange = showSchedulePassword;
+scheduleForm.onsubmit = async event => {
+  event.preventDefault();
+  if (changingSchedule) return;
+  const fields = Object.fromEntries(new FormData(scheduleForm));
+  scheduleForm.elements.password.value = "";
+  await submitSchedule({ operation: "add", ...fields });
+};
+schedulePassword.onsubmit = async event => {
+  event.preventDefault();
+  if (changingSchedule) return;
+  const password = schedulePassword.elements.password.value;
+  schedulePassword.reset();
+  if (await submitSchedule({ operation: "password", id: replacingSchedule, password })) editSchedulePassword();
+};
+setInterval(loadSchedules, 2000);
 if (initialVaultFolder) selectFolderLocation(initialVaultFolder);
 if (initialVaultFolder === null) showNotice(t(257));
 loadFolders();
