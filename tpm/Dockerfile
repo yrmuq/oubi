@@ -15,7 +15,8 @@ RUN sh check.sh \
 
 FROM runtime
 ENV GOMAXPROCS=1
-RUN install -d -m 0755 /run/oubi-tpm && install -d -m 0700 /var/lib/oubi-tpm
+RUN --mount=type=bind,source=dependencies/os-refresh.txt,target=/tmp/os-refresh.txt apk upgrade --no-cache \
+    && install -d -m 0755 /run/oubi-tpm && install -d -m 0700 /var/lib/oubi-tpm
 COPY --from=build /out/oubi-tpm /usr/local/bin/oubi-tpm
 COPY --from=build /out/LICENSE.* /usr/share/licenses/oubi-tpm/
 COPY LICENSE /usr/share/licenses/oubi-tpm/LICENSE

@@ -14,6 +14,9 @@ from pathlib import Path
 
 PYPI_INDEX = "https://pypi.org/simple"
 REQUIREMENTS = str(Path(__file__).with_name("requirements.txt"))
+DEPENDENCIES = Path(__file__).with_name("dependencies")
+GPU_WHEELS = json.loads((DEPENDENCIES / "gpu.json").read_text(encoding="utf-8"))
+SHARED_CONSTRAINTS = str(DEPENDENCIES / "shared.txt")
 PIP_PROGRESS = re.compile(r"Progress (\d+) of (\d+)")
 PIP_FILE = re.compile(r"Downloading ([\w.+-]+\.(?:whl(?:\.metadata)?|tar\.gz))\b")
 GPU_BUSY_STATES = {"installing", "checking", "removing"}
@@ -47,6 +50,12 @@ class GpuRuntime:
     def _marker(self, target, gpu):
         name = f"gpu-name-{gpu}" if gpu else "gpu-name"
         return self.environment(target) / name
+
+    def wheel_environment(self, name, vision):
+        legacy = self.root / name
+        if any(legacy.glob(f"lib/python*/site-packages/torchvision-{vision}.dist-info")):
+            return legacy
+        return self.root / f"{name}-vision{vision.split('+')[0]}"
 
     def installed(self, target, gpu=None):
         try:
@@ -234,8 +243,8 @@ class GpuRuntime:
                 shutil.rmtree(runtime)
             try:
                 subprocess.run([sys.executable, "-m", "venv", str(runtime)], check=True)
-                self._pip(python, "--index-url", PYPI_INDEX, "pip==26.2.2")
-                self._pip(python, *self.requirements(target))
+                self._pip(python, "--index-url", PYPI_INDEX, "-r", str(DEPENDENCIES / "pip.txt"))
+                self._pip(python, "-c", SHARED_CONSTRAINTS, *self.requirements(target))
                 packages_ready.touch()
             finally:
                 if not packages_ready.is_file():

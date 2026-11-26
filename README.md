@@ -63,7 +63,7 @@
 | `OUBI_NSFW_FROM` | Use `q` to include `rating:q` and `rating:e`, or `e` to include only `rating:e`. |
 | `OUBI_COPY_TXT=1` | Copy or move accompanying `.txt` files with sorted images. |
 | `OUBI_BATCH_SIZE` | Set the number of images in a model pass. The CPU default is `1`. |
-| `OUBI_MODEL` | Use a Hugging Face model ID or a model directory visible to the container. |
+| `OUBI_MODEL` | Use a Hugging Face model ID or a model directory visible to the container. Oubi resolves the current Hub revision at the start of each tagging run. |
 | `OUBI_GENRE_1`–`OUBI_GENRE_20` | Set initial genre tags in order. A saved genre list in the web interface takes precedence. |
 
 Put optional gender overrides in `genders.csv` under the data directory as headerless rows like `hatsune_miku,f`. Copy entries from `unknown_genders.txt` into that file, add `f` or `m`, then sort again.
@@ -88,6 +88,8 @@ Select a GPU in the header and click its `Install` button. The terminal shows th
 ### Release Scheme
 
 Use the [latest stable release](https://github.com/yrmuq/oubi/releases/latest) for regular use and the [release list](https://github.com/yrmuq/oubi/releases) for versioned images. Stable releases are `X.Y.0` and publish `ghcr.io/yrmuq/oubi:latest`. Automated dependency prereleases use `X.Y.Z` with `Z > 0` and use their numbered tag. Development builds use `:dev`. All three channels run the web interface.
+
+The [Dependencies workflow](.github/workflows/deps.yml) updates the Python lock, resolves CPU and GPU wheel sets, verifies new Cryptomator CLI releases, and refreshes Debian and Alpine packages. The [security workflow](.github/workflows/security.yml) scans the published stable images daily and requests a dependency build for newly fixable high or critical findings. Set the optional repository Actions secret `OUBI_SECURITY_WEBHOOK` to an HTTPS Mattermost incoming webhook to receive scan alerts.
 
 ### Docker
 
@@ -219,5 +221,5 @@ The scripts and `Dockerfile` in this repository are licensed under `GPL-3.0-only
 | Transformers | [huggingface/transformers](https://github.com/huggingface/transformers) | `Apache-2.0` | Loads the tagger pipeline. |
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | `Apache-2.0` | Required by the tagger model code. |
 | Pillow JPEG XL plugin | [Isotr0py/pillow-jpegxl-plugin](https://github.com/Isotr0py/pillow-jpegxl-plugin) | `GPL-3.0-or-later` | Shared decoder with a bundled license and [matching source distribution](https://pypi.org/project/pillow-jxl-plugin/1.3.8/#files). |
-| Cryptomator CLI | [Cryptomator CLI 0.6.2 source](https://github.com/cryptomator/cli/tree/0.6.2) | `AGPL-3.0-only` | The upstream Linux x86_64 binary and its license ship with Oubi. The vault override enables mounting via FUSE. |
+| Cryptomator CLI | [cryptomator/cli](https://github.com/cryptomator/cli) | `AGPL-3.0-only` | The upstream Linux x86_64 binary and license ship with Oubi. The [dependency lock](dependencies/cryptomator.json) records the release and archive checksum. |
 | Go TPM | [google/go-tpm](https://github.com/google/go-tpm) | `Apache-2.0` | The Alpine service uses the library to seal and unseal the key used for scheduled vault credentials. |

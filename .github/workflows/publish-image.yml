@@ -59,7 +59,7 @@ jobs:
         if: ${{ steps.image.outputs.source != '' && inputs.channel != 'dev' }}
         run: sh scripts/smoke-container.sh oubi:smoke linux/amd64
       - name: Build the TPM service candidate
-        if: ${{ steps.image.outputs.tpm_tags != '' }}
+        if: ${{ steps.image.outputs.tpm_tags != '' || (steps.image.outputs.source != '' && inputs.channel != 'dev') }}
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -70,8 +70,27 @@ jobs:
           cache-from: type=gha,scope=oubi-tpm-alpine-amd64
           cache-to: type=gha,mode=max,scope=oubi-tpm-alpine-amd64
       - name: Start the TPM service candidate
-        if: ${{ steps.image.outputs.tpm_tags != '' }}
+        if: ${{ steps.image.outputs.tpm_tags != '' || (steps.image.outputs.source != '' && inputs.channel != 'dev') }}
         run: sh scripts/smoke-tpm.sh oubi-tpm:smoke
+      - name: Check the Oubi candidate for fixable vulnerabilities
+        if: ${{ steps.image.outputs.source != '' && inputs.channel != 'dev' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: oubi:smoke
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+      - name: Check the TPM candidate for fixable vulnerabilities
+        if: ${{ steps.image.outputs.source != '' && inputs.channel != 'dev' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: oubi-tpm:smoke
+          skip-setup-trivy: true
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
       - name: Reserve the dependency release version
         if: ${{ steps.image.outputs.source != '' && inputs.channel == 'deps' }}
         env:

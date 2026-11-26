@@ -3,7 +3,8 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -14,6 +15,7 @@ from tag_folder import (
     chunked,
     find_pending_images,
     format_bytes,
+    load_tagger,
     model_status_line,
     progress_line,
     rate_limited,
@@ -23,6 +25,22 @@ from tag_folder import (
 
 
 class TagBatchTests(unittest.TestCase):
+    def test_model_files_and_pipeline_use_the_same_discovered_revision(self):
+        revision = "a" * 40
+        model = "local-test/example-model"
+        file = SimpleNamespace(rfilename="config.json", size=50)
+        hub = SimpleNamespace(HfApi=Mock(return_value=SimpleNamespace(model_info=Mock(
+            return_value=SimpleNamespace(sha=revision, siblings=[file])))),
+            try_to_load_from_cache=Mock(return_value=None), hf_hub_download=Mock())
+        pipeline = Mock()
+        modules = {"huggingface_hub": hub, "transformers": SimpleNamespace(pipeline=pipeline),
+                   "torch": SimpleNamespace(float32=object())}
+        with patch.dict(sys.modules, modules), patch("tag_folder.say", return_value=""):
+            load_tagger(model, device="cpu")
+        hub.try_to_load_from_cache.assert_called_once_with(model, "config.json", revision=revision)
+        self.assertEqual(hub.hf_hub_download.call_args.kwargs["revision"], revision)
+        self.assertEqual(pipeline.call_args.kwargs["revision"], revision)
+
     def test_identify_excludes_workspace_cache_from_root_and_explicit_folders(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

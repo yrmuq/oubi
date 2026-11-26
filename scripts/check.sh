@@ -7,5 +7,6 @@ sh -n entrypoint.sh
 sh -n scripts/smoke-container.sh
 sh -n scripts/smoke-tpm.sh
 sh -n scripts/sync-deps.sh
+sh -n scripts/lock-cpu.sh
 sh -n tpm/check.sh
 bash -n scripts/publish-image.sh

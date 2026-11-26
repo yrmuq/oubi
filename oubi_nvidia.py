@@ -9,10 +9,8 @@ import threading
 import time
 from pathlib import Path
 
-from oubi_gpu import GpuError, GpuRuntime, PYPI_INDEX, REQUIREMENTS, gpu_smoke_test
+from oubi_gpu import GPU_WHEELS, GpuError, GpuRuntime, PYPI_INDEX, REQUIREMENTS, gpu_smoke_test
 
-TORCH_VERSION = "2.14.0"
-VISION_VERSION = "0.29.0"
 GPU_UUID = re.compile(r"GPU-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.IGNORECASE)
 VERSION = re.compile(r"\d+(?:\.\d+)+")
 # Minimum Linux driver and lowest compiled minor compute capability per GPU generation.
@@ -95,13 +93,16 @@ class NvidiaRuntime(GpuRuntime):
         return gpu["build"], gpu["uuid"]
 
     def environment(self, build):
-        return self.root / f"{build}-torch{TORCH_VERSION}-{sys.implementation.cache_tag}"
+        wheels = GPU_WHEELS["nvidia"][build]
+        return self.wheel_environment(f"{build}-torch{wheels['torch']}-{sys.implementation.cache_tag}",
+                                      f"{wheels['torchvision']}+{build}")
 
     def requirements(self, build):
+        wheels = GPU_WHEELS["nvidia"][build]
         return (
             "--index-url", f"https://download.pytorch.org/whl/{build}",
             "--extra-index-url", PYPI_INDEX,
-            f"torch=={TORCH_VERSION}+{build}", f"torchvision=={VISION_VERSION}+{build}",
+            f"torch=={wheels['torch']}+{build}", f"torchvision=={wheels['torchvision']}+{build}",
             "-r", REQUIREMENTS,
         )
 

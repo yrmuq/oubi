@@ -6,16 +6,12 @@ import sys
 from pathlib import Path
 
 from oubi_gpu import GpuError as RocmError
-from oubi_gpu import GpuRuntime, PYPI_INDEX, REQUIREMENTS, gpu_smoke_test
+from oubi_gpu import GPU_WHEELS, GpuRuntime, PYPI_INDEX, REQUIREMENTS, gpu_smoke_test
 
 AMD_INDEX = "https://stable.repo.amd.com/rocm/whl-next/"
-ROCM_VERSION = "10.1.0"
-TORCH_VERSION = "2.14.0"
-VISION_VERSION = "0.29.0a0"
-ROCM_METADATA = (
-    f"{AMD_INDEX}rocm/rocm-{ROCM_VERSION}.tar.gz"
-    "#sha256=e6616e62ebd1324031681e6e59349d46ee4f143a8d8f4f901a91c35c993041fc"
-)
+WHEELS = GPU_WHEELS["amd"]
+ROCM_VERSION = WHEELS["rocm"]
+ROCM_METADATA = f"{AMD_INDEX}rocm/rocm-{ROCM_VERSION}.tar.gz#sha256={WHEELS['sha256']}"
 ARCHITECTURES = (
     "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1101",
     "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1200", "gfx1201",
@@ -104,7 +100,8 @@ class RocmRuntime(GpuRuntime):
         return choice
 
     def environment(self, arch):
-        return self.root / f"rocm{ROCM_VERSION}-torch{TORCH_VERSION}-{sys.implementation.cache_tag}-{arch}"
+        name = f"rocm{ROCM_VERSION}-torch{WHEELS['torch']}-{sys.implementation.cache_tag}-{arch}"
+        return self.wheel_environment(name, f"{WHEELS['torchvision']}+rocm{ROCM_VERSION}")
 
     def status(self):
         visible = self.has_devices()
@@ -124,8 +121,8 @@ class RocmRuntime(GpuRuntime):
     def requirements(self, arch):
         return (
             "--index-url", AMD_INDEX, "--extra-index-url", PYPI_INDEX,
-            f"torch[device-{arch}]=={TORCH_VERSION}+rocm{ROCM_VERSION}",
-            f"torchvision[device-{arch}]=={VISION_VERSION}+rocm{ROCM_VERSION}",
+            f"torch[device-{arch}]=={WHEELS['torch']}+rocm{ROCM_VERSION}",
+            f"torchvision[device-{arch}]=={WHEELS['torchvision']}+rocm{ROCM_VERSION}",
             f"rocm[libraries,device-{arch}] @ {ROCM_METADATA}",
             "-r", REQUIREMENTS,
         )

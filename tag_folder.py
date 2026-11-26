@@ -8,12 +8,13 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
 
 from oubi_files import JPEG_XL_SUFFIX, image_files, open_image, sidecar_path, stored_image_path
-from oubi_gpu import GpuError
+from oubi_gpu import DEPENDENCIES, GpuError
 from oubi_index import report_changes
 from oubi_nvidia import GPU_UUID, nvidia_device
 from oubi_rocm import amd_device
@@ -21,6 +22,7 @@ from oubi_rocm import amd_device
 # ===== SETTINGS =====
 ORDER = ["rating", "character", "copyright", "style", "general", "meta"]
 DEFAULT_BATCH_SIZE = 1
+DEFAULT_MODEL = (DEPENDENCIES / "default-model.txt").read_text(encoding="utf-8").strip()
 
 
 # ===== GFX OVERRIDE =====
@@ -228,10 +230,10 @@ def rate_limited(error):
 
 
 # ===== DOWNLOAD THE MODEL =====
-def cached_file(repo_id, filename):
+def cached_file(repo_id, filename, revision):
     from huggingface_hub import try_to_load_from_cache
 
-    found = try_to_load_from_cache(repo_id, filename)
+    found = try_to_load_from_cache(repo_id, filename, revision=revision)
     if isinstance(found, str) and os.path.isfile(found):
         return found
     return None
@@ -241,6 +243,8 @@ def list_model_files(repo_id):
     from huggingface_hub import HfApi
 
     info = HfApi().model_info(repo_id, files_metadata=True)
+    if not info.sha or not re.fullmatch(r"[0-9a-f]{40}", info.sha):
+        raise ValueError("Hugging Face did not return a model revision")
     files = []
     for sibling in info.siblings:
         size = sibling.size
@@ -248,26 +252,26 @@ def list_model_files(repo_id):
         if size is None and isinstance(lfs, dict):
             size = lfs.get("size")
         files.append((sibling.rfilename, int(size or 0)))
-    return files
+    return info.sha, files
 
 
 def download_model(repo_id):
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     print(say(49), flush=True)
-    files = list_model_files(repo_id)
+    revision, files = list_model_files(repo_id)
     total = sum(size for _, size in files)
     cached = 0
     missing = []
     for name, size in files:
-        if cached_file(repo_id, name):
+        if cached_file(repo_id, name, revision):
             cached += size
         else:
             missing.append((name, size))
     print(model_status_line(cached, total), flush=True)
     if not missing:
         print(say(50), flush=True)
-        return
+        return revision
     print(say(51, size=format_bytes(max(0, total - cached)), count=len(missing)), flush=True)
     meter = DownloadMeter(total=total, cached=cached)
     from huggingface_hub import hf_hub_download
@@ -275,13 +279,15 @@ def download_model(repo_id):
     try:
         for name, size in missing:
             print(say(52, name=name, size=format_bytes(size)), flush=True)
-            hf_hub_download(repo_id=repo_id, filename=name, tqdm_class=byte_progress(meter, name, size))
+            hf_hub_download(repo_id=repo_id, filename=name, revision=revision,
+                            tqdm_class=byte_progress(meter, name, size))
             print(say(53, name=name), flush=True)
     except Exception as error:
         if rate_limited(error):
             print(say(54), flush=True)
         raise
     print(say(55), flush=True)
+    return revision
 
 
 def categories_of(result):
@@ -293,12 +299,11 @@ def load_tagger(model, device="auto", architecture=None):
     import torch
     from transformers import pipeline
 
+    options = {}
     if os.path.isdir(model):
         print(say(56), flush=True)
-        source = model
     else:
-        download_model(model)
-        source = model
+        options["revision"] = download_model(model)
     print(say(57), flush=True)
     if device == "amd":
         index = amd_device(torch, architecture)
@@ -311,11 +316,12 @@ def load_tagger(model, device="auto", architecture=None):
     else:
         print(say(58, name="CPU") if device == "cpu" else say(59), flush=True)
     tagger = pipeline(
-        model=source,
-        image_processor=source,
+        model=model,
+        image_processor=model,
         trust_remote_code=True,
         device=index,
         dtype=torch.float16 if index >= 0 else torch.float32,
+        **options,
     )
     print(say(60), flush=True)
     return tagger
@@ -365,7 +371,7 @@ def main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument("folder", nargs="+")
-    ap.add_argument("--model", default="pixai-labs/pixai-tagger-v1.0")
+    ap.add_argument("--model", default=os.environ.get("OUBI_MODEL", DEFAULT_MODEL))
     ap.add_argument("--csv", default="tags.csv")
     ap.add_argument("--no-txt", action="store_true", help="не писать .txt в подпапку tags")
     ap.add_argument("--exclude")

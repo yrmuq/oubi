@@ -18,12 +18,12 @@
 
 ## Deployment and packaging
 
-- [Dockerfile](../Dockerfile), [requirements.txt](../requirements.txt), and [entrypoint.sh](../entrypoint.sh) define the CPU image and web startup.
+- [Dockerfile](../Dockerfile), [requirements.txt](../requirements.txt), [dependencies/](../dependencies/), and [entrypoint.sh](../entrypoint.sh) define the CPU image, the optional GPU wheel sets and shared constraints, the default model, and web startup.
 - [docker-compose.yml](../docker-compose.yml) and [.env.example](../.env.example) define image channel selection, host paths, and environment options. The optional [AMD override](../docker-compose.amd.yml) and [NVIDIA override](../docker-compose.nvidia.yml) grant access to host GPUs. `/images` holds source files, `/output` holds sorted results, `/data` holds tag indexes, UI settings, and optional GPU environments, and `/cache` holds model files.
 - [docker-compose.cryptomator.yml](../docker-compose.cryptomator.yml) adds the encrypted vault bind and FUSE permissions. [Dockerfile](../Dockerfile) packages the pinned Cryptomator CLI and `fuse3` in the shared image.
 - [docker-compose.tpm.yml](../docker-compose.tpm.yml) starts the Alpine service in [tpm/](../tpm/) with access to the TPM device and host machine ID. Oubi uses its Unix socket for scheduled vault credentials.
 - [image.yml](../.github/workflows/image.yml) checks and publishes the dev image. [release.yml](../.github/workflows/release.yml) computes the stable version and records the release. Both call [publish-image.yml](../.github/workflows/publish-image.yml) to build, smoke-test, and publish to GHCR.
-- [dependabot.yml](../.github/dependabot.yml) groups GitHub Actions, Docker, and pip updates. [deps.yml](../.github/workflows/deps.yml) invokes [sync-deps.sh](../scripts/sync-deps.sh) and [update-torch-pins.py](../scripts/update-torch-pins.py) to maintain the dependency branch and publish tested prereleases.
+- [dependabot.yml](../.github/dependabot.yml) groups GitHub Actions, Docker, Go, and pip updates. [deps.yml](../.github/workflows/deps.yml) synchronizes the dependency branch, updates package locks and the signed Cryptomator CLI, refreshes system packages, and publishes tested prereleases. [security.yml](../.github/workflows/security.yml) scans the published stable images and dispatches early dependency refreshes.
 - [VERSION](../VERSION) and [bump-version.sh](../scripts/bump-version.sh) track and allocate release versions. [publish-image.sh](../scripts/publish-image.sh) verifies image metadata and updates GitHub Releases and GHCR aliases. [smoke-container.sh](../scripts/smoke-container.sh) checks startup through the container entrypoint.
 
 ## Tests

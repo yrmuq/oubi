@@ -32,6 +32,7 @@ from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
 from oubi_schedule import ScheduleError, Schedules, tpm_available, tpm_service_configured
 from oubi_thumbnails import VaultThumbnails, render_jpeg_xl_for_browser, render_thumbnail
+from tag_folder import DEFAULT_MODEL
 
 # ===== SETTINGS =====
 HERE = Path(__file__).resolve().parent
@@ -1105,7 +1106,7 @@ def tag_command(folders, *, device="cpu", architecture=None, gpu=None, python=No
         str(HERE / "tag_folder.py"),
         *folders,
         "--model",
-        os.environ.get("OUBI_MODEL", "pixai-labs/pixai-tagger-v1.0"),
+        os.environ.get("OUBI_MODEL", DEFAULT_MODEL),
         "--csv",
         workspace.csv,
         "--batch-size",
@@ -1971,7 +1972,7 @@ class App:
             self.phase = "download"
             self.percent = None
             self.step = text(22)
-        model = os.environ.get("OUBI_MODEL", "pixai-labs/pixai-tagger-v1.0")
+        model = os.environ.get("OUBI_MODEL", DEFAULT_MODEL)
         try:
             if os.path.isdir(model):
                 self.note(text(56))

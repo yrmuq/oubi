@@ -1,0 +1,65 @@
+name: Scan published images
+
+on:
+  schedule:
+    - cron: '19 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    outputs:
+      fingerprint: ${{ steps.report.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Scan the published Oubi image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/yrmuq/oubi:latest
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          format: json
+          output: latest.json
+          exit-code: 0
+      - name: Scan the published TPM image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/yrmuq/oubi:tpm-latest
+          skip-setup-trivy: true
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          format: json
+          output: tpm-latest.json
+          exit-code: 0
+      - name: Summarize and notify
+        id: report
+        if: ${{ !cancelled() }}
+        env:
+          OUBI_SECURITY_WEBHOOK: ${{ secrets.OUBI_SECURITY_WEBHOOK }}
+        run: python3 scripts/report-vulnerabilities.py latest.json tpm-latest.json
+
+  refresh:
+    needs: scan
+    if: ${{ !cancelled() && needs.scan.outputs.fingerprint != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FINGERPRINT: ${{ needs.scan.outputs.fingerprint }}
+    steps:
+      - name: Request a dependency build for newly fixable findings
+        run: |
+          [[ $FINGERPRINT =~ ^[0-9a-f]{64}$ ]]
+          # The saved fingerprint prevents a daily duplicate build while stable awaits release.
+          current=$(gh api -H 'Accept: application/vnd.github.raw+json' \
+            "repos/$GITHUB_REPOSITORY/contents/dependencies/security-refresh.txt?ref=deps")
+          if [[ $current != "$FINGERPRINT" ]]; then
+            gh workflow run deps.yml -R "$GITHUB_REPOSITORY" --ref main -f "security_fingerprint=$FINGERPRINT"
+          fi
