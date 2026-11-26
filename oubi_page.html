@@ -135,7 +135,8 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #schedule-dialog::backdrop { background: #0009; }
 #schedule-dialog h2 { margin: 0 0 12px; }
 #schedule-dialog form:not([hidden]), #schedule-dialog label:not([hidden]) { display: grid; gap: 6px; }
-#schedule-dialog input, #schedule-dialog select { box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#schedule-dialog input, #schedule-dialog select, #schedule-dialog textarea { box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#schedule-dialog textarea { resize: none; }
 #schedule-error, #schedule-tpm-note { margin: 0; }
 #schedule-rules { display: grid; gap: 8px; padding: 0; list-style: none; }
 #schedule-rules li { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
@@ -558,10 +559,10 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       </select>
     </label>
     <label><span data-schedule-text="351"></span>
-      <input type="text" name="folder" maxlength="4096">
+      <textarea name="folder" rows="1" maxlength="4096" autocomplete="off" data-bwignore="true"></textarea>
     </label>
     <label><span data-schedule-text="352"></span>
-      <input type="text" name="cron" maxlength="128" placeholder="0 3 * * *" required>
+      <textarea name="cron" rows="1" maxlength="128" placeholder="0 3 * * *" autocomplete="off" data-bwignore="true" required></textarea>
     </label>
     <label><span id="schedule-action-text" data-schedule-text="353"></span>
       <select name="action" aria-labelledby="schedule-action-text">
@@ -3295,6 +3296,12 @@ scheduleDialog.addEventListener("close", () => {
   editSchedulePassword();
 });
 scheduleSource.onchange = showSchedulePassword;
+scheduleForm.addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.isComposing && event.target instanceof HTMLTextAreaElement) {
+    event.preventDefault();
+    scheduleForm.requestSubmit();
+  }
+});
 scheduleForm.onsubmit = async event => {
   event.preventDefault();
   if (changingSchedule) return;
