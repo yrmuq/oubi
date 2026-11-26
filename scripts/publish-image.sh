@@ -25,8 +25,8 @@ lookup_digest() {
 }
 
 prepare() {
-    local base source version ref available published tag status version_commit dev_parent extra_parent parents
-    local -a candidates=() tags=() registry_versions=()
+    local base source version ref available published tag candidate status version_commit dev_parent extra_parent parents
+    local -a candidates=() tags=() tpm_tags=() registry_versions=()
     base=$(git rev-parse HEAD)
     source=$base
     version=$(tr -d '[:space:]' < VERSION)
@@ -102,18 +102,26 @@ prepare() {
 
     [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
     for tag in "${candidates[@]}"; do
-        if lookup_digest "$image:$tag" >/dev/null; then
-            continue
-        else
-            status=$?
-            [[ $status -eq 1 ]] || return "$status"
-        fi
-        tags+=("$image:$tag")
+        for candidate in "$tag" "tpm-$tag"; do
+            if lookup_digest "$image:$candidate" >/dev/null; then
+                continue
+            else
+                status=$?
+                [[ $status -eq 1 ]] || return "$status"
+            fi
+            if [[ $candidate == "$tag" ]]; then
+                tags+=("$image:$candidate")
+            else
+                tpm_tags+=("$image:$candidate")
+            fi
+        done
     done
     {
         printf 'version=%s\nsource=%s\n' "$version" "$source"
         printf 'tags<<EOF\n'
         if (("${#tags[@]}")); then printf '%s\n' "${tags[@]}"; fi
+        printf 'EOF\ntpm_tags<<EOF\n'
+        if (("${#tpm_tags[@]}")); then printf '%s\n' "${tpm_tags[@]}"; fi
         printf 'EOF\nlabels<<EOF\n'
         printf 'org.opencontainers.image.source=https://github.com/%s\n' "$repository"
         printf 'org.opencontainers.image.revision=%s\n' "$source"
@@ -148,7 +156,6 @@ verify_image() {
          .Config.Labels["org.opencontainers.image.revision"] == $source and
          .Config.Labels["org.opencontainers.image.version"] == $version and
          .Config.Labels["org.opencontainers.image.licenses"] == "GPL-3.0-only"' >/dev/null
-    sh scripts/smoke-container.sh "$ref" linux/amd64
 }
 
 wait_digest() {
@@ -177,7 +184,7 @@ promote() {
         if [[ $current == "$digest" ]]; then
             return 0
         fi
-        if [[ $alias == "$RELEASE_VERSION" ]]; then
+        if [[ $alias == "$RELEASE_VERSION" || $alias == "tpm-$RELEASE_VERSION" ]]; then
             printf 'The version tag %s already points to a different digest.\n' "$alias" >&2
             return 1
         fi
@@ -223,27 +230,31 @@ write_dev_draft() {
 
 finish() {
     local source=${SOURCE_SHA:?} version=${RELEASE_VERSION:?}
-    local tag="v$version" digest ref notes actual base remote_tag
+    local tag="v$version" image_tag digest tpm_digest ref tpm_ref notes actual base remote_tag
     case $channel in
-        dev|stable)
-            digest=$(wait_digest "$image:sha-$source")
-            ;;
-        deps)
-            digest=$(wait_digest "$image:$version")
-            ;;
+        dev|stable) image_tag="sha-$source" ;;
+        deps) image_tag="$version" ;;
     esac
+    digest=$(wait_digest "$image:$image_tag")
+    tpm_digest=$(wait_digest "$image:tpm-$image_tag")
     ref="$image@$digest"
+    tpm_ref="$image@$tpm_digest"
     verify_image "$ref" "$source" "$version"
-    notes=$(printf 'Container image for linux/amd64: %s\n\nSource: %s\nVersion: %s' "$ref" "$source" "$version")
+    verify_image "$tpm_ref" "$source" "$version"
+    sh scripts/smoke-container.sh "$ref" linux/amd64
+    sh scripts/smoke-tpm.sh "$tpm_ref" "$ref"
+    notes=$(printf 'Container image for linux/amd64: %s\n\nTPM service image for linux/amd64: %s\n\nSource: %s\nVersion: %s' "$ref" "$tpm_ref" "$source" "$version")
 
     case $channel in
         dev)
             actual=$(branch_head dev)
             [[ $actual == "$source" ]] || return 0
+            promote tpm-dev "$tpm_digest"
             promote dev "$digest"
             write_dev_draft "$source" "$notes"
             ;;
         stable)
+            promote "tpm-$version" "$tpm_digest"
             promote "$version" "$digest"
             base=$(git rev-parse "$source^")
             actual=$(branch_head main)
@@ -259,6 +270,7 @@ finish() {
             fi
             [[ $(gh api "repos/$repository/releases/latest" --jq '.tag_name') == "$tag" ]]
             [[ $(branch_head main) == "$source" ]]
+            promote tpm-latest "$tpm_digest"
             promote latest "$digest"
             ;;
         deps)

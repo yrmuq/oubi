@@ -49,7 +49,9 @@
 - Open the Cryptomator password form outside the native modal top layer so browser password managers can display their inline autofill controls.
 - Run scheduled jobs in a separate workspace context. A scheduled vault mount waits for the manual session to close and never grants browser access to the unlocked vault.
 - Protect scheduled Cryptomator passwords with both TPM 2.0 and an automatically generated host key. Deletion decisions remain manual.
-- Document the TPM device's numeric group directly in the Compose override so operators can paste the ID printed by `stat`.
+- Give the Alpine TPM service the device under its root ownership so scheduled unlock works with a `0600` host TPM without changing host permissions.
+- Keep the TPM host key volume private to the Alpine service and authenticate requests using the UID supplied by the Unix socket.
+- Preserve existing direct TPM credentials for installations using their original device mapping.
 - Use textareas for the schedule folder and cron so Bitwarden's username heuristic skips them while its password field remains available.
 
 ## Compatibility Workarounds

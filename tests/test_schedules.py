@@ -100,7 +100,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(self.scheduler.public(), [])
         self.assertEqual(self.make_scheduler().public(), [])
 
-    @patch("oubi_schedule.tpm_available", return_value=True)
+    @patch("oubi_schedule.local_tpm_available", return_value=True)
     @patch("oubi_schedule.subprocess.run")
     def test_tpm_secret_subprocess_uses_stdin_and_both_keys(self, run, available):
         run.return_value = SimpleNamespace(stdout=b"sealed")
@@ -118,6 +118,20 @@ class ScheduleTests(unittest.TestCase):
         with self.assertRaises(ScheduleError) as error:
             vault_credential(directory, "rule", "decrypt", "sealed")
         self.assertEqual(error.exception.code, 328)
+
+    @patch("oubi_schedule.request_tpm", return_value="oubi-tpm-v1:sealed")
+    @patch("oubi_schedule.tpm_service_configured", return_value=True)
+    @patch("oubi_schedule.local_tpm_available", return_value=False)
+    def test_routes_credentials_by_format_and_reports_migration(self, direct, service, request):
+        directory = self.path.parent
+        encrypted = vault_credential(directory, "rule", "encrypt", "password")
+        request.assert_called_once_with("encrypt", "rule", "password")
+        request.return_value = "password"
+        self.assertEqual(vault_credential(directory, "rule", "decrypt", encrypted), "password")
+        request.assert_called_with("decrypt", "rule", encrypted)
+        with self.assertRaises(ScheduleError) as error:
+            vault_credential(directory, "rule", "decrypt", "original-systemd-credential")
+        self.assertEqual(error.exception.code, 366)
 
 
 class ScheduledWorkspaceTests(unittest.TestCase):

@@ -187,28 +187,16 @@ Open **Schedules** in the header, choose a workspace, and enter a folder path re
 
 Jobs run with the container and wait for an active operation to finish. A scheduled vault job waits until the manually opened vault is locked. It then unlocks and locks the vault on its own, independently of the browser. **Schedules** shows the last run's time and result. **Reset** deletes the rule and its saved password. A run that already started can finish.
 
-Schedules in regular folders work with the standard Compose setup. For scheduled Cryptomator jobs, also use the [TPM Compose override](docker-compose.tpm.yml). Run these commands on the Linux server that runs Docker:
-
-```sh
-cat /sys/class/tpm/tpm0/tpm_version_major
-stat -c '%g' /dev/tpmrm0
-```
-
-The first command should print `2`. In `docker-compose.tpm.yml`, uncomment the `group_add` block and set the group to the number from the second command. The example below uses group `109`.
-
-```yaml
-    group_add:
-      - "109"
-```
-
-Add the TPM override to your usual Compose command.
+Schedules in regular folders work with the standard Compose setup. For scheduled Cryptomator jobs, add the [TPM Compose override](docker-compose.tpm.yml). The x86_64 Linux Docker host needs TPM 2.0 at `/dev/tpmrm0` and rootful Docker with ordinary UID mapping. The override runs a small Alpine service as the device owner, so it can open a `root:root` TPM device with mode `0600`. The service communicates with Oubi through a local socket. The numeric `PUID` from the usual Compose settings determines which user can connect.
 
 ```sh
 docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker-compose.tpm.yml pull
 docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker-compose.tpm.yml up -d
 ```
 
-Enter the Cryptomator password when adding a vault schedule. Oubi generates the key automatically in `/data` and protects the password with TPM 2.0, the host's machine ID, and the Secure Boot policy (PCR 7). Keep the `/data` volume when updating the container. If you move the setup to another host, replace or reset the TPM, change the Secure Boot policy, or lose the key, use **Replace password** to configure the schedule again.
+Enter the Cryptomator password when adding a vault schedule. The TPM service generates the key automatically and protects the password with TPM 2.0, the host's machine ID, and the Secure Boot policy (PCR 7). Keep the `/data` and `oubi-tpm-keys` volumes when updating.
+
+If you switch an existing vault schedule from direct TPM access to the Alpine service, use **Replace password** once to protect the password with the new service. The rule keeps its folder, cron expression, and last run. Use the same button after moving to another host, resetting or replacing the TPM, changing the Secure Boot policy, or losing the key volume.
 
 Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
 
@@ -230,3 +218,4 @@ The scripts and `Dockerfile` in this repository are licensed under `GPL-3.0-only
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | `Apache-2.0` | Required by the tagger model code. |
 | Pillow JPEG XL plugin | [Isotr0py/pillow-jpegxl-plugin](https://github.com/Isotr0py/pillow-jpegxl-plugin) | `GPL-3.0-or-later` | Shared decoder with a bundled license and [matching source distribution](https://pypi.org/project/pillow-jxl-plugin/1.3.8/#files). |
 | Cryptomator CLI | [Cryptomator CLI 0.6.2 source](https://github.com/cryptomator/cli/tree/0.6.2) | `AGPL-3.0-only` | The upstream Linux x86_64 binary and its license ship with Oubi. The vault override enables mounting via FUSE. |
+| Go TPM | [google/go-tpm](https://github.com/google/go-tpm) | `Apache-2.0` | The Alpine service uses the library to seal and unseal the key used for scheduled vault credentials. |

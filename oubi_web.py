@@ -29,7 +29,7 @@ from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_
 from oubi_gpu import GPU_BUSY_STATES, GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
-from oubi_schedule import ScheduleError, Schedules, tpm_available
+from oubi_schedule import ScheduleError, Schedules, tpm_available, tpm_service_configured
 from oubi_thumbnails import VaultThumbnails, render_jpeg_xl_for_browser, render_thumbnail
 
 # ===== SETTINGS =====
@@ -2441,7 +2441,11 @@ class Handler(BaseHTTPRequestHandler):
             except ScheduleError as error:
                 self._error(500, error.code)
                 return
-            self._send(200, {"rules": rules, "vault": self.app.vault.path is not None, "tpm": tpm_available()})
+            ready = tpm_available()
+            data = {"rules": rules, "vault": self.app.vault.path is not None, "tpm": ready}
+            if not ready and tpm_service_configured():
+                data["tpm_error"] = 365
+            self._send(200, data)
             return
         if path in APP_ASSETS:
             try:
@@ -2799,7 +2803,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 raise ScheduleError(331)
         except ScheduleError as error:
-            status = 500 if error.code in (327, 329, 330) else 409 if error.code in (326, 334, 345) else 400
+            status = 500 if error.code in (327, 329, 330) else 409 if error.code in (326, 334, 345, 365) else 400
             self._error(status, error.code)
             return
         self._send(201 if operation == "add" else 200, {"id": id_})

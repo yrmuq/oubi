@@ -571,7 +571,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <option value="both" data-schedule-text="354"></option>
       </select>
     </label>
-    <p id="schedule-tpm-note" data-schedule-text="326" hidden></p>
+    <p id="schedule-tpm-note" hidden></p>
     <label id="schedule-password-add" hidden><span data-schedule-text="174"></span>
       <input type="password" name="password" autocomplete="current-password" disabled>
     </label>
@@ -754,7 +754,9 @@ function showSchedulePassword() {
   password.required = encrypted;
   if (!encrypted) password.value = "";
   document.getElementById("schedule-password-add").hidden = !encrypted;
-  document.getElementById("schedule-tpm-note").hidden = !encrypted || scheduleData.tpm;
+  const tpmNote = document.getElementById("schedule-tpm-note");
+  tpmNote.textContent = t(scheduleData.tpm_error || 326);
+  tpmNote.hidden = !encrypted || scheduleData.tpm;
 }
 
 function editSchedulePassword(id = "") {

@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -12,6 +13,9 @@ from uuid import uuid4
 
 
 TPM_DEVICE = "/dev/tpmrm0"
+TPM_SOCKET = Path("/run/oubi-tpm/service.sock")
+TPM_CREDENTIAL_PREFIX = "oubi-tpm-v1:"
+TPM_MESSAGE_LIMIT = 32768
 CRON_LIMITS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 CRON_ITEM = re.compile(r"(\*|[0-9]+(?:-[0-9]+)?)(?:/([0-9]+))?", re.ASCII)
 SCHEDULE_ACTIONS = ("tag", "duplicates", "both")
@@ -69,13 +73,60 @@ def schedule_folder(value):
     return relative.as_posix() if relative.parts else ""
 
 
-def tpm_available():
+def local_tpm_available():
     return os.access(TPM_DEVICE, os.R_OK | os.W_OK)
 
 
+def tpm_service_configured():
+    return TPM_SOCKET.parent.is_dir()
+
+
+def request_tpm(operation, id_="", value=""):
+    timeout = 1 if operation == "ping" else 30
+    try:
+        payload = json.dumps({"operation": operation, "id": id_, "value": value}, ensure_ascii=False).encode()
+        if len(payload) > TPM_MESSAGE_LIMIT:
+            raise ValueError
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(timeout)
+            connection.connect(str(TPM_SOCKET))
+            connection.sendall(payload)
+            connection.shutdown(socket.SHUT_WR)
+            with connection.makefile("rb") as stream:
+                body = stream.read(TPM_MESSAGE_LIMIT + 1)
+        if len(body) > TPM_MESSAGE_LIMIT:
+            raise ValueError
+        response = json.loads(body)
+        if not isinstance(response, dict):
+            raise ValueError
+    except (OSError, ValueError, UnicodeError) as error:
+        raise ScheduleError(365) from error
+
+    if response.get("error") == "unavailable":
+        raise ScheduleError(365)
+    result = response.get("value")
+    if (not isinstance(result, str) or not result or
+            (operation == "encrypt" and not result.startswith(TPM_CREDENTIAL_PREFIX))):
+        raise ScheduleError(327 if operation == "encrypt" else 328)
+    return result
+
+
+def tpm_available():
+    if not tpm_service_configured():
+        return local_tpm_available()
+    try:
+        return request_tpm("ping") == "ready"
+    except ScheduleError:
+        return False
+
+
 def vault_credential(directory, id_, operation, value):
-    if not tpm_available():
-        raise ScheduleError(326)
+    using_service = tpm_service_configured()
+    if (operation == "encrypt" and using_service) or (
+            operation == "decrypt" and value.startswith(TPM_CREDENTIAL_PREFIX)):
+        return request_tpm(operation, id_, value)
+    if not local_tpm_available():
+        raise ScheduleError(366 if using_service else 326)
     secret_dir = directory / ".oubi-tpm"
     code = 327 if operation == "encrypt" else 328
     command = ["systemd-creds", f"--name=oubi-schedule-{id_}", f"--tpm2-device={TPM_DEVICE}"]

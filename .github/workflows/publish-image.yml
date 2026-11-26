@@ -58,6 +58,20 @@ jobs:
       - name: Start the candidate
         if: ${{ steps.image.outputs.source != '' && inputs.channel != 'dev' }}
         run: sh scripts/smoke-container.sh oubi:smoke linux/amd64
+      - name: Build the TPM service candidate
+        if: ${{ steps.image.outputs.tpm_tags != '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tpm/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: oubi-tpm:smoke
+          cache-from: type=gha,scope=oubi-tpm-alpine-amd64
+          cache-to: type=gha,mode=max,scope=oubi-tpm-alpine-amd64
+      - name: Start the TPM service candidate
+        if: ${{ steps.image.outputs.tpm_tags != '' }}
+        run: sh scripts/smoke-tpm.sh oubi-tpm:smoke
       - name: Reserve the dependency release version
         if: ${{ steps.image.outputs.source != '' && inputs.channel == 'deps' }}
         env:
@@ -75,7 +89,19 @@ jobs:
           labels: ${{ steps.image.outputs.labels }}
           cache-from: type=gha,scope=oubi-bookworm-3.12-amd64
           cache-to: type=gha,mode=max,scope=oubi-bookworm-3.12-amd64
-      - name: Verify the published image and update its release channel
+      - name: Publish immutable TPM service tags
+        if: ${{ steps.image.outputs.tpm_tags != '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tpm/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.tpm_tags }}
+          labels: ${{ steps.image.outputs.labels }}
+          cache-from: type=gha,scope=oubi-tpm-alpine-amd64
+          cache-to: type=gha,mode=max,scope=oubi-tpm-alpine-amd64
+      - name: Verify the published images and update their release channel
         if: ${{ steps.image.outputs.source != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

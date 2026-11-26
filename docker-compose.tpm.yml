@@ -1,9 +1,29 @@
 services:
   oubi:
+    depends_on:
+      - oubi-tpm
+    volumes:
+      - oubi-tpm-socket:/run/oubi-tpm:ro
+
+  oubi-tpm:
+    image: ghcr.io/yrmuq/oubi:tpm-${OUBI_CHANNEL:-dev}
+    user: "0:0"
+    environment:
+      OUBI_TPM_UID: "${PUID:-1000}"
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     devices:
-      - /dev/tpmrm0:/dev/tpmrm0
-    # Uncomment and use the group ID from stat -c '%g' /dev/tpmrm0.
-    # group_add:
-    #   - "109"
+      - /dev/tpmrm0:/dev/tpmrm0:rw
     volumes:
       - /etc/machine-id:/etc/machine-id:ro
+      - oubi-tpm-socket:/run/oubi-tpm
+      - oubi-tpm-keys:/var/lib/oubi-tpm
+    restart: unless-stopped
+
+volumes:
+  oubi-tpm-socket:
+  oubi-tpm-keys:
