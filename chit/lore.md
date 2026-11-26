@@ -49,6 +49,7 @@
 - Open the Cryptomator password form outside the native modal top layer so browser password managers can display their inline autofill controls.
 - Run scheduled jobs in a separate workspace context. A scheduled vault mount waits for the manual session to close and never grants browser access to the unlocked vault.
 - Protect scheduled Cryptomator passwords with both TPM 2.0 and an automatically generated host key. Deletion decisions remain manual.
+- Document the TPM device's numeric group directly in the Compose override so operators can paste the ID printed by `stat`.
 
 ## Compatibility Workarounds
 

@@ -194,7 +194,14 @@ cat /sys/class/tpm/tpm0/tpm_version_major
 stat -c '%g' /dev/tpmrm0
 ```
 
-The first command should print `2`. Put the number from the second command in `.env` as `OUBI_TPM_GID`, then add the TPM override to your usual Compose command.
+The first command should print `2`. In `docker-compose.tpm.yml`, uncomment the `group_add` block and set the group to the number from the second command. The example below uses group `109`.
+
+```yaml
+    group_add:
+      - "109"
+```
+
+Add the TPM override to your usual Compose command.
 
 ```sh
 docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker-compose.tpm.yml pull

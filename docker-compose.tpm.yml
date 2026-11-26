@@ -2,7 +2,8 @@ services:
   oubi:
     devices:
       - /dev/tpmrm0:/dev/tpmrm0
-    group_add:
-      - "${OUBI_TPM_GID:?Set the host group ID of /dev/tpmrm0}"
+    # Uncomment and use the group ID from stat -c '%g' /dev/tpmrm0.
+    # group_add:
+    #   - "109"
     volumes:
       - /etc/machine-id:/etc/machine-id:ro
