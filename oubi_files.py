@@ -12,6 +12,7 @@ JPEG_XL_SUFFIX = ".jxl"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", JPEG_XL_SUFFIX}
 VAULT_MOUNT = Path("/mnt/oubi-crypt/mount")
 VAULT_METADATA_ROOT = Path("/run/oubi-crypt/mount")
+WORKSPACE_METADATA_DIR = ".oubi"
 
 
 def indexed_image_path(value, root):
@@ -33,6 +34,10 @@ def sidecar_path(image):
     return image.parent / "tags" / (image.name + ".txt")
 
 
+def is_workspace_metadata(path):
+    return WORKSPACE_METADATA_DIR in Path(path).parts
+
+
 def open_image(source, *, jpeg_xl=False):
     from PIL import Image
 
@@ -52,6 +57,8 @@ def direct_image_files(folder):
 
 
 def image_files(folder, exclude=None, *, cancelled=None, visit=None, onerror=None):
+    if is_workspace_metadata(folder):
+        return
     excluded = Path(exclude).resolve() if exclude else None
     for directory, subdirs, names in os.walk(folder, onerror=onerror):
         if cancelled and cancelled():
@@ -60,7 +67,7 @@ def image_files(folder, exclude=None, *, cancelled=None, visit=None, onerror=Non
         if excluded and parent.resolve().is_relative_to(excluded):
             subdirs.clear()
             continue
-        subdirs[:] = [name for name in subdirs if name != "tags"
+        subdirs[:] = [name for name in subdirs if name not in {"tags", WORKSPACE_METADATA_DIR}
                       and not (excluded and (parent / name).resolve() == excluded)]
         if visit is not None:
             subdirs[:] = [name for name in subdirs if not name.startswith(".") and not (parent / name).is_symlink()]
@@ -88,7 +95,7 @@ def file_revision(info):
     return "-".join(str(field) for field in fields)
 
 
-def _updated_index(index, root, image, *, table, cleanup):
+def _updated_index(index, root, images, *, table, cleanup):
     if index.is_symlink():
         raise ValueError("Image index must be a regular file")
     if not index.exists():
@@ -100,7 +107,7 @@ def _updated_index(index, root, image, *, table, cleanup):
     removed = False
 
     def matches(raw):
-        return bool(raw) and Path(os.path.normpath(indexed_image_path(raw, root))) == image
+        return bool(raw) and Path(os.path.normpath(indexed_image_path(raw, root))) in images
 
     with index.open(encoding="utf-8", newline="") as source, updated.open("w", encoding="utf-8", newline="") as output:
         if table:
@@ -157,39 +164,56 @@ def _apply_removal(changes):
 
 
 def delete_source_image(root, relative, revision, *, index, sorted_list, excluded=None, before_commit=None):
-    root = Path(root).resolve()
-    path = Path(relative)
-    if (path.is_absolute() or not path.parts or any(part in {"..", "tags", ".oubi"} for part in path.parts)
-            or path.suffix.lower() not in IMAGE_EXTS):
-        raise ValueError("Invalid source image")
-    image = root / path
-    if image.parent.resolve() != image.parent or (excluded and image.is_relative_to(Path(excluded).resolve())):
-        raise ValueError("Invalid source image")
+    return delete_source_images(root, [(relative, revision)], index=index, sorted_list=sorted_list,
+                                excluded=excluded, before_commit=before_commit)
 
-    def check_revision():
+
+def source_image_path(root, relative, excluded=None):
+    path = Path(relative)
+    image = root / path
+    if (path.is_absolute() or not path.parts or any(part in {"..", "tags", WORKSPACE_METADATA_DIR} for part in path.parts)
+            or path.suffix.lower() not in IMAGE_EXTS or image.parent.resolve() != image.parent
+            or (excluded and image.is_relative_to(excluded))):
+        raise ValueError("Invalid source image")
+    return image
+
+
+def delete_source_images(root, files, *, index, sorted_list, excluded=None, before_commit=None):
+    root = Path(root).resolve()
+    excluded = Path(excluded).resolve() if excluded else None
+    images = {}
+    changes = []
+
+    def check_revision(image, relative, revision):
         if image.parent.resolve() != image.parent:
-            raise ImageChangedError()
+            raise ImageChangedError(relative)
         try:
             current = image_revision(image)
         except FileNotFoundError as error:
-            raise ImageChangedError() from error
+            raise ImageChangedError(relative) from error
         if current != revision:
-            raise ImageChangedError()
+            raise ImageChangedError(relative)
 
-    check_revision()
-    tags = sidecar_path(image)
-    if tags.parent.is_symlink() or tags.is_symlink() or (tags.exists() and not tags.is_file()):
-        raise ValueError("Invalid image sidecar")
-
-    with ExitStack() as cleanup:
-        changes = [(image, None)]
+    for relative, revision in files:
+        image = source_image_path(root, relative, excluded)
+        if image in images:
+            raise ValueError("Invalid source image")
+        check_revision(image, relative, revision)
+        images[image] = (relative, revision)
+        changes.append((image, None))
+        tags = sidecar_path(image)
+        if tags.parent.is_symlink() or tags.is_symlink() or (tags.exists() and not tags.is_file()):
+            raise ValueError("Invalid image sidecar")
         if tags.is_file():
             changes.append((tags, None))
+
+    with ExitStack() as cleanup:
         for path, table in ((Path(index), True), (Path(sorted_list), False)):
-            updated = _updated_index(path, root, image, table=table, cleanup=cleanup)
+            updated = _updated_index(path, root, images, table=table, cleanup=cleanup)
             if updated is not None:
                 changes.append((path, updated))
-        check_revision()
+        for image, (relative, revision) in images.items():
+            check_revision(image, relative, revision)
         if before_commit is not None:
             before_commit()
         return _apply_removal(changes)

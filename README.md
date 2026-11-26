@@ -25,7 +25,7 @@
 
 - Select source folders, identify images, and preview saved tags in the browser.
 - Tag JPEG, PNG, WebP, BMP, GIF, and JPEG XL images. Resume from `tags/<image filename>.txt`, such as `tags/photo.jpg.txt`. Set `OUBI_FORCE=1` to tag those images again.
-- Find visually similar images across selected folders with Duplicates. Compare pairs side by side and keep either copy or mark the pair as different.
+- Find visually similar images across selected folders with Duplicates. Compare pairs side by side, keep either copy, delete both, or mark the pair as different.
 - Plan a sort from `tags.csv`, then copy or move images. Numbered pages stay in their series and original art can be sorted by configured genres.
 - Open a Cryptomator vault and choose whether sorted images stay inside it or go to the usual output folder.
 - Filter the preview by tags, correct character genders through `genders.csv`, and customize the layout, theme, and language.
@@ -41,18 +41,21 @@
 | Square selection button | Select all visible folders or select the current folder when it has no subfolders. |
 | Tile size and order | Resize tiles with the slider. Folders always come first, with untagged images first among the files by default. The order button switches between this order and name order. Both modes compare names by symbols, numbers, then letters. |
 | Image tile | Click to open the image in the preview. Press and hold, right-click, or press Shift+F10 on a focused tile to open its delete action. Confirm the file name before deleting. |
-| Trash icon on the preview | Confirm permanent removal of the current image, its tag sidecar, and its index entries. |
+| Trash icon on the preview | Confirm permanent removal of the current image and add it to the deletion queue. |
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
+| Queue | Show pending removals from the preview, image tiles, and Duplicates. The counter shows active operations and the red exclamation mark indicates an error. |
+| Duplicate previews | Scroll over either image to zoom both and drag either zoomed image to move both. Click to open the full-screen comparison with the same controls. |
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
 | `Identify` | Show the live count of images found in the selected folders, then the progress of checking existing tags and tagging the remaining images. |
 | `Tagging device` | Choose CPU, AMD, or NVIDIA. Oubi selects an available installed GPU when the page opens. |
 | `Install` / `Uninstall` | Install or remove components for the selected GPU. Confirm with `y` or cancel with `n` in the terminal. Shared CUDA packages stay available while another configured card uses them. |
-| `Sorting` / `Gallery` | Switch between genre settings and favorite tag filters. Gallery hides the sorting controls and sorting badges. Returning to Sorting clears the active filters. |
+| `Gallery` / `Duplicates` / `Sorting` | Start in Gallery on first use, then cycle through Duplicates and Sorting. Gallery hides sorting controls and badges. Returning to Sorting clears the active filters. |
 | Default panel layout | Find tag search and active filters under the preview. Genre tags in Sorting and favorites in Gallery appear under the current image's tags. |
 | `Import` / `Export` | Transfer favorites from the active library or the panel layout as JSON. Import merges favorites and replaces the panel layout. |
 | Hold an image tag | Add or remove the tag from favorites. The Gallery groups saved tags by character or event. |
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | Lock icon | Unlock or lock the Cryptomator vault from the folder controls. |
+| Schedules | Run identification, duplicate search, or both in the background. View the last run and its result. |
 | `Sort destination` | With the vault open, choose the destination for both sorting and its plan. |
 | `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
 | `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
@@ -178,9 +181,30 @@ Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/S
 
 If opening fails, the password dialog identifies the failed step and shows the relevant error from Cryptomator or FUSE when available. Use that message when reporting a vault problem. If Oubi has to rebuild the index on unlock, the terminal shows the reason before discovery starts.
 
+#### Scheduled jobs
+
+Open **Schedules** in the header and click **+ Add schedule**. Enter a folder path relative to the selected workspace, such as `Photos/Trips`. Leave **Folder** blank to process the whole workspace. The five cron fields are minute, hour, day of the month, month, and day of the week. For example, `0 3 * * *` runs daily at 03:00 in the container's `TZ` time zone. Scheduled identification uses the CPU. Duplicate search saves pairs for review in **Duplicates**. File deletion still requires a manual decision.
+
+Jobs run with the container and wait for an active operation to finish. A scheduled vault job waits until the manually opened vault is locked. It then unlocks and locks the vault on its own, independently of the browser. In **Schedules**, click **Run** to start a saved rule without waiting for its cron time. The same row shows the current step, progress when measurable, and the final result. **Stop** cancels a queued run or interrupts the active one. Once the run ends, use **Edit** to update the rule or **Remove** to delete it and its saved password.
+
+If Compose recreates Oubi, an active run is marked **Interrupted**. The saved rule stays in the data volume and can run again from **Run** or at its next scheduled time.
+
+Schedules in regular folders work with the standard Compose setup. For scheduled Cryptomator jobs, add the [TPM Compose override](docker-compose.tpm.yml). The x86_64 Linux Docker host needs TPM 2.0 at `/dev/tpmrm0` and rootful Docker with ordinary UID mapping. The override runs a small Alpine service as the device owner, so it can open a `root:root` TPM device with mode `0600`. The service communicates with Oubi through a local socket. The numeric `PUID` from the usual Compose settings determines which user can connect.
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker-compose.tpm.yml pull
+docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker-compose.tpm.yml up -d
+```
+
+Enter the Cryptomator password when adding a vault schedule. The TPM service generates the key automatically and protects the password with TPM 2.0, the host's machine ID, and the Secure Boot policy (PCR 7). Keep the `/data` and `oubi-tpm-keys` volumes when updating.
+
+If you switch an existing vault schedule from direct TPM access to the Alpine service, use **Edit** to enter the vault password again. Do the same if the saved password can no longer be decrypted after a hardware or key change.
+
 Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
 
 Oubi saves gallery thumbnails on demand in `.oubi/thumbnails/`. Open a preview to load the full-size image. For JPEG XL, Oubi serves a PNG rendition if the browser lacks native JPEG XL support. Existing vault indexes refresh once to discover JPEG XL files. Deletion through Oubi removes the corresponding thumbnail, and a recount removes cached thumbnails whose originals were deleted elsewhere.
+
+Locking Cryptomator waits for the active duplicate removal to finish and pauses the remaining queue until the same vault is unlocked. Pending removals stay in server memory until the container stops.
 
 ---
 
@@ -196,3 +220,4 @@ The scripts and `Dockerfile` in this repository are licensed under `GPL-3.0-only
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | `Apache-2.0` | Required by the tagger model code. |
 | Pillow JPEG XL plugin | [Isotr0py/pillow-jpegxl-plugin](https://github.com/Isotr0py/pillow-jpegxl-plugin) | `GPL-3.0-or-later` | Shared decoder with a bundled license and [matching source distribution](https://pypi.org/project/pillow-jxl-plugin/1.3.8/#files). |
 | Cryptomator CLI | [Cryptomator CLI 0.6.2 source](https://github.com/cryptomator/cli/tree/0.6.2) | `AGPL-3.0-only` | The upstream Linux x86_64 binary and its license ship with Oubi. The vault override enables mounting via FUSE. |
+| Go TPM | [google/go-tpm](https://github.com/google/go-tpm) | `Apache-2.0` | The Alpine service uses the library to seal and unseal the key used for scheduled vault credentials. |

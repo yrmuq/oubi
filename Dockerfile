@@ -16,6 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends fuse3 libdrm-amdgpu1 libelf1 libgomp1 libnuma1 \
+        systemd libtss2-esys-3.0.2-0 libtss2-rc0 libtss2-mu0 libtss2-tcti-device0 tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /opt/oubi/requirements.txt
@@ -37,7 +38,7 @@ RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 oubi; fi \
         useradd --uid 1000 --gid 1000 --no-create-home --no-log-init --home-dir /data --shell /usr/sbin/nologin oubi; \
     fi
 
-COPY tag_folder.py sort_images.py oubi_files.py oubi_index.py oubi_duplicates.py oubi_thumbnails.py oubi_cryptomator.py oubi_gpu.py oubi_rocm.py oubi_nvidia.py oubi_web.py oubi_page.html /opt/oubi/
+COPY tag_folder.py sort_images.py oubi_files.py oubi_index.py oubi_duplicates.py oubi_thumbnails.py oubi_cryptomator.py oubi_gpu.py oubi_rocm.py oubi_nvidia.py oubi_schedule.py oubi_web.py oubi_page.html /opt/oubi/
 COPY assets /opt/oubi/assets
 COPY languages /opt/oubi/languages
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

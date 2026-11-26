@@ -39,6 +39,10 @@ assert not status["vault_enabled"]
 subprocess.run(["id", "-un"], check=True)
 subprocess.run(["cryptomator-cli", "--version"], check=True)
 subprocess.run(["fusermount3", "--version"], check=True)
+assert "+TPM2" in subprocess.check_output(["systemd-creds", "--version"], text=True)
+
+with urlopen(base + "/api/schedules", timeout=2) as response:
+    assert json.load(response) == {"rules": [], "vault": False, "tpm": False}
 
 from pathlib import Path
 from stat import S_IMODE

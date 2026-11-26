@@ -22,12 +22,15 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
-from oubi_files import IMAGE_EXTS, JPEG_XL_SUFFIX, ImageChangedError, delete_source_image, direct_image_files, image_files, image_revision, indexed_image_path, sidecar_path
+from oubi_files import (IMAGE_EXTS, JPEG_XL_SUFFIX, WORKSPACE_METADATA_DIR, ImageChangedError, delete_source_images,
+                        direct_image_files, file_revision, image_files, image_revision, indexed_image_path,
+                        is_workspace_metadata, sidecar_path, source_image_path)
 from oubi_duplicates import DATABASE_NAME, DuplicateError, DuplicateStore, duplicate_file, scan_duplicates
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
 from oubi_gpu import GPU_BUSY_STATES, GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
+from oubi_schedule import ScheduleError, Schedules, tpm_available, tpm_service_configured
 from oubi_thumbnails import VaultThumbnails, render_jpeg_xl_for_browser, render_thumbnail
 
 # ===== SETTINGS =====
@@ -74,7 +77,7 @@ class Workspace:
         relative = Path(os.environ.get("OUBI_CRYPT_OUTPUT", "Sorted"))
         if relative.is_absolute() or not relative.parts or ".." in relative.parts:
             raise VaultError(168)
-        data = root / ".oubi"
+        data = root / WORKSPACE_METADATA_DIR
         output = (root / relative).resolve()
         if (not output.is_relative_to(root) or output == root or output.is_relative_to(data)
                 or data.is_relative_to(output) or "tags" in relative.parts or data.is_symlink()
@@ -473,7 +476,7 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES, *, exclude=None, folders=
                     rel = resolved.relative_to(base).as_posix()
                 except (OSError, ValueError):
                     continue
-                if (rel in seen or not any(resolved.is_relative_to(folder) for folder in sources)
+                if (rel in seen or is_workspace_metadata(rel) or not any(resolved.is_relative_to(folder) for folder in sources)
                         or not image.is_file() or in_output(image, exclude)):
                     continue
                 seen.add(rel)
@@ -546,7 +549,7 @@ def tags_in_folders(rels, path=CSV_PATH, root=IMAGES, *, exclude=None):
             try:
                 for row in csv.DictReader(handle):
                     rel = relative_file(row.get("file"))
-                    if not listed(rel) or in_output(base / rel, exclude):
+                    if is_workspace_metadata(rel) or not listed(rel) or in_output(base / rel, exclude):
                         continue
                     for column in columns:
                         for part in (row.get(column) or "").split(","):
@@ -859,7 +862,7 @@ def absolute_folders(rels, root=IMAGES, *, language=None, exclude=None):
             path = resolve_under(root, rel)
         except ValueError:
             return None, text(86, language=language)
-        if not path.is_dir() or in_output(path, exclude):
+        if not path.is_dir() or is_workspace_metadata(path) or in_output(path, exclude):
             return None, text(86, language=language)
         paths.append(str(path))
     return paths, None
@@ -1184,12 +1187,22 @@ class App:
         self.duplicate_store = None
         self.duplicate_lock = threading.Lock()
         self.lock = threading.Lock()
+        self.review_ready = threading.Condition(self.lock)
+        self.reviews = []
+        self.review_worker = None
+        self.review_paused = False
+        self.review_version = 0
+        self.review_removed = 0
+        self.review_failed = 0
+        self.review_mount = None
         self.gpu_lock = threading.Lock()
         self.rocm, self.nvidia = devices or (RocmRuntime(), NvidiaRuntime())
         self.gpu_prompt = None
         self.lines = []
         self.model_state = "downloading"
         self.job_running = False
+        self.job_result = None
+        self.schedule_scope = None
         self.cancel_requested = False
         self.job_mode = None
         self.job_id = ""
@@ -1459,14 +1472,19 @@ class App:
             prefix = relative + "/" if relative else ""
             files = ((prefix + image.name, sidecar_path(image).name in sidecars or prefix + image.name in tagged)
                      for image in images)
-        return {"files": [{"path": path, "tagged": bool(tagged)} for path, tagged in files]}
+        pending = self.pending_deletion_paths()
+        return {"files": [{"path": path, "tagged": bool(tagged)} for path, tagged in files if path not in pending]}
 
     def _ensure_count(self, *, refresh=False):
         with self.lock:
+            if self.schedule_scope == "images":
+                return False
             if self.job_running and self.job_mode != "plan":
                 return False
             if self.folder_scan or ((self.catalog is not None or self.folder_cache is not None) and not refresh):
                 return True
+            if self.review_worker is not None:
+                return False
             self.gallery_removed.clear()
             cancel = threading.Event()
             scan_id = uuid4().hex
@@ -1513,89 +1531,280 @@ class App:
 
     def duplicate_page(self, index):
         store = self.duplicate_results()
-        with store.lock:
-            while True:
-                page = store.page(index)
-                try:
-                    for pair in (page["pair"], page["next"]):
-                        if pair is not None:
-                            for item in pair["images"]:
-                                item["live_revision"] = self.check_duplicate_image(item["path"], item["revision"])
-                except DuplicateError as error:
+        while True:
+            with store.lock:
+                with self.lock:
+                    files, pairs = self._review_exclusions()
+                page = store.page(index, files, pairs)
+            try:
+                for pair in (page["pair"], page["next"]):
+                    if pair is not None:
+                        for item in pair["images"]:
+                            item["live_revision"] = self.check_duplicate_image(item["path"], item["revision"])
+            except DuplicateError as error:
+                with store.lock:
                     store.drop_pairs(error.values["path"])
+            else:
+                return page
+
+    def _review_exclusions(self):
+        pending = [item for item in self.reviews if item["state"] in ("waiting", "running")]
+        return ({path for item in pending for path in item["files"]},
+                [item["pair"][:2] for item in pending if not item["files"]])
+
+    def pending_deletion_paths(self):
+        with self.lock:
+            return self._review_exclusions()[0]
+
+    def _source_image_revision(self, relative):
+        workspace = self.paths
+        root = Path(workspace.images).resolve()
+        excluded = Path(workspace.excluded).resolve() if workspace.excluded else None
+        info = source_image_path(root, relative, excluded).lstat()
+        return file_revision(info), (info.st_size, info.st_mtime_ns)
+
+    def queue_image_deletion(self, relative, revision, language):
+        relative = Path(relative).as_posix()
+        try:
+            live, saved = self._source_image_revision(relative)
+        except FileNotFoundError as error:
+            raise DuplicateError(187) from error
+        except OSError as error:
+            raise DuplicateError(321, path=relative, error=str(error)) from error
+        if revision != live:
+            raise DuplicateError(187)
+        with self.review_ready:
+            if self.job_running or self.review_paused:
+                raise DuplicateError(188)
+            if relative in self._review_exclusions()[0]:
+                raise DuplicateError(320, path=relative)
+            self._enqueue_review({"files": (relative,), "revision": revision, "saved": saved, "language": language})
+
+    def queue_duplicate_review(self, pair, decision, language):
+        pair = tuple(pair)
+        store = self.duplicate_results()
+        with store.lock, self.review_ready:
+            if self.job_running or self.review_paused:
+                raise DuplicateError(283)
+            files, pairs = self._review_exclusions()
+            if (files.intersection(pair[:2]) or pair[:2] in pairs or not store.contains(*pair[:4])):
+                raise DuplicateError(295)
+            targets = {"left": [pair[1]], "right": [pair[0]], "both": pair[:2], "different": []}[decision]
+            self._enqueue_review({"pair": pair, "decision": decision, "language": language, "files": targets})
+
+    def _enqueue_review(self, item):
+        item["state"] = "waiting"
+        self.reviews.append(item)
+        try:
+            self._start_review_worker()
+        except RuntimeError as error:
+            self.reviews.remove(item)
+            raise DuplicateError(315, error=str(error)) from error
+        self.review_version += 1
+
+    def _start_review_worker(self):
+        if self.review_worker is None and any(item["state"] == "waiting" for item in self.reviews):
+            worker = threading.Thread(target=self._work_duplicate_reviews, daemon=True)
+            worker.start()
+            self.review_worker = worker
+
+    def _work_duplicate_reviews(self):
+        while True:
+            with self.review_ready:
+                self.review_ready.wait_for(lambda: self.review_paused or self.folder_scan is None)
+                item = next((item for item in self.reviews if item["state"] == "waiting"), None)
+                if self.review_paused or item is None:
+                    self.review_worker = None
+                    self.review_version += 1
+                    self.review_ready.notify_all()
+                    return
+                item["state"] = "running"
+                self.review_version += 1
+            language = item["language"]
+            try:
+                self._check_review_mount()
+                if "pair" in item:
+                    pair = item["pair"]
+                    if item.get("remounted"):
+                        left, right, left_revision, right_revision = pair[:4]
+                        pair = [*pair[:4], self.check_duplicate_image(left, left_revision),
+                                self.check_duplicate_image(right, right_revision)]
+                    message = self.review_duplicate(pair, item["decision"], language)
                 else:
-                    return page
+                    message = self._delete_queued_image(item)
+                state = "warning" if message else "done"
+            except DuplicateError as error:
+                state = "failed"
+                message = f"[{error.code}] " + text(error.code, language=language, **error.values)
+            except Exception as error:
+                state = "failed"
+                message = "[316] " + text(316, language=language, error=str(error))
+            with self.review_ready:
+                if message:
+                    self._append_line(message)
+                if item["files"] and state != "failed":
+                    self.review_removed += 1
+                    if self.workspace is None:
+                        self.folder_cache = None
+                if state == "failed":
+                    self.review_failed += 1
+                if item["files"] and state in ("warning", "failed"):
+                    item.update(state=state, message=message)
+                else:
+                    self.reviews.remove(item)
+                self.review_version += 1
+
+    def pause_duplicate_reviews(self):
+        with self.review_ready:
+            self.review_paused = True
+            self.review_ready.notify_all()
+            self.review_ready.wait_for(lambda: self.review_worker is None)
+            return self.reviews
+
+    def resume_duplicate_reviews(self, reviews=None, mounted=None):
+        with self.review_ready:
+            if reviews is not None:
+                self.reviews = reviews
+                self.review_mount = mounted
+                for item in reviews:
+                    item["remounted"] = True
+            self.review_paused = False
+            self._start_review_worker()
+
+    def deletion_status(self):
+        with self.lock:
+            return self._deletion_status()
+
+    def _deletion_status(self):
+        items = [{"files": item["files"], "state": item["state"], "message": item.get("message", "")}
+                 for item in self.reviews if item["files"]]
+        return {"items": items, "busy": self.review_worker is not None, "version": self.review_version,
+                "removed": self.review_removed, "failed": self.review_failed}
 
     def review_duplicate(self, pair, decision, language):
         store = self.duplicate_results()
         with store.lock:
             if not store.contains(*pair[:4]):
                 raise DuplicateError(295)
-            left, right, left_revision, right_revision, left_live, right_live = pair
-            self.check_duplicate_image(left, left_revision, left_live)
-            self.check_duplicate_image(right, right_revision, right_live)
-            if decision == "different":
-                try:
-                    store.dismiss(pair[:4])
-                except (OSError, sqlite3.Error) as error:
-                    raise DuplicateError(285, error=str(error)) from error
-                return ""
+        self._check_review_mount()
+        left, right, left_revision, right_revision, left_live, right_live = pair
+        self.check_duplicate_image(left, left_revision, left_live)
+        self.check_duplicate_image(right, right_revision, right_live)
+        if decision == "different":
+            try:
+                store.dismiss(pair[:4])
+            except (OSError, sqlite3.Error) as error:
+                raise DuplicateError(285, error=str(error)) from error
+            return ""
+        validate_keep = None
+        if decision == "both":
+            files = [(left, left_live), (right, right_live)]
+        else:
             keep, keep_revision, keep_live, remove, revision = (
                 (left, left_revision, left_live, right, right_live) if decision == "left"
                 else (right, right_revision, right_live, left, left_live)
             )
-            try:
-                cleanup = self.remove_image(remove, revision,
-                                            validate_keep=lambda: self.check_duplicate_image(keep, keep_revision, keep_live))
-            except ImageChangedError as error:
-                raise DuplicateError(284, path=remove) from error
-            except (OSError, ValueError, sqlite3.Error, csv.Error) as error:
-                raise DuplicateError(286, path=remove, error=str(error)) from error
-            try:
-                store.remove(remove)
-            except (OSError, sqlite3.Error) as error:
-                store.drop_pairs(remove)
-                return "[287] " + text(287, language=language, path=remove, error=str(error))
-            return text(189, language=language) if cleanup else ""
+            files = [(remove, revision)]
+
+            def validate_keep():
+                self.check_duplicate_image(keep, keep_revision, keep_live)
+
+        paths = [relative for relative, _ in files]
+        try:
+            cleanup, thumbnail_errors = self._remove_images(files, validate_keep=validate_keep)
+        except ImageChangedError as error:
+            raise DuplicateError(284, path=str(error)) from error
+        except (OSError, ValueError, sqlite3.Error, csv.Error) as error:
+            if decision == "both":
+                raise DuplicateError(303, left=left, right=right, error=str(error)) from error
+            raise DuplicateError(286, path=paths[0], error=str(error)) from error
+        return self._finish_image_removal(paths, cleanup, thumbnail_errors, language)
+
+    def _delete_queued_image(self, item):
+        relative, = item["files"]
+        revision = item["revision"]
+        try:
+            if item.get("remounted"):
+                revision, saved = self._source_image_revision(relative)
+                if saved != item["saved"]:
+                    raise ImageChangedError(relative)
+            cleanup, thumbnail_errors = self._remove_images([(relative, revision)])
+        except (ImageChangedError, FileNotFoundError) as error:
+            raise DuplicateError(187) from error
+        except (OSError, ValueError, sqlite3.Error, csv.Error) as error:
+            raise DuplicateError(322, path=relative, error=str(error)) from error
+        return self._finish_image_removal(item["files"], cleanup, thumbnail_errors, item["language"])
+
+    def _finish_image_removal(self, paths, cleanup, thumbnail_errors, language):
+        warnings = []
+        store = self.duplicate_store
+        try:
+            if store is None and (Path(self.paths.csv).parent / DATABASE_NAME).exists():
+                store = self.duplicate_results()
+            if store is not None:
+                store.remove(*paths)
+        except (OSError, sqlite3.Error, DuplicateError) as error:
+            if store is not None:
+                with store.lock:
+                    with suppress(sqlite3.Error):
+                        store.drop_pairs(*paths)
+            detail = text(error.code, language=language, **error.values) if isinstance(error, DuplicateError) else str(error)
+            code = 304 if len(paths) == 2 else 287
+            warnings.append(f"[{code}] " + text(code, language=language, path=paths[0], error=detail))
+        if cleanup:
+            code = 305 if len(paths) == 2 else 189
+            warnings.append(f"[{code}] " + text(code, language=language))
+        for relative, error in thumbnail_errors:
+            warnings.append("[306] " + text(306, language=language, path=relative, error=error))
+        return " ".join(warnings)
+
+    def _check_review_mount(self):
+        if self.review_mount is not None and not self.review_mount():
+            raise DuplicateError(317)
 
     def remove_image(self, relative, revision, *, validate_keep=None):
+        cleanup, thumbnail_errors = self._remove_images([(relative, revision)], validate_keep=validate_keep)
+        return cleanup or bool(thumbnail_errors)
+
+    def _remove_images(self, files, *, validate_keep=None):
         workspace = self.paths
         catalog = self.catalog
 
         def before_commit():
+            self._check_review_mount()
             if validate_keep is not None:
                 validate_keep()
             if catalog is not None:
                 catalog.mark_dirty()
 
-        cleanup_pending = delete_source_image(workspace.images, relative, revision, index=workspace.csv,
-                                              sorted_list=workspace.sorted_list, excluded=workspace.excluded,
-                                              before_commit=before_commit)
-        relative = Path(relative).as_posix()
-        cache = self.thumbnails
-        if cache is None and self.duplicate_store is not None:
-            cache = VaultThumbnails(Path(workspace.csv).parent)
-        if cache is not None:
+        cleanup_pending = delete_source_images(workspace.images, files, index=workspace.csv,
+                                               sorted_list=workspace.sorted_list, excluded=workspace.excluded,
+                                               before_commit=before_commit)
+        relatives = [Path(relative).as_posix() for relative, _ in files]
+        cache = self.thumbnails or VaultThumbnails(Path(workspace.csv).parent)
+        thumbnail_errors = []
+        for relative in relatives:
             try:
                 cache.remove(relative)
-            except OSError:
-                cleanup_pending = True
-        removed = Path(workspace.images).resolve() / relative
+            except OSError as error:
+                thumbnail_errors.append((relative, str(error)))
+        root = Path(workspace.images).resolve()
         with self.lock:
             if self.folder_scan is not None:
-                self.gallery_removed.add(relative)
-            if Path(self.preview_file) == removed:
+                self.gallery_removed.update(relatives)
+            if any(Path(self.preview_file) == root / relative for relative in relatives):
                 self.preview_file = ""
         if catalog is not None:
             try:
-                catalog.remove(relative)
+                for relative in relatives:
+                    catalog.remove(relative)
                 self._save_catalog(catalog)
             except sqlite3.Error:
                 self.close_catalog()
                 with self.lock:
                     self._invalidate_folders()
                 self.note(text(208))
-        return cleanup_pending
+        return cleanup_pending, thumbnail_errors
 
     def _save_catalog(self, catalog):
         try:
@@ -1613,7 +1822,7 @@ class App:
                 tags, sorted_paths = read_metadata(workspace)
                 for raw in self.index_changes:
                     name = relative_path(raw, base)
-                    if name is None:
+                    if name is None or is_workspace_metadata(name):
                         continue
                     image = base / name
                     if (image.suffix.lower() not in IMAGE_EXTS or not image.is_file()
@@ -1704,49 +1913,57 @@ class App:
                     self.scan_progress = None
                 self.folder_scan = None
                 self.gallery_removed.clear()
+                self.review_ready.notify_all()
 
     def gallery(self, directories, tags=None):
         paths = self.paths
         if self.catalog is not None:
             folders = [""] if directories is None else directories
             files = self.catalog.gallery(folders) if tags is None else self.catalog.search(folders, tags)
-            return {"files": files}
-        with self.lock:
-            scanning = self.workspace is not None and self.folder_scan and not self.folder_scan[0].is_set()
-        if scanning:
-            return {"scanning": True}
-        if tags is not None:
-            return {"files": images_with_tags(tags, path=paths.csv, root=paths.images, exclude=paths.excluded,
-                                              folders=directories)}
-        return {"files": recent_tagged(directories, limit=None, root=paths.images, exclude=paths.excluded,
-                                       csv=paths.csv)}
+        else:
+            with self.lock:
+                scanning = self.workspace is not None and self.folder_scan and not self.folder_scan[0].is_set()
+            if scanning:
+                return {"scanning": True}
+            if tags is not None:
+                files = images_with_tags(tags, path=paths.csv, root=paths.images, exclude=paths.excluded,
+                                         folders=directories)
+            else:
+                files = recent_tagged(directories, limit=None, root=paths.images, exclude=paths.excluded, csv=paths.csv)
+        pending = self.pending_deletion_paths()
+        return {"files": [path for path in files if path not in pending]}
 
     def status(self):
         with self.lock:
             preview = self.preview_file
-            tag_scan = self.tag_scan
             payload = {
                 "model": self.model_state,
                 "job_running": self.job_running,
                 "job_mode": self.job_mode,
                 "job_id": self.job_id,
                 "phase": self.phase,
-                "step": self.step,
-                "detail": self.detail,
-                "percent": self.percent,
+                **self._job_progress(),
                 "preview_file": "",
                 "scan_progress": self.scan_progress,
                 "log": self.lines[-80:],
+                "deletions": self._deletion_status(),
             }
-        if tag_scan:
-            payload["tag_scan"] = {"stage": tag_scan["stage"], "done": tag_scan["done"], "total": tag_scan["total"],
-                                   "elapsed": int(time.monotonic() - tag_scan["started"])}
         if preview:
             try:
-                payload["preview_file"] = str(Path(preview).relative_to(self.paths.images))
+                relative = Path(preview).relative_to(self.paths.images).as_posix()
+                if relative not in self.pending_deletion_paths():
+                    payload["preview_file"] = relative
             except ValueError:
                 payload["preview_file"] = ""
         return payload
+
+    def _job_progress(self):
+        progress = {"step": self.step, "detail": self.detail, "percent": self.percent}
+        if self.tag_scan:
+            scan = self.tag_scan
+            progress["tag_scan"] = {"stage": scan["stage"], "done": scan["done"], "total": scan["total"],
+                                    "elapsed": int(time.monotonic() - scan["started"])}
+        return progress
 
     def download(self):
         with self.lock:
@@ -1812,11 +2029,14 @@ class App:
         with self.lock:
             if self.job_running:
                 return text(33, language=language)
+            if self.review_worker is not None:
+                return "[314] " + text(314, language=language)
             try:
                 python = gpu_runtime.acquire(gpu_target, uuid) if gpu_runtime else None
             except GpuError as error:
                 return text(error.message_id, language=language)
             self.job_running = True
+            self.job_result = None
             self.cancel_requested = False
             self.job_mode = mode
             self.job_id = uuid4().hex
@@ -1887,6 +2107,9 @@ class App:
         except OSError as error:
             code = 1
             self.note(text(26, path=workspace.data or workspace.images, error=error, language=language))
+        except Exception:
+            code = 1
+            raise
         finally:
             if gpu_usage:
                 runtime, target = gpu_usage
@@ -1900,6 +2123,7 @@ class App:
                             self.close_catalog()
                     self.note(text(208, language=language))
             with self.lock:
+                self.job_result = code
                 self.job_running = False
                 self.job_mode = None
                 self.tag_scan = None
@@ -1916,6 +2140,7 @@ class App:
     def _run_duplicates(self, folders, language):
         last_report = 0
         last_step = None
+        code = 1
 
         def progress(step, done, total):
             nonlocal last_report, last_step
@@ -1934,6 +2159,7 @@ class App:
         try:
             count = scan_duplicates(self.duplicate_results(), self.paths, folders, lambda: self.cancel_requested,
                                     progress, report_error)
+            code = -15 if count is None else 0
             message = text(81 if count is None else 275, language=language, count=count)
             self.note(message)
             with self.lock:
@@ -1950,6 +2176,7 @@ class App:
                 self.step = f"[{code}] " + text(code, language=language, error=str(error))
         finally:
             with self.lock:
+                self.job_result = code
                 self.job_running = False
                 self.job_mode = None
 
@@ -1965,7 +2192,101 @@ class App:
             return
 
 
+def reserve_schedule(app, rule):
+    with app.vault.lock, app.lock:
+        opened = app.vault.app
+        if (app.schedule_scope or app.job_running or app.review_worker is not None
+                or (opened and (opened.job_running or opened.review_worker is not None))
+                or (rule["source"] == "vault" and app.vault.process is not None)
+                or (rule["source"] == "images" and app.folder_scan is not None)
+                or (rule["action"] != "duplicates" and app.model_state == "downloading")):
+            return False
+        app.schedule_scope = rule["source"]
+        return True
+
+
+def release_schedule(app, rule):
+    with app.vault.lock, app.lock:
+        if rule["source"] == "images" and rule["action"] != "duplicates":
+            app.folder_cache = None
+            app.character_cache.clear()
+        app.schedule_scope = None
+
+
+def run_scheduled_operations(app, background, rule, stopping, report_progress):
+    workspace = background.paths
+    try:
+        _, folder = resolve_source_folder(workspace.images, rule["folder"], workspace.excluded)
+    except (OSError, ValueError):
+        return 338
+    modes = ("duplicates", "tag") if rule["action"] == "both" else (rule["action"],)
+    failures = []
+    for mode in modes:
+        if stopping.is_set():
+            return 336
+        if mode == "tag" and app.model_state != "ready":
+            failures.append(339)
+            continue
+        if mode == "duplicates" and rule["source"] == "images":
+            background.duplicate_store = app.duplicate_results()
+        failure = background.start(mode, [folder], device="cpu")
+        if not failure:
+            while background.job_running:
+                with background.lock:
+                    progress = background._job_progress()
+                report_progress(progress)
+                if stopping.wait(0.2):
+                    background.stop()
+                    time.sleep(0.05)
+            if stopping.is_set():
+                return 336
+        if failure or background.job_result != 0:
+            failures.append(341 if mode == "duplicates" else 340)
+    return 346 if len(failures) == 2 else failures[0] if failures else 337
+
+
+def execute_schedule(app, rule, password, stopping, report_progress):
+    if stopping.is_set():
+        return 336
+    encrypted = rule["source"] == "vault"
+    if encrypted and app.vault.path is None:
+        return 345
+    private_vault = Vault(app.vault.path, app.vault.mount) if encrypted else None
+    if private_vault is not None:
+        report_progress({"stage": 190})
+        try:
+            private_vault.unlock(password)
+        except VaultError as error:
+            return 164 if error.message_id == 164 else 343
+    background = None
+    try:
+        if stopping.is_set():
+            result = 336
+        else:
+            report_progress({"stage": 25})
+            workspace = Workspace.encrypted(private_vault.mount) if private_vault else None
+            background = App(workspace, devices=(app.rocm, app.nvidia))
+            result = run_scheduled_operations(app, background, rule, stopping, report_progress)
+    except (OSError, ValueError, VaultError, DuplicateError, sqlite3.Error):
+        result = 335
+    finally:
+        if private_vault is not None:
+            report_progress({"stage": 369})
+            try:
+                if background is not None:
+                    background.close_catalog()
+                    if background.duplicate_store is not None:
+                        background.duplicate_store.db.close()
+            finally:
+                try:
+                    private_vault.close()
+                except (VaultError, OSError):
+                    result = 344
+    return result
+
+
 class Handler(BaseHTTPRequestHandler):
+    schedules = None
     app = None
 
     def log_message(self, fmt, *args):
@@ -2033,22 +2354,22 @@ class Handler(BaseHTTPRequestHandler):
         if (self.headers.get_content_type() != "application/json" or not isinstance(scope, str)
                 or not isinstance(pair, list) or len(pair) != 6
                 or not all(isinstance(value, str) and value for value in pair)
-                or decision not in ("left", "different", "right")):
+                or decision not in ("left", "both", "different", "right")):
             return self._duplicate_error(400, 282)
         with self.app.vault.lock:
             app = self._scoped_app(scope)
             if app is None:
                 return self._error_response(409, 172)
-            if app.status()["job_running"]:
-                return self._duplicate_error(409, 283)
+            if app is self.app and app.schedule_scope == "images":
+                return self._error_response(409, 342)
             try:
-                warning = app.review_duplicate(pair, decision, self._language())
+                app.queue_duplicate_review(pair, decision, self._language())
             except DuplicateError as error:
                 status = 409 if error.code in {284, 295} else 500
                 return self._duplicate_error(status, error.code, **error.values)
             except sqlite3.Error as error:
                 return self._duplicate_error(500, 297, error=str(error))
-            return 200, {"ok": True, "warning": warning}
+            return 202, {"ok": True}
 
     def _delete_image(self, payload):
         scope = payload.get("scope")
@@ -2064,22 +2385,19 @@ class Handler(BaseHTTPRequestHandler):
             if app is None:
                 self._error(409, 172)
                 return
-            if app.status()["job_running"]:
-                self._error(409, 188)
+            if app is self.app and app.schedule_scope == "images":
+                self._error(409, 342)
                 return
             try:
-                cleanup_pending = app.remove_image(path, revision)
-            except ImageChangedError:
-                self._error(409, 187)
-                return
-            except (OSError, UnicodeError, csv.Error):
-                self._error(500, 186)
+                app.queue_image_deletion(path, revision, self._language())
+            except DuplicateError as error:
+                status = 409 if error.code in (187, 188, 320) else 500
+                self._send(*self._duplicate_error(status, error.code, **error.values))
                 return
             except ValueError:
                 self._error(404, 87)
                 return
-            warning = text(189, language=self._language()) if cleanup_pending else ""
-            self._send(200, {"ok": True, "warning": warning})
+        self._send(202, {"ok": True})
 
     def _vault_action(self, path, payload):
         if self.headers.get_content_type() != "application/json":
@@ -2089,6 +2407,8 @@ class Handler(BaseHTTPRequestHandler):
         with vault.lock:
             try:
                 if path == "/api/vault/unlock":
+                    if getattr(self.app, "schedule_scope", None) == "vault":
+                        raise VaultError(342)
                     vault.unlock(payload.get("password"))
                     try:
                         workspace = Workspace.encrypted(vault.mount)
@@ -2098,6 +2418,7 @@ class Handler(BaseHTTPRequestHandler):
                         if refresh:
                             vault.app.note(text(263))
                         vault.app._ensure_count(refresh=refresh)
+                        vault.resume_duplicate_reviews()
                     except (OSError, ValueError, VaultError) as error:
                         vault.close()
                         if isinstance(error, VaultError):
@@ -2126,6 +2447,18 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query, keep_blank_values=True)
         path = parsed.path
+        if path == "/api/schedules" and self.schedules is not None:
+            try:
+                rules = self.schedules.public()
+            except ScheduleError as error:
+                self._error(500, error.code)
+                return
+            ready = tpm_available()
+            data = {"rules": rules, "vault": self.app.vault.path is not None, "tpm": ready}
+            if not ready and tpm_service_configured():
+                data["tpm_error"] = 365
+            self._send(200, data)
+            return
         if path in APP_ASSETS:
             try:
                 asset = (HERE / path.lstrip("/")).read_bytes()
@@ -2224,6 +2557,13 @@ class Handler(BaseHTTPRequestHandler):
                 if preview is not None:
                     with suppress(OSError):
                         thumbnails.write(name, revision, preview)
+                    try:
+                        if image_revision(file) != revision:
+                            raise ValueError(relative)
+                    except (OSError, ValueError):
+                        with suppress(OSError):
+                            thumbnails.remove(name)
+                        raise
                     return 200, preview, "image/webp"
             return 200, original, content_type(file)
         except (OSError, ValueError):
@@ -2307,6 +2647,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Expected a JSON object")
         except ValueError:
             self._error(400, 89)
+            return
+        if parsed.path == "/api/schedules" and self.schedules is not None:
+            self._schedule_action(payload)
             return
         if parsed.path == "/api/theme":
             if not write_theme(payload.get("theme")):
@@ -2431,6 +2774,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(409, 172)
                 return
             mode = payload.get("mode")
+            if self.app.schedule_scope:
+                self._error(409, 342)
+                return
             normal = self.app.status()
             vault_app = self.app.vault.app
             busy = normal["job_running"] or bool(vault_app and vault_app.status()["job_running"])
@@ -2447,12 +2793,51 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, {"ok": True, "job_id": app.status()["job_id"]})
 
+    def _schedule_action(self, payload):
+        if self.headers.get_content_type() != "application/json":
+            self._error(400, 89)
+            return
+        operation = payload.get("operation")
+        id_ = payload.get("id")
+        try:
+            if operation != "add" and (not isinstance(id_, str) or re.fullmatch(r"[0-9a-f]{32}", id_) is None):
+                raise ScheduleError(332)
+            if operation in ("add", "edit"):
+                source = payload.get("source")
+                if source == "vault" and self.app.vault.path is None:
+                    raise ScheduleError(345)
+                fields = (payload.get("cron"), source, payload.get("folder"), payload.get("action"), payload.get("password"))
+            if operation == "add":
+                id_ = self.schedules.add(*fields)
+            elif operation == "edit":
+                self.schedules.edit(id_, *fields)
+            elif operation == "reset":
+                self.schedules.reset(id_)
+            elif operation == "password":
+                self.schedules.replace_password(id_, payload.get("password"))
+            elif operation == "run":
+                self.schedules.run_now(id_)
+            elif operation == "stop":
+                self.schedules.stop_now(id_)
+            else:
+                raise ScheduleError(331)
+        except ScheduleError as error:
+            status = 500 if error.code in (327, 329, 330) else 409 if error.code in (326, 334, 345, 365, 372, 373) else 400
+            self._error(status, error.code)
+            return
+        self._send({"add": 201, "run": 202}.get(operation, 200), {"id": id_})
+
 
 def main():
     app = App()
     Handler.app = app
     port = int(os.environ.get("OUBI_LISTEN", "8080"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    schedules = Schedules(Path(app.paths.csv).parent / "schedules.json", write_json_file,
+                          lambda rule: reserve_schedule(app, rule),
+                          lambda rule, password, stopping, progress: execute_schedule(app, rule, password, stopping, progress),
+                          lambda rule: release_schedule(app, rule), lambda code: print(f"[{code}] {text(code)}", flush=True))
+    Handler.schedules = schedules
     threading.Thread(target=app.download, daemon=True).start()
     app._ensure_count()
     print(text(28, port=port), flush=True)
@@ -2468,9 +2853,12 @@ def main():
 
     signal.signal(signal.SIGTERM, shutdown)
     try:
+        schedules.start()
         server.serve_forever()
     finally:
         server.server_close()
+        schedules.close()
+        app.pause_duplicate_reviews()
         with app.vault.lock:
             if opened := app.vault.app:
                 opened.stop()

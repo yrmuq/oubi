@@ -1,5 +1,6 @@
 """Mount the Cryptomator vault for the browser that unlocked it."""
 
+import hashlib
 import re
 import secrets
 import signal
@@ -54,6 +55,8 @@ class Vault:
         self.token = ""
         self.scope = ""
         self.app = None
+        self.review_identity = None
+        self.review_backlogs = {}
 
     def owns(self, token):
         owner, process = self.token, self.process
@@ -109,6 +112,7 @@ class Vault:
         try:
             if not config.is_file():
                 raise VaultError(166, str(config))
+            identity = hashlib.sha256(config.read_bytes()).digest()
         except OSError as error:
             raise VaultError(243, str(error)) from error
         try:
@@ -136,6 +140,7 @@ class Vault:
                     if self.is_mounted():
                         self.token = secrets.token_urlsafe(32)
                         self.scope = secrets.token_hex(16)
+                        self.review_identity = identity
                         return
                     time.sleep(0.05)
                 size = output.seek(0, SEEK_END)
@@ -155,12 +160,30 @@ class Vault:
             self.close()
             raise
 
+    def resume_duplicate_reviews(self):
+        app, process = self.app, self.process
+
+        def mounted():
+            return self.app is app and self.process is process and process.poll() is None and self.is_mounted()
+
+        app.resume_duplicate_reviews(self.review_backlogs.pop(self.review_identity, []), mounted)
+
     def close(self):
-        if self.app is not None:
-            self.app.stop_folder_count()
-        if self.process is not None:
-            self._unmount()
-        if self.app is not None:
-            self.app.close_catalog()
+        app = self.app
+        if app is not None:
+            reviews = app.pause_duplicate_reviews()
+            app.stop_folder_count()
+        try:
+            if self.process is not None:
+                self._unmount()
+        except (OSError, VaultError):
+            if app is not None:
+                app.resume_duplicate_reviews()
+            raise
+        if app is not None:
+            app.close_catalog()
+            if reviews:
+                self.review_backlogs[self.review_identity] = reviews
+        self.review_identity = None
         self.token = self.scope = ""
         self.app = self.process = None

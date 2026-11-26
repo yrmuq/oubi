@@ -23,6 +23,20 @@ from tag_folder import (
 
 
 class TagBatchTests(unittest.TestCase):
+    def test_identify_excludes_workspace_cache_from_root_and_explicit_folders(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / ".oubi" / "thumbnails"
+            album = root / "thumbnails"
+            cache.mkdir(parents=True)
+            album.mkdir()
+            (cache / "preview.webp").touch()
+            original = album / "original.webp"
+            original.touch()
+            for force in (False, True):
+                with self.subTest(force=force):
+                    self.assertEqual(find_pending_images([root, cache], None, force), (1, [(1, original)]))
+
     def test_identify_reports_unique_images_and_checks_all_existing_tags(self):
         with TemporaryDirectory() as directory:
             folder = Path(directory)

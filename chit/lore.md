@@ -38,12 +38,21 @@
 - Keep Cryptomator indexes, sort history, and generated metadata inside the vault; expose the unlocked workspace only to the browser session that unlocked it.
 - Review duplicate matches as direct pHash pairs and remember rejected pairs only for the file revisions reviewed.
 - Verify both files again before deleting a duplicate so a stale comparison cannot remove the only remaining copy.
+- Stage both duplicate files and their metadata in one removal so a failure on the second file restores the first.
+- Run preview, tile, and duplicate removals in the same FIFO queue per workspace and hide reserved files while the queue runs so slow file operations do not stop browsing or review.
+- Pause the vault deletion queue before unmounting and resume its pending work only for the same vault after unlocking.
 - Use the configured Cryptomator start folder as the initial browser location without changing the vault scan root, output paths, or folder selection for jobs.
 - Resolve the internal sort destination relative to the Cryptomator mount and exclude its subtree from vault source operations.
 - Ship Cryptomator in the shared Oubi image so operators can install or update vault-enabled deployments with Compose pulls.
 - Enable vault controls at startup when `/crypt/vault.cryptomator` is present. The container path is fixed so operators only configure the host bind mount.
 - Return vault unlock errors to the requesting browser with the failed stage and a concise Cryptomator or FUSE diagnostic, redacting the submitted password.
 - Open the Cryptomator password form outside the native modal top layer so browser password managers can display their inline autofill controls.
+- Run scheduled jobs in a separate workspace context. A scheduled vault mount waits for the manual session to close and never grants browser access to the unlocked vault.
+- Protect scheduled Cryptomator passwords with both TPM 2.0 and an automatically generated host key. Deletion decisions remain manual.
+- Give the Alpine TPM service the device under its root ownership so scheduled unlock works with a `0600` host TPM without changing host permissions.
+- Keep the TPM host key volume private to the Alpine service and authenticate requests using the UID supplied by the Unix socket.
+- Preserve existing direct TPM credentials for installations using their original device mapping.
+- Use textareas for the schedule folder and cron so Bitwarden's username heuristic skips them while its password field remains available.
 
 ## Compatibility Workarounds
 
