@@ -133,7 +133,9 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #vault-dialog .dialog-actions button { flex: 1 1 0; }
 #schedule-dialog { width: min(540px, calc(100vw - 56px)); max-height: calc(100dvh - 56px); background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
 #schedule-dialog::backdrop { background: #0009; }
-#schedule-dialog h2 { margin: 0 0 12px; }
+.schedule-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+#schedule-title { margin: 0; }
+#schedule-close { flex: none; width: 32px; height: 32px; padding: 0; font-size: 21px; line-height: 1; }
 #schedule-dialog form:not([hidden]), #schedule-dialog label:not([hidden]) { display: grid; gap: 6px; }
 #schedule-dialog input, #schedule-dialog select, #schedule-dialog textarea { box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
 #schedule-dialog textarea { resize: none; }
@@ -141,7 +143,7 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #schedule-rules { display: grid; gap: 8px; padding: 0; list-style: none; }
 #schedule-rules li { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 #schedule-rules p { overflow-wrap: anywhere; margin: 0 0 6px; }
-#schedule-rules button + button { margin-inline-start: 6px; }
+.schedule-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .folder-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 #folder-navigation { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
 #folder-up { height: 28px; padding: 0 8px; }
@@ -550,7 +552,10 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   <p id="delete-error" role="alert" hidden></p>
 </dialog>
 <dialog id="schedule-dialog" aria-labelledby="schedule-title">
-  <h2 id="schedule-title" data-schedule-text="347"></h2>
+  <div class="schedule-header">
+    <h2 id="schedule-title" data-schedule-text="347"></h2>
+    <button type="button" class="secondary" id="schedule-close"><span aria-hidden="true">×</span></button>
+  </div>
   <form id="schedule-form">
     <label><span id="schedule-workspace-text" data-schedule-text="348"></span>
       <select id="schedule-source" name="source" aria-labelledby="schedule-workspace-text">
@@ -588,9 +593,6 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   </form>
   <ul id="schedule-rules"></ul>
   <p id="schedule-error" role="alert" hidden></p>
-  <div class="dialog-actions">
-    <button type="button" class="secondary" id="schedule-close" data-schedule-text="362"></button>
-  </div>
 </dialog>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
@@ -775,6 +777,8 @@ function renderSchedules() {
     const row = document.createElement("li");
     const target = document.createElement("p");
     const result = document.createElement("p");
+    const actions = document.createElement("div");
+    actions.className = "schedule-actions";
     const action = { tag: 1, duplicates: 264, both: 354 }[rule.action];
     target.textContent = [t(rule.source === "vault" ? 350 : 349), "/" + rule.folder, rule.cron, t(action)].join(" · ");
     result.textContent = rule.last_run
@@ -788,7 +792,7 @@ function renderSchedules() {
     reset.onclick = () => {
       if (window.confirm(t(361))) submitSchedule({ operation: "reset", id: rule.id });
     };
-    row.append(target, result, reset);
+    actions.append(reset);
     if (rule.source === "vault") {
       const replace = document.createElement("button");
       replace.type = "button";
@@ -799,8 +803,16 @@ function renderSchedules() {
         showScheduleError();
         editSchedulePassword(rule.id);
       };
-      row.append(replace);
+      actions.append(replace);
     }
+    const run = document.createElement("button");
+    run.type = "button";
+    run.className = "secondary";
+    run.textContent = t(367);
+    run.disabled = rule.pending || rule.result === 333;
+    run.onclick = () => submitSchedule({ operation: "run", id: rule.id });
+    actions.append(run);
+    row.append(target, result, actions);
     return row;
   });
   scheduleList.replaceChildren(...entries);
@@ -1159,6 +1171,9 @@ function showEmpty() {
 function applyI18n() {
   document.documentElement.lang = lang;
   document.getElementById("schedule-open").textContent = t(347);
+  const scheduleClose = document.getElementById("schedule-close");
+  scheduleClose.setAttribute("aria-label", t(362));
+  scheduleClose.title = t(362);
   for (const node of scheduleDialog.querySelectorAll("[data-schedule-text]")) node.textContent = t(node.dataset.scheduleText);
   renderSchedules();
   document.getElementById("tag").textContent = t(1);

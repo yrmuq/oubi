@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -48,6 +48,9 @@ class ScheduleTests(unittest.TestCase):
 
     def run_slot(self, now):
         self.scheduler.queue_due(now)
+        self.wait_for_worker()
+
+    def wait_for_worker(self):
         with self.scheduler.lock:
             worker = self.scheduler.worker
         if worker:
@@ -70,6 +73,33 @@ class ScheduleTests(unittest.TestCase):
         result = self.make_scheduler().public()[0]
         self.assertEqual(result["result"], 337)
         self.assertIsInstance(result["last_run"], int)
+
+    def test_run_now_coalesces_clicks_and_keeps_the_cron_time(self):
+        next_hour = (datetime.now().astimezone() + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        expression = f"0 {next_hour.hour} * * *"
+        id_ = self.scheduler.add(expression, "images", "trip", "duplicates", None)
+
+        self.reserve.return_value = False
+        for _ in range(2):
+            self.scheduler.run_now(id_)
+            self.wait_for_worker()
+        self.assertTrue(self.scheduler.public()[0]["pending"])
+        self.execute.assert_not_called()
+
+        self.reserve.return_value = True
+        self.execute.side_effect = lambda *args: self.scheduler.run_now(id_) or 337
+        self.scheduler.run_now(id_)
+        self.wait_for_worker()
+        self.execute.assert_called_once()
+        result = self.make_scheduler().public()[0]
+        self.assertEqual(result["cron"], expression)
+        self.assertEqual(result["result"], 337)
+        self.assertFalse(result["pending"])
+        self.assertNotIn("slot", json.loads(self.path.read_text())[id_])
+
+        self.run_slot(next_hour)
+        self.run_slot(next_hour)
+        self.assertEqual(self.execute.call_count, 2)
 
     def test_credentials_are_private_and_password_replacement_unblocks(self):
         def credential(path, id_, operation, value):

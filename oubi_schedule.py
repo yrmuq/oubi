@@ -250,6 +250,17 @@ class Schedules:
             self._save({key: rule for key, rule in self.rules.items() if key != id_})
             self.pending.pop(id_, None)
 
+    def run_now(self, id_):
+        with self.lock:
+            if self.load_failed:
+                raise ScheduleError(329)
+            rule = self.rules.get(id_)
+            if rule is None:
+                raise ScheduleError(332)
+            if rule.get("result") != 333:
+                self.pending.setdefault(id_, None)
+                self._start_worker()
+
     def public(self):
         with self.lock:
             if self.load_failed:
@@ -286,15 +297,19 @@ class Schedules:
         with self.lock:
             for id_, rule in self.rules.items():
                 if (not rule.get("blocked") and rule.get("result") != 333 and slot > rule.get("slot", -1)
-                        and cron_matches(parse_cron(rule["cron"]), now)):
-                    self.pending.setdefault(id_, slot)
-            if self.pending and self.worker is None:
-                self.worker = threading.Thread(target=self.run_pending, args=(slot,), daemon=True)
-                self.worker.start()
+                        and cron_matches(parse_cron(rule["cron"]), now)
+                        and self.pending.get(id_) is None):
+                    self.pending[id_] = slot
+            self._start_worker()
 
-    def run_pending(self, slot):
+    def _start_worker(self):
+        if self.pending and self.worker is None and not self.stopping.is_set():
+            self.worker = threading.Thread(target=self.run_pending, daemon=True)
+            self.worker.start()
+
+    def run_pending(self):
         try:
-            self._process_pending(slot)
+            self._process_pending()
         except ScheduleError as error:
             self.report_error(error.code)
             self.stopping.wait(30)
@@ -302,7 +317,7 @@ class Schedules:
             with self.lock:
                 self.worker = None
 
-    def _process_pending(self, slot):
+    def _process_pending(self):
         with self.lock:
             due = list(self.pending)
         for id_ in due:
@@ -313,8 +328,12 @@ class Schedules:
                 if rule is None or not self.reserve(rule):
                     continue
                 try:
-                    running = {**rule, "slot": max(slot, int(time.time()) // 60),
-                               "last_run": int(time.time()), "result": 333}
+                    now = datetime.now().astimezone()
+                    slot = int(now.timestamp()) // 60
+                    queued_slot = self.pending[id_]
+                    running = {**rule, "last_run": int(now.timestamp()), "result": 333}
+                    if queued_slot is not None or cron_matches(parse_cron(rule["cron"]), now):
+                        running["slot"] = max(slot, queued_slot or slot, rule.get("slot", -1))
                     self._save({**self.rules, id_: running})
                 except ScheduleError:
                     self.release(rule)

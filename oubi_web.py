@@ -2800,13 +2800,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.schedules.reset(id_)
             elif operation == "password":
                 self.schedules.replace_password(id_, payload.get("password"))
+            elif operation == "run":
+                self.schedules.run_now(id_)
             else:
                 raise ScheduleError(331)
         except ScheduleError as error:
             status = 500 if error.code in (327, 329, 330) else 409 if error.code in (326, 334, 345, 365) else 400
             self._error(status, error.code)
             return
-        self._send(201 if operation == "add" else 200, {"id": id_})
+        self._send({"add": 201, "run": 202}.get(operation, 200), {"id": id_})
 
 
 def main():
