@@ -124,11 +124,29 @@ class ScheduleTests(unittest.TestCase):
 
     def test_reset_during_run_stays_reset(self):
         id_ = self.scheduler.add("* * * * *", "images", "", "tag", None)
-        self.execute.side_effect = lambda rule, password, stopping: self.scheduler.reset(id_) or 337
+        self.execute.side_effect = lambda rule, password, stopping, report: self.scheduler.reset(id_) or 337
         self.run_slot(datetime.now().astimezone())
         self.release.assert_called_once()
         self.assertEqual(self.scheduler.public(), [])
         self.assertEqual(self.make_scheduler().public(), [])
+
+    def test_run_progress_is_visible_only_while_running(self):
+        id_ = self.scheduler.add("0 2 * * *", "images", "", "duplicates", None)
+
+        def execute(rule, password, stopping, report):
+            self.assertEqual(self.scheduler.public()[0]["progress"], {"stage": 25})
+            progress = {"step": "Checking image hashes", "detail": "", "percent": 35}
+            report(progress)
+            self.assertEqual(self.scheduler.public()[0]["progress"], progress)
+            self.assertNotIn("progress", json.loads(self.path.read_text())[id_])
+            return 337
+
+        self.execute.side_effect = execute
+        self.scheduler.run_now(id_)
+        self.wait_for_worker()
+        result = self.scheduler.public()[0]
+        self.assertEqual(result["result"], 337)
+        self.assertIsNone(result["progress"])
 
     @patch("oubi_schedule.local_tpm_available", return_value=True)
     @patch("oubi_schedule.subprocess.run")
@@ -177,11 +195,13 @@ class ScheduledWorkspaceTests(unittest.TestCase):
         with (patch("oubi_web.Vault") as vault, patch("oubi_web.Workspace.encrypted"),
               patch("oubi_web.App") as background, patch("oubi_web.run_scheduled_operations", return_value=337)):
             background.return_value.duplicate_store = None
-            result = execute_schedule(app, rule, "password", threading.Event())
+            progress = Mock()
+            result = execute_schedule(app, rule, "password", threading.Event(), progress)
             self.assertEqual(result, 337)
             vault.return_value.unlock.assert_called_once_with("password")
             vault.return_value.close.assert_called_once_with()
             self.assertIsNone(app.vault.app)
             self.assertEqual(app.vault.scope, "")
+            self.assertEqual([call.args[0]["stage"] for call in progress.call_args_list], [190, 25, 369])
         release_schedule(app, rule)
         self.assertIsNone(app.schedule_scope)

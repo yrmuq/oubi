@@ -1935,24 +1935,18 @@ class App:
     def status(self):
         with self.lock:
             preview = self.preview_file
-            tag_scan = self.tag_scan
             payload = {
                 "model": self.model_state,
                 "job_running": self.job_running,
                 "job_mode": self.job_mode,
                 "job_id": self.job_id,
                 "phase": self.phase,
-                "step": self.step,
-                "detail": self.detail,
-                "percent": self.percent,
+                **self._job_progress(),
                 "preview_file": "",
                 "scan_progress": self.scan_progress,
                 "log": self.lines[-80:],
                 "deletions": self._deletion_status(),
             }
-        if tag_scan:
-            payload["tag_scan"] = {"stage": tag_scan["stage"], "done": tag_scan["done"], "total": tag_scan["total"],
-                                   "elapsed": int(time.monotonic() - tag_scan["started"])}
         if preview:
             try:
                 relative = Path(preview).relative_to(self.paths.images).as_posix()
@@ -1961,6 +1955,14 @@ class App:
             except ValueError:
                 payload["preview_file"] = ""
         return payload
+
+    def _job_progress(self):
+        progress = {"step": self.step, "detail": self.detail, "percent": self.percent}
+        if self.tag_scan:
+            scan = self.tag_scan
+            progress["tag_scan"] = {"stage": scan["stage"], "done": scan["done"], "total": scan["total"],
+                                    "elapsed": int(time.monotonic() - scan["started"])}
+        return progress
 
     def download(self):
         with self.lock:
@@ -2210,7 +2212,7 @@ def release_schedule(app, rule):
         app.schedule_scope = None
 
 
-def run_scheduled_operations(app, background, rule, stopping):
+def run_scheduled_operations(app, background, rule, stopping, report_progress):
     workspace = background.paths
     try:
         _, folder = resolve_source_folder(workspace.images, rule["folder"], workspace.excluded)
@@ -2229,6 +2231,9 @@ def run_scheduled_operations(app, background, rule, stopping):
         failure = background.start(mode, [folder], device="cpu")
         if not failure:
             while background.job_running:
+                with background.lock:
+                    progress = background._job_progress()
+                report_progress(progress)
                 if stopping.wait(0.2):
                     background.stop()
                     time.sleep(0.05)
@@ -2239,7 +2244,7 @@ def run_scheduled_operations(app, background, rule, stopping):
     return 346 if len(failures) == 2 else failures[0] if failures else 337
 
 
-def execute_schedule(app, rule, password, stopping):
+def execute_schedule(app, rule, password, stopping, report_progress):
     if stopping.is_set():
         return 336
     encrypted = rule["source"] == "vault"
@@ -2247,19 +2252,22 @@ def execute_schedule(app, rule, password, stopping):
         return 345
     private_vault = Vault(app.vault.path, app.vault.mount) if encrypted else None
     if private_vault is not None:
+        report_progress({"stage": 190})
         try:
             private_vault.unlock(password)
         except VaultError as error:
             return 164 if error.message_id == 164 else 343
     background = None
     try:
+        report_progress({"stage": 25})
         workspace = Workspace.encrypted(private_vault.mount) if private_vault else None
         background = App(workspace, devices=(app.rocm, app.nvidia))
-        result = run_scheduled_operations(app, background, rule, stopping)
+        result = run_scheduled_operations(app, background, rule, stopping, report_progress)
     except (OSError, ValueError, VaultError, DuplicateError, sqlite3.Error):
         result = 335
     finally:
         if private_vault is not None:
+            report_progress({"stage": 369})
             try:
                 if background is not None:
                     background.close_catalog()
@@ -2818,7 +2826,7 @@ def main():
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     schedules = Schedules(Path(app.paths.csv).parent / "schedules.json", write_json_file,
                           lambda rule: reserve_schedule(app, rule),
-                          lambda rule, password, stopping: execute_schedule(app, rule, password, stopping),
+                          lambda rule, password, stopping, progress: execute_schedule(app, rule, password, stopping, progress),
                           lambda rule: release_schedule(app, rule), lambda code: print(f"[{code}] {text(code)}", flush=True))
     Handler.schedules = schedules
     threading.Thread(target=app.download, daemon=True).start()

@@ -163,6 +163,7 @@ class Schedules:
         self.thread = None
         self.worker = None
         self.pending = {}
+        self.progress = None
         self.load_failed = False
         try:
             self.rules = self._read_rules()
@@ -266,6 +267,7 @@ class Schedules:
             if self.load_failed:
                 raise ScheduleError(329)
             return [{"id": id_, "pending": id_ in self.pending,
+                     "progress": self.progress if rule.get("result") == 333 else None,
                      **{key: rule.get(key) for key in ("cron", "source", "folder", "action", "last_run", "result", "blocked")}}
                     for id_, rule in self.rules.items()]
 
@@ -339,10 +341,16 @@ class Schedules:
                     self.release(rule)
                     raise
                 self.pending.pop(id_, None)
+                self.progress = {"stage": 368 if running["source"] == "vault" else 25}
+
+            def report_progress(progress):
+                with self.lock:
+                    self.progress = progress
+
             try:
                 password = (vault_credential(self.path.parent.resolve(), id_, "decrypt", running["credential"])
                             if running["source"] == "vault" else None)
-                result = self.execute(running, password, self.stopping)
+                result = self.execute(running, password, self.stopping, report_progress)
             except ScheduleError as error:
                 result = error.code
             except Exception:
@@ -350,6 +358,7 @@ class Schedules:
             finally:
                 self.release(running)
             with self.lock:
+                self.progress = None
                 if self.rules.get(id_) is running:
                     finished = {**running, "result": result, "blocked": result in (164, 328)}
                     try:

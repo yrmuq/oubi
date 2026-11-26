@@ -35,6 +35,9 @@
   --log: 200px;
   --search-bg: #fff;
   --search-edge: #c8c8c8;
+  --terminal-bg: #e8e8e8;
+  --terminal-text: #000;
+  --terminal-input: #f5f5f5;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -62,6 +65,9 @@
     --pick: #e7b341;
     --search-bg: #0c0c0c;
     --search-edge: #4a4a4a;
+    --terminal-bg: #000;
+    --terminal-text: #e6e6e6;
+    --terminal-input: #151515;
   }
 }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
@@ -144,6 +150,7 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #schedule-rules li { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 #schedule-rules p { overflow-wrap: anywhere; margin: 0 0 6px; }
 .schedule-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.schedule-run { background: #f08b32; color: #17110b; }
 .folder-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 #folder-navigation { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
 #folder-up { height: 28px; padding: 0 8px; }
@@ -219,6 +226,10 @@ body.arrange .block * { pointer-events: none; }
 .settings-menu button { display: block; width: 100%; border-radius: 5px; background: transparent; color: var(--text); text-align: start; white-space: nowrap; }
 .settings-menu button:hover, .settings-menu button:focus-visible { background: var(--btn-2); }
 #deletion-control { position: static; }
+#deletion-toggle { display: flex; align-items: center; gap: 6px; }
+.queue-badge { display: inline-grid; place-items: center; min-width: 1.45em; height: 1.45em; padding-inline: .2em; box-sizing: border-box; border-radius: 999px; background: var(--text); color: var(--pane); font-size: .82em; font-weight: 700; }
+.queue-badge[hidden] { display: none; }
+.queue-error { background: #b4232b; color: #fff; }
 #deletion-menu { width: min(430px, calc(100vw - 32px)); max-height: 55vh; overflow: auto; padding: 8px; box-sizing: border-box; }
 #deletion-menu p, #deletion-items { margin: 0; }
 #deletion-items { padding: 0; list-style: none; }
@@ -301,9 +312,9 @@ body.arrange .block * { pointer-events: none; }
 .genre-18, .genre-handle.genre-18 { background: #d4c6f2; }
 .genre-19, .genre-handle.genre-19 { background: #ead9a4; }
 .genre-20, .genre-handle.genre-20 { background: #c8d5dc; }
-.log { margin: 0; border: 0; flex: 1; min-height: 0; background: #000; color: #e6e6e6; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
-.terminal-entry { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid #333; background: #000; color: #e6e6e6; font: 13px/1.35 ui-monospace, monospace; }
-.terminal-entry input { font: inherit; flex: 1; min-width: 0; padding: 3px 5px; border: 1px solid #555; border-radius: 4px; background: #151515; color: inherit; }
+.log { margin: 0; border: 0; flex: 1; min-height: 0; background: var(--terminal-bg); color: var(--terminal-text); overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
+.terminal-entry:not([hidden]) { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid var(--line); background: var(--terminal-bg); color: var(--terminal-text); font: 13px/1.35 ui-monospace, monospace; }
+.terminal-entry input { font: inherit; flex: 1; min-width: 0; padding: 3px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--terminal-input); color: inherit; }
 .terminal-entry input:disabled { opacity: .65; }
 #zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
 #zoom[hidden] { display: none; }
@@ -326,6 +337,7 @@ html[data-theme="light"] {
   --folder-tab: #d7a441; --folder: #e7b84a; --folder-front: #f6d78a; --folder-edge: #8a5a12;
   --bar: #e4e4e4; --btn-2: #dedede; --btn-2-text: #1c1c1c; --danger: #8d3a3a; --pick: #c98400;
   --search-bg: #fff; --search-edge: #c8c8c8;
+  --terminal-bg: #e8e8e8; --terminal-text: #000; --terminal-input: #f5f5f5;
 }
 html[data-theme="dark"] {
   color-scheme: dark;
@@ -334,6 +346,7 @@ html[data-theme="dark"] {
   --yellow: #f5c400; --blue: #4c86ff; --iron-a: #f4f6f8; --iron-b: #7e8b97; --iron-c: #c5ced6;
   --bar: #2a2a2a; --btn-2: #333; --btn-2-text: #fff; --danger: #6e2e2e; --pick: #e7b341;
   --search-bg: #0c0c0c; --search-edge: #4a4a4a;
+  --terminal-bg: #000; --terminal-text: #e6e6e6; --terminal-input: #151515;
 }
 </style>
 <script>
@@ -366,11 +379,12 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <button type="button" class="secondary" id="schedule-open" aria-haspopup="dialog">Schedules</button>
     </div>
   </div>
-  <button id="app-mode" type="button" class="secondary" aria-pressed="false">Sorting</button>
+  <button id="app-mode" type="button" class="secondary" aria-pressed="false">Gallery</button>
   <div class="head-tools">
-    <button id="arrange" type="button" title="Move blocks">✎</button>
     <div id="deletion-control" class="settings-control">
-      <button id="deletion-toggle" class="secondary" type="button" aria-expanded="false" aria-controls="deletion-menu"></button>
+      <button id="deletion-toggle" class="secondary" type="button" aria-expanded="false" aria-controls="deletion-menu">
+        <span id="deletion-label"></span><span id="deletion-count" class="queue-badge">0</span><span id="deletion-warning" class="queue-badge queue-error" role="img" hidden>!</span>
+      </button>
       <div id="deletion-menu" class="settings-menu" hidden>
         <p id="deletion-empty"></p>
         <ul id="deletion-items"></ul>
@@ -393,6 +407,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <option value="ru" lang="ru">Русский</option>
     </select>
     <button id="theme" type="button">auto</button>
+    <button id="arrange" type="button" title="Move blocks">✎</button>
   </div>
 </header>
 <div class="top">
@@ -445,7 +460,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     </div>
     <div class="block grow" data-block="log">
       <pre id="log" class="log"></pre>
-      <form id="terminal-entry" class="terminal-entry">
+      <form id="terminal-entry" class="terminal-entry" hidden>
         <span aria-hidden="true">&gt;</span>
         <input id="terminal-input" type="text" aria-label="Terminal input" enterkeyhint="send" autocomplete="off" autocapitalize="off" spellcheck="false" disabled>
       </form>
@@ -582,15 +597,6 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     </label>
     <button type="submit" data-schedule-text="355"></button>
   </form>
-  <form id="schedule-password-form" hidden>
-    <label><span data-schedule-text="174"></span>
-      <input type="password" name="password" autocomplete="current-password" required>
-    </label>
-    <div class="dialog-actions">
-      <button type="submit" data-schedule-text="360"></button>
-      <button type="button" class="secondary" id="schedule-password-cancel" data-schedule-text="175"></button>
-    </div>
-  </form>
   <ul id="schedule-rules"></ul>
   <p id="schedule-error" role="alert" hidden></p>
 </dialog>
@@ -631,9 +637,9 @@ let tagText = "";
 let hasFile = false;
 let pinned = [];
 let vocab = [];
-const appModes = ["sorting", "gallery", "duplicates"];
+const appModes = ["gallery", "duplicates", "sorting"];
 const savedMode = readPreference("oubi.mode");
-let appMode = appModes.includes(savedMode) ? savedMode : "sorting";
+let appMode = appModes.includes(savedMode) ? savedMode : appModes[0];
 let regularLayout;
 let duplicatePage = null;
 let duplicateRequest = 0;
@@ -685,6 +691,7 @@ const rocmArch = document.getElementById("rocm-arch");
 const rocmInstall = document.getElementById("rocm-install");
 const nvidiaCard = document.getElementById("nvidia-card");
 const nvidiaInstall = document.getElementById("nvidia-install");
+const terminalEntry = document.getElementById("terminal-entry");
 const terminalInput = document.getElementById("terminal-input");
 const deleteImage = document.getElementById("delete-image");
 const imageActions = document.getElementById("image-actions");
@@ -707,7 +714,6 @@ const vaultCancel = document.getElementById("vault-cancel");
 const scheduleDialog = document.getElementById("schedule-dialog");
 const scheduleForm = document.getElementById("schedule-form");
 const scheduleSource = document.getElementById("schedule-source");
-const schedulePassword = document.getElementById("schedule-password-form");
 const scheduleList = document.getElementById("schedule-rules");
 const scheduleError = document.getElementById("schedule-error");
 const vaultBackground = document.querySelectorAll("body > .topbar, body > .top");
@@ -742,7 +748,6 @@ let scheduleData = { rules: [], vault: false, tpm: false };
 let changingSchedule = false;
 let readingSchedules = false;
 let scheduleRevision = 0;
-let replacingSchedule = "";
 
 function showScheduleError(message = "") {
   scheduleError.textContent = message;
@@ -761,12 +766,21 @@ function showSchedulePassword() {
   tpmNote.hidden = !encrypted || scheduleData.tpm;
 }
 
-function editSchedulePassword(id = "") {
-  replacingSchedule = id;
-  schedulePassword.reset();
-  schedulePassword.hidden = !id;
-  scheduleForm.hidden = Boolean(id);
-  if (id) schedulePassword.elements.password.focus();
+function renderScheduleProgress() {
+  const number = new Intl.NumberFormat(lang);
+  scheduleData.rules.forEach((rule, index) => {
+    const line = scheduleList.children[index].querySelector(".schedule-progress");
+    const progress = rule.progress;
+    const scan = progress?.tag_scan ? tagScanDisplay(progress.tag_scan) : null;
+    const percent = scan ? scan.percent : progress?.percent;
+    const text = progress ? [
+      scan?.step || (progress.stage ? t(progress.stage) : progress.step),
+      !scan && Number.isFinite(percent) && !/%/.test(progress.detail) ? number.format(percent) + "%" : "",
+      scan?.detail || progress.detail,
+    ].filter(Boolean).join(" · ") : "";
+    if (line.textContent !== text) line.textContent = text;
+    line.hidden = !text;
+  });
 }
 
 function renderSchedules() {
@@ -777,12 +791,14 @@ function renderSchedules() {
     const row = document.createElement("li");
     const target = document.createElement("p");
     const result = document.createElement("p");
+    const progress = document.createElement("p");
+    progress.className = "schedule-progress";
     const actions = document.createElement("div");
     actions.className = "schedule-actions";
     const action = { tag: 1, duplicates: 264, both: 354 }[rule.action];
     target.textContent = [t(rule.source === "vault" ? 350 : 349), "/" + rule.folder, rule.cron, t(action)].join(" · ");
     result.textContent = rule.last_run
-      ? [t(357), date.format(rule.last_run * 1000), t(rule.result)].join(" · ")
+      ? [t(357), date.format(rule.last_run * 1000), rule.result === 333 ? "" : t(rule.result)].filter(Boolean).join(" · ")
       : t(358);
     if (rule.pending) result.textContent += " · " + t(359);
     const reset = document.createElement("button");
@@ -793,29 +809,18 @@ function renderSchedules() {
       if (window.confirm(t(361))) submitSchedule({ operation: "reset", id: rule.id });
     };
     actions.append(reset);
-    if (rule.source === "vault") {
-      const replace = document.createElement("button");
-      replace.type = "button";
-      replace.className = "secondary";
-      replace.textContent = t(360);
-      replace.disabled = rule.result === 333 || !scheduleData.vault || !scheduleData.tpm;
-      replace.onclick = () => {
-        showScheduleError();
-        editSchedulePassword(rule.id);
-      };
-      actions.append(replace);
-    }
     const run = document.createElement("button");
     run.type = "button";
-    run.className = "secondary";
+    run.className = "schedule-run";
     run.textContent = t(367);
     run.disabled = rule.pending || rule.result === 333;
     run.onclick = () => submitSchedule({ operation: "run", id: rule.id });
     actions.append(run);
-    row.append(target, result, actions);
+    row.append(target, result, progress, actions);
     return row;
   });
   scheduleList.replaceChildren(...entries);
+  renderScheduleProgress();
 }
 
 async function loadSchedules() {
@@ -830,10 +835,11 @@ async function loadSchedules() {
       if (scheduleError.hidden) showScheduleError(data.error || t(363));
       return;
     }
-    if (JSON.stringify(data) !== JSON.stringify(scheduleData)) {
-      scheduleData = data;
-      renderSchedules();
-    }
+    const sameControls = JSON.stringify(data, (key, value) => key === "progress" ? undefined : value) ===
+      JSON.stringify(scheduleData, (key, value) => key === "progress" ? undefined : value);
+    scheduleData = data;
+    if (sameControls) renderScheduleProgress();
+    else renderSchedules();
   } catch {
     if (scheduleDialog.open && revision === scheduleRevision && scheduleError.hidden) showScheduleError(t(363));
   } finally {
@@ -1094,8 +1100,14 @@ async function reviewDuplicate(decision) {
 
 function renderDeletionQueue() {
   const items = deletionStatus?.items || [];
-  const count = items.reduce((sum, item) => sum + item.files.length, 0);
-  deletionToggle.textContent = t(307) + (count ? ` (${new Intl.NumberFormat(lang).format(count)})` : "");
+  const count = items.filter(item => item.state === "waiting" || item.state === "running").length;
+  const countBadge = document.getElementById("deletion-count");
+  const warningBadge = document.getElementById("deletion-warning");
+  document.getElementById("deletion-label").textContent = t(307);
+  countBadge.textContent = new Intl.NumberFormat(lang).format(count);
+  warningBadge.hidden = !items.some(item => item.state === "failed" || item.state === "warning");
+  warningBadge.title = t(370);
+  warningBadge.setAttribute("aria-label", t(370));
   if (deletionMenu.hidden) return;
   deletionEmpty.hidden = items.length > 0;
   deletionEmpty.textContent = t(308);
@@ -2123,8 +2135,9 @@ async function tick() {
 }
 
 function showTerminalInput() {
+  terminalEntry.hidden = !gpuPrompt;
   terminalInput.disabled = !gpuPrompt || sendingGpuRequest;
-  terminalInput.placeholder = t(gpuPrompt ? 159 : gpuProgress ? 162 : 160);
+  terminalInput.placeholder = t(159);
 }
 
 function selectedRocmArch() {
@@ -2250,7 +2263,7 @@ nvidiaInstall.onclick = async () => {
   if (await sendGpuRequest("/api/nvidia", { gpu, action }, action === "uninstall" ? 236 : 133)) terminalInput.focus();
 };
 terminalInput.oninput = () => terminalInput.setCustomValidity("");
-document.getElementById("terminal-entry").onsubmit = async event => {
+terminalEntry.onsubmit = async event => {
   event.preventDefault();
   if (!gpuPrompt || sendingGpuRequest) return;
   const answer = terminalInput.value.trim().toLowerCase();
@@ -3307,10 +3320,8 @@ document.getElementById("schedule-open").onclick = () => {
   loadSchedules();
 };
 document.getElementById("schedule-close").onclick = () => scheduleDialog.close();
-document.getElementById("schedule-password-cancel").onclick = () => editSchedulePassword();
 scheduleDialog.addEventListener("close", () => {
   scheduleForm.elements.password.value = "";
-  editSchedulePassword();
 });
 scheduleSource.onchange = showSchedulePassword;
 scheduleForm.addEventListener("keydown", event => {
@@ -3326,14 +3337,7 @@ scheduleForm.onsubmit = async event => {
   scheduleForm.elements.password.value = "";
   await submitSchedule({ operation: "add", ...fields });
 };
-schedulePassword.onsubmit = async event => {
-  event.preventDefault();
-  if (changingSchedule) return;
-  const password = schedulePassword.elements.password.value;
-  schedulePassword.reset();
-  if (await submitSchedule({ operation: "password", id: replacingSchedule, password })) editSchedulePassword();
-};
-setInterval(loadSchedules, 2000);
+setInterval(loadSchedules, 1000);
 if (initialVaultFolder) selectFolderLocation(initialVaultFolder);
 if (initialVaultFolder === null) showNotice(t(257));
 loadFolders();

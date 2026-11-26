@@ -43,13 +43,13 @@
 | Image tile | Click to open the image in the preview. Press and hold, right-click, or press Shift+F10 on a focused tile to open its delete action. Confirm the file name before deleting. |
 | Trash icon on the preview | Confirm permanent removal of the current image and add it to the deletion queue. |
 | Recount icon | Rescan the active workspace. Use it to refresh the vault index after changes made outside Oubi. |
-| Deletion queue | Show pending removals from the preview, image tiles, and Duplicates, along with any errors. Browsing continues while the server works through the queue in the current workspace. |
+| Queue | Show pending removals from the preview, image tiles, and Duplicates. The counter shows active operations and the red exclamation mark indicates an error. |
 | Duplicate previews | Scroll over either image to zoom both and drag either zoomed image to move both. Click to open the full-screen comparison with the same controls. |
 | Preview mode icon | Switch between the gallery of selected folders and the latest tagging result. Starting a job opens the work view. |
 | `Identify` | Show the live count of images found in the selected folders, then the progress of checking existing tags and tagging the remaining images. |
 | `Tagging device` | Choose CPU, AMD, or NVIDIA. Oubi selects an available installed GPU when the page opens. |
 | `Install` / `Uninstall` | Install or remove components for the selected GPU. Confirm with `y` or cancel with `n` in the terminal. Shared CUDA packages stay available while another configured card uses them. |
-| `Sorting` / `Gallery` | Switch between genre settings and favorite tag filters. Gallery hides the sorting controls and sorting badges. Returning to Sorting clears the active filters. |
+| `Gallery` / `Duplicates` / `Sorting` | Start in Gallery on first use, then cycle through Duplicates and Sorting. Gallery hides sorting controls and badges. Returning to Sorting clears the active filters. |
 | Default panel layout | Find tag search and active filters under the preview. Genre tags in Sorting and favorites in Gallery appear under the current image's tags. |
 | `Import` / `Export` | Transfer favorites from the active library or the panel layout as JSON. Import merges favorites and replaces the panel layout. |
 | Hold an image tag | Add or remove the tag from favorites. The Gallery groups saved tags by character or event. |
@@ -185,7 +185,7 @@ If opening fails, the password dialog identifies the failed step and shows the r
 
 Open **Schedules** in the header, choose a workspace, and enter a folder path relative to that workspace. Leave the folder blank to process the whole workspace. The five cron fields are minute, hour, day of the month, month, and day of the week. For example, `0 3 * * *` runs daily at 03:00 in the container's `TZ` time zone. Scheduled identification uses the CPU. Duplicate search saves pairs for review in **Duplicates**. File deletion still requires a manual decision.
 
-Jobs run with the container and wait for an active operation to finish. A scheduled vault job waits until the manually opened vault is locked. It then unlocks and locks the vault on its own, independently of the browser. In **Schedules**, click **Run** to start a saved rule without waiting for its cron time. The same row shows when it ran and how it finished. **Reset** deletes the rule and its saved password. A run that already started can finish.
+Jobs run with the container and wait for an active operation to finish. A scheduled vault job waits until the manually opened vault is locked. It then unlocks and locks the vault on its own, independently of the browser. In **Schedules**, click **Run** to start a saved rule without waiting for its cron time. The same row shows the current step, progress when measurable, and the final result. **Remove** deletes the rule and its saved password. A run that already started can finish.
 
 Schedules in regular folders work with the standard Compose setup. For scheduled Cryptomator jobs, add the [TPM Compose override](docker-compose.tpm.yml). The x86_64 Linux Docker host needs TPM 2.0 at `/dev/tpmrm0` and rootful Docker with ordinary UID mapping. The override runs a small Alpine service as the device owner, so it can open a `root:root` TPM device with mode `0600`. The service communicates with Oubi through a local socket. The numeric `PUID` from the usual Compose settings determines which user can connect.
 
@@ -196,7 +196,7 @@ docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker
 
 Enter the Cryptomator password when adding a vault schedule. The TPM service generates the key automatically and protects the password with TPM 2.0, the host's machine ID, and the Secure Boot policy (PCR 7). Keep the `/data` and `oubi-tpm-keys` volumes when updating.
 
-If you switch an existing vault schedule from direct TPM access to the Alpine service, use **Replace password** once to protect the password with the new service. The rule keeps its folder, cron expression, and last run. Use the same button after moving to another host, resetting or replacing the TPM, changing the Secure Boot policy, or losing the key volume.
+If you switch an existing vault schedule from direct TPM access to the Alpine service, remove and recreate the rule with the vault password. Do the same if the saved password can no longer be decrypted after a hardware or key change.
 
 Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
 
