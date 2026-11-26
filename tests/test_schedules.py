@@ -130,6 +130,9 @@ class ScheduleTests(unittest.TestCase):
         with self.assertRaises(ScheduleError) as error:
             self.scheduler.reset(id_)
         self.assertEqual(error.exception.code, 372)
+        with self.assertRaises(ScheduleError) as error:
+            self.scheduler.edit(id_, "0 3 * * *", "images", "photos", "tag", None)
+        self.assertEqual(error.exception.code, 373)
         self.scheduler.stop_now(id_)
         self.assertFalse(self.scheduler.public()[0]["pending"])
         self.reserve.return_value = True
@@ -137,6 +140,36 @@ class ScheduleTests(unittest.TestCase):
         self.execute.assert_not_called()
         self.run_slot(now + timedelta(minutes=2))
         self.execute.assert_called_once()
+
+    def test_edit_persists_settings_and_preserves_run_history_and_vault_credentials(self):
+        with patch("oubi_schedule.vault_credential", return_value="sealed") as credential:
+            id_ = self.scheduler.add("0 2 * * *", "vault", "", "duplicates", "secret")
+            self.scheduler.run_now(id_)
+            self.wait_for_worker()
+            last_run = self.scheduler.public()[0]["last_run"]
+            credential.reset_mock()
+
+            self.scheduler.edit(id_, "0  3 * * *", "vault", "Photos/Trips", "both", "")
+            updated, = self.make_scheduler().public()
+            self.assertEqual((updated["id"], updated["cron"], updated["folder"], updated["action"]),
+                             (id_, "0 3 * * *", "Photos/Trips", "both"))
+            self.assertEqual((updated["last_run"], updated["result"]), (last_run, 337))
+            self.assertEqual(json.loads(self.path.read_text())[id_]["credential"], "sealed")
+            credential.assert_not_called()
+
+            with self.assertRaises(ScheduleError) as error:
+                self.scheduler.edit(id_, "0 3 * * *", "vault", "/Photos/Trips", "both", None)
+            self.assertEqual(error.exception.code, 325)
+            self.assertEqual(self.scheduler.public()[0], updated)
+
+            self.scheduler.edit(id_, "0 3 * * *", "images", "", "tag", None)
+            self.assertNotIn("credential", json.loads(self.path.read_text())[id_])
+            with self.assertRaises(ScheduleError) as error:
+                self.scheduler.edit(id_, "0 3 * * *", "vault", "", "tag", None)
+            self.assertEqual(error.exception.code, 165)
+            self.scheduler.edit(id_, "0 3 * * *", "vault", "", "tag", "new password")
+            credential.assert_called_once_with(self.path.parent, id_, "encrypt", "new password")
+            self.assertEqual(self.make_scheduler().public()[0]["source"], "vault")
 
     def test_stop_interrupts_only_the_active_run_before_remove(self):
         id_ = self.scheduler.add("* * * * *", "images", "", "tag", None)

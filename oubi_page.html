@@ -137,15 +137,16 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #delete-error { margin-top: 10px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 #vault-dialog .dialog-actions button { flex: 1 1 0; }
-#schedule-dialog { width: min(540px, calc(100vw - 56px)); max-height: calc(100dvh - 56px); background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-#schedule-dialog::backdrop { background: #0009; }
+.schedule-dialog { width: min(540px, calc(100vw - 56px)); max-height: calc(100dvh - 56px); background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.schedule-dialog::backdrop { background: #0009; }
 .schedule-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-#schedule-title { margin: 0; }
-#schedule-close { flex: none; width: 32px; height: 32px; padding: 0; font-size: 21px; line-height: 1; }
-#schedule-dialog form:not([hidden]), #schedule-dialog label:not([hidden]) { display: grid; gap: 6px; }
-#schedule-dialog input, #schedule-dialog select, #schedule-dialog textarea { box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
-#schedule-dialog textarea { resize: none; }
-#schedule-error, #schedule-tpm-note { margin: 0; }
+.schedule-header h2 { margin: 0; }
+.schedule-close { flex: none; width: 32px; height: 32px; padding: 0; font-size: 21px; line-height: 1; }
+#schedule-form, #schedule-form label:not([hidden]) { display: grid; gap: 6px; }
+#schedule-form input, #schedule-form select, #schedule-form textarea { box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#schedule-form textarea { resize: none; }
+#schedule-form ::placeholder { color: var(--muted); opacity: 1; }
+#schedule-error, #schedule-form-error, #schedule-tpm-note { margin: 0; }
 #schedule-rules { display: grid; gap: 8px; padding: 0; list-style: none; }
 #schedule-rules li { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 #schedule-rules p { overflow-wrap: anywhere; margin: 0 0 6px; }
@@ -566,26 +567,37 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   </div>
   <p id="delete-error" role="alert" hidden></p>
 </dialog>
-<dialog id="schedule-dialog" aria-labelledby="schedule-title">
+<dialog class="schedule-dialog" id="schedule-dialog" aria-labelledby="schedule-title">
   <div class="schedule-header">
     <h2 id="schedule-title" data-schedule-text="347"></h2>
-    <button type="button" class="secondary" id="schedule-close"><span aria-hidden="true">×</span></button>
+    <button type="button" class="secondary schedule-close" id="schedule-close"><span aria-hidden="true">×</span></button>
+  </div>
+  <button type="button" id="schedule-add" aria-haspopup="dialog"></button>
+  <ul id="schedule-rules"></ul>
+  <p id="schedule-error" role="alert" hidden></p>
+</dialog>
+<dialog class="schedule-dialog" id="schedule-editor" aria-labelledby="schedule-editor-title">
+  <div class="schedule-header">
+    <h2 id="schedule-editor-title"></h2>
+    <button type="button" class="secondary schedule-close" id="schedule-editor-close"><span aria-hidden="true">×</span></button>
   </div>
   <form id="schedule-form">
     <label><span id="schedule-workspace-text" data-schedule-text="348"></span>
-      <select id="schedule-source" name="source" aria-labelledby="schedule-workspace-text">
+      <select id="schedule-source" name="source" aria-labelledby="schedule-workspace-text" required autofocus>
+        <option value="" data-schedule-text="379" selected disabled></option>
         <option value="images" data-schedule-text="349"></option>
         <option value="vault" data-schedule-text="350" disabled>Cryptomator</option>
       </select>
     </label>
     <label><span data-schedule-text="351"></span>
-      <textarea name="folder" rows="1" maxlength="4096" autocomplete="off" data-bwignore="true"></textarea>
+      <textarea name="folder" rows="1" maxlength="4096" data-schedule-placeholder="374" autocomplete="off" data-bwignore="true"></textarea>
     </label>
     <label><span data-schedule-text="352"></span>
       <textarea name="cron" rows="1" maxlength="128" placeholder="0 3 * * *" autocomplete="off" data-bwignore="true" required></textarea>
     </label>
     <label><span id="schedule-action-text" data-schedule-text="353"></span>
-      <select name="action" aria-labelledby="schedule-action-text">
+      <select name="action" aria-labelledby="schedule-action-text" required>
+        <option value="" data-schedule-text="380" selected disabled></option>
         <option value="tag" data-schedule-text="1"></option>
         <option value="duplicates" data-schedule-text="264"></option>
         <option value="both" data-schedule-text="354"></option>
@@ -595,10 +607,9 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     <label id="schedule-password-add" hidden><span data-schedule-text="174"></span>
       <input type="password" name="password" autocomplete="current-password" disabled>
     </label>
-    <button type="submit" data-schedule-text="355"></button>
+    <p id="schedule-form-error" role="alert" hidden></p>
+    <button type="submit" id="schedule-save"></button>
   </form>
-  <ul id="schedule-rules"></ul>
-  <p id="schedule-error" role="alert" hidden></p>
 </dialog>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
@@ -712,10 +723,14 @@ const vaultError = document.getElementById("vault-error");
 const vaultUnlock = document.getElementById("vault-unlock");
 const vaultCancel = document.getElementById("vault-cancel");
 const scheduleDialog = document.getElementById("schedule-dialog");
+const scheduleEditor = document.getElementById("schedule-editor");
 const scheduleForm = document.getElementById("schedule-form");
 const scheduleSource = document.getElementById("schedule-source");
 const scheduleList = document.getElementById("schedule-rules");
 const scheduleError = document.getElementById("schedule-error");
+const scheduleFormError = document.getElementById("schedule-form-error");
+const scheduleSave = document.getElementById("schedule-save");
+const scheduleEditorClose = document.getElementById("schedule-editor-close");
 const vaultBackground = document.querySelectorAll("body > .topbar, body > .top");
 const sortTarget = document.getElementById("sort-target");
 const folderBox = document.getElementById("folders");
@@ -748,22 +763,44 @@ let scheduleData = { rules: [], vault: false, tpm: false };
 let changingSchedule = false;
 let readingSchedules = false;
 let scheduleRevision = 0;
+let editingSchedule = null;
 
-function showScheduleError(message = "") {
-  scheduleError.textContent = message;
-  scheduleError.hidden = !message;
+function showScheduleError(message = "", target = scheduleError) {
+  target.textContent = message;
+  target.hidden = !message;
 }
 
 function showSchedulePassword() {
   const encrypted = scheduleSource.value === "vault";
+  const hasPassword = encrypted && editingSchedule?.source === "vault";
   const password = scheduleForm.elements.password;
   password.disabled = !encrypted;
-  password.required = encrypted;
+  password.required = encrypted && !hasPassword;
+  password.placeholder = hasPassword ? t(381) : "";
   if (!encrypted) password.value = "";
   document.getElementById("schedule-password-add").hidden = !encrypted;
   const tpmNote = document.getElementById("schedule-tpm-note");
   tpmNote.textContent = t(scheduleData.tpm_error || 326);
   tpmNote.hidden = !encrypted || scheduleData.tpm;
+}
+
+function renderScheduleEditor() {
+  scheduleSource.querySelector('[value="vault"]').disabled = !scheduleData.vault;
+  document.getElementById("schedule-editor-title").textContent = t(editingSchedule ? 376 : 355);
+  scheduleSave.textContent = editingSchedule ? t(378) : "+ " + t(377);
+  showSchedulePassword();
+}
+
+function openScheduleEditor(rule = null) {
+  if (changingSchedule || scheduleEditor.open) return;
+  editingSchedule = rule;
+  scheduleForm.reset();
+  if (rule) {
+    for (const field of ["source", "folder", "cron", "action"]) scheduleForm.elements[field].value = rule[field];
+  }
+  showScheduleError("", scheduleFormError);
+  renderScheduleEditor();
+  scheduleEditor.showModal();
 }
 
 function renderScheduleProgress() {
@@ -784,8 +821,7 @@ function renderScheduleProgress() {
 }
 
 function renderSchedules() {
-  scheduleSource.options[1].disabled = !scheduleData.vault;
-  showSchedulePassword();
+  renderScheduleEditor();
   const date = new Intl.DateTimeFormat(lang, { dateStyle: "short", timeStyle: "short" });
   const entries = scheduleData.rules.map(rule => {
     const row = document.createElement("li");
@@ -811,7 +847,13 @@ function renderSchedules() {
     reset.onclick = () => {
       if (window.confirm(t(361))) submitSchedule({ operation: "reset", id: rule.id });
     };
-    actions.append(reset);
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "secondary";
+    edit.textContent = t(375);
+    edit.setAttribute("aria-haspopup", "dialog");
+    edit.disabled = active;
+    edit.onclick = () => openScheduleEditor(rule);
     const run = document.createElement("button");
     run.type = "button";
     run.className = active ? "danger" : "schedule-run";
@@ -819,12 +861,12 @@ function renderSchedules() {
     run.disabled = rule.stopping;
     run.onclick = async () => {
       if (changingSchedule) return;
-      run.disabled = reset.disabled = true;
+      run.disabled = reset.disabled = edit.disabled = true;
       await submitSchedule({ operation: active ? "stop" : "run", id: rule.id });
       run.disabled = rule.stopping;
-      reset.disabled = active;
+      reset.disabled = edit.disabled = active;
     };
-    actions.append(run);
+    actions.append(reset, edit, run);
     row.append(target, result, progress, actions);
     return row;
   });
@@ -856,11 +898,11 @@ async function loadSchedules() {
   }
 }
 
-async function submitSchedule(payload) {
+async function submitSchedule(payload, errorTarget = scheduleError) {
   if (changingSchedule) return false;
   changingSchedule = true;
   scheduleRevision++;
-  showScheduleError();
+  showScheduleError("", errorTarget);
   try {
     const response = await fetch("/api/schedules", {
       method: "POST",
@@ -869,12 +911,12 @@ async function submitSchedule(payload) {
     });
     const data = await response.json();
     if (!response.ok) {
-      if (scheduleDialog.open) showScheduleError(data.error || t(364));
+      if (scheduleDialog.open) showScheduleError(data.error || t(364), errorTarget);
       return false;
     }
     return true;
   } catch {
-    if (scheduleDialog.open) showScheduleError(t(364));
+    if (scheduleDialog.open) showScheduleError(t(364), errorTarget);
     return false;
   } finally {
     changingSchedule = false;
@@ -1192,10 +1234,13 @@ function showEmpty() {
 function applyI18n() {
   document.documentElement.lang = lang;
   document.getElementById("schedule-open").textContent = t(347);
-  const scheduleClose = document.getElementById("schedule-close");
-  scheduleClose.setAttribute("aria-label", t(362));
-  scheduleClose.title = t(362);
-  for (const node of scheduleDialog.querySelectorAll("[data-schedule-text]")) node.textContent = t(node.dataset.scheduleText);
+  document.getElementById("schedule-add").textContent = "+ " + t(355);
+  for (const button of document.querySelectorAll(".schedule-close")) {
+    button.setAttribute("aria-label", t(362));
+    button.title = t(362);
+  }
+  for (const node of document.querySelectorAll("[data-schedule-text]")) node.textContent = t(node.dataset.scheduleText);
+  scheduleForm.elements.folder.placeholder = t(scheduleForm.elements.folder.dataset.schedulePlaceholder);
   renderSchedules();
   document.getElementById("tag").textContent = t(1);
   for (const [id, label] of duplicateButtons) document.getElementById(id).textContent = t(label);
@@ -3329,8 +3374,13 @@ document.getElementById("schedule-open").onclick = () => {
   loadSchedules();
 };
 document.getElementById("schedule-close").onclick = () => scheduleDialog.close();
-scheduleDialog.addEventListener("close", () => {
-  scheduleForm.elements.password.value = "";
+document.getElementById("schedule-add").onclick = () => openScheduleEditor();
+scheduleEditorClose.onclick = () => scheduleEditor.close();
+scheduleEditor.addEventListener("cancel", event => {
+  if (changingSchedule) event.preventDefault();
+});
+scheduleEditor.addEventListener("close", () => {
+  if (!scheduleEditor.open) scheduleForm.elements.password.value = "";
 });
 scheduleSource.onchange = showSchedulePassword;
 scheduleForm.addEventListener("keydown", event => {
@@ -3344,7 +3394,13 @@ scheduleForm.onsubmit = async event => {
   if (changingSchedule) return;
   const fields = Object.fromEntries(new FormData(scheduleForm));
   scheduleForm.elements.password.value = "";
-  await submitSchedule({ operation: "add", ...fields });
+  const operation = editingSchedule ? "edit" : "add";
+  scheduleSave.disabled = scheduleEditorClose.disabled = true;
+  try {
+    if (await submitSchedule({ operation, id: editingSchedule?.id, ...fields }, scheduleFormError)) scheduleEditor.close();
+  } finally {
+    scheduleSave.disabled = scheduleEditorClose.disabled = false;
+  }
 };
 setInterval(loadSchedules, 1000);
 if (initialVaultFolder) selectFolderLocation(initialVaultFolder);

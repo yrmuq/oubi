@@ -183,9 +183,9 @@ If opening fails, the password dialog identifies the failed step and shows the r
 
 #### Scheduled jobs
 
-Open **Schedules** in the header, choose a workspace, and enter a folder path relative to that workspace. Leave the folder blank to process the whole workspace. The five cron fields are minute, hour, day of the month, month, and day of the week. For example, `0 3 * * *` runs daily at 03:00 in the container's `TZ` time zone. Scheduled identification uses the CPU. Duplicate search saves pairs for review in **Duplicates**. File deletion still requires a manual decision.
+Open **Schedules** in the header and click **+ Add schedule**. Enter a folder path relative to the selected workspace, such as `Photos/Trips`. Leave **Folder** blank to process the whole workspace. The five cron fields are minute, hour, day of the month, month, and day of the week. For example, `0 3 * * *` runs daily at 03:00 in the container's `TZ` time zone. Scheduled identification uses the CPU. Duplicate search saves pairs for review in **Duplicates**. File deletion still requires a manual decision.
 
-Jobs run with the container and wait for an active operation to finish. A scheduled vault job waits until the manually opened vault is locked. It then unlocks and locks the vault on its own, independently of the browser. In **Schedules**, click **Run** to start a saved rule without waiting for its cron time. The same row shows the current step, progress when measurable, and the final result. **Stop** cancels a queued run or interrupts the active one. **Remove** becomes available when the run ends and deletes the rule and its saved password.
+Jobs run with the container and wait for an active operation to finish. A scheduled vault job waits until the manually opened vault is locked. It then unlocks and locks the vault on its own, independently of the browser. In **Schedules**, click **Run** to start a saved rule without waiting for its cron time. The same row shows the current step, progress when measurable, and the final result. **Stop** cancels a queued run or interrupts the active one. Once the run ends, use **Edit** to update the rule or **Remove** to delete it and its saved password.
 
 If Compose recreates Oubi, an active run is marked **Interrupted**. The saved rule stays in the data volume and can run again from **Run** or at its next scheduled time.
 
@@ -198,7 +198,7 @@ docker compose -f docker-compose.yml -f docker-compose.cryptomator.yml -f docker
 
 Enter the Cryptomator password when adding a vault schedule. The TPM service generates the key automatically and protects the password with TPM 2.0, the host's machine ID, and the Secure Boot policy (PCR 7). Keep the `/data` and `oubi-tpm-keys` volumes when updating.
 
-If you switch an existing vault schedule from direct TPM access to the Alpine service, remove and recreate the rule with the vault password. Do the same if the saved password can no longer be decrypted after a hardware or key change.
+If you switch an existing vault schedule from direct TPM access to the Alpine service, use **Edit** to enter the vault password again. Do the same if the saved password can no longer be decrypted after a hardware or key change.
 
 Oubi mounts the unlocked vault under `/mnt/oubi-crypt` inside the container, using a path permitted by Ubuntu's standard `fusermount3` AppArmor profile. Oubi can read the tags and sort history created by earlier versions.
 

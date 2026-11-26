@@ -2800,14 +2800,17 @@ class Handler(BaseHTTPRequestHandler):
         operation = payload.get("operation")
         id_ = payload.get("id")
         try:
-            if operation == "add":
+            if operation != "add" and (not isinstance(id_, str) or re.fullmatch(r"[0-9a-f]{32}", id_) is None):
+                raise ScheduleError(332)
+            if operation in ("add", "edit"):
                 source = payload.get("source")
                 if source == "vault" and self.app.vault.path is None:
                     raise ScheduleError(345)
-                id_ = self.schedules.add(payload.get("cron"), source, payload.get("folder"),
-                                         payload.get("action"), payload.get("password"))
-            elif not isinstance(id_, str) or re.fullmatch(r"[0-9a-f]{32}", id_) is None:
-                raise ScheduleError(332)
+                fields = (payload.get("cron"), source, payload.get("folder"), payload.get("action"), payload.get("password"))
+            if operation == "add":
+                id_ = self.schedules.add(*fields)
+            elif operation == "edit":
+                self.schedules.edit(id_, *fields)
             elif operation == "reset":
                 self.schedules.reset(id_)
             elif operation == "password":
@@ -2819,7 +2822,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 raise ScheduleError(331)
         except ScheduleError as error:
-            status = 500 if error.code in (327, 329, 330) else 409 if error.code in (326, 334, 345, 365, 372) else 400
+            status = 500 if error.code in (327, 329, 330) else 409 if error.code in (326, 334, 345, 365, 372, 373) else 400
             self._error(status, error.code)
             return
         self._send({"add": 201, "run": 202}.get(operation, 200), {"id": id_})

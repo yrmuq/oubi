@@ -73,6 +73,17 @@ def schedule_folder(value):
     return relative.as_posix() if relative.parts else ""
 
 
+def schedule_parameters(cron, source, folder, action):
+    if not isinstance(cron, str) or len(cron) > 128:
+        raise ScheduleError(324)
+    cron = " ".join(cron.split())
+    parse_cron(cron)
+    folder = schedule_folder(folder)
+    if source not in ("images", "vault") or action not in SCHEDULE_ACTIONS:
+        raise ScheduleError(331)
+    return {"cron": cron, "source": source, "folder": folder, "action": action}
+
+
 def local_tpm_available():
     return os.access(TPM_DEVICE, os.R_OK | os.W_OK)
 
@@ -214,20 +225,41 @@ class Schedules:
         return vault_credential(self.path.parent.resolve(), id_, "encrypt", password)
 
     def add(self, cron, source, folder, action, password):
-        if not isinstance(cron, str) or len(cron) > 128:
-            raise ScheduleError(324)
-        cron = " ".join(cron.split())
-        parse_cron(cron)
-        folder = schedule_folder(folder)
-        if source not in ("images", "vault") or action not in SCHEDULE_ACTIONS:
-            raise ScheduleError(331)
+        rule = schedule_parameters(cron, source, folder, action)
         id_ = uuid4().hex
-        rule = {"cron": cron, "source": source, "folder": folder, "action": action}
         if source == "vault":
             rule["credential"] = self._encrypt(id_, password)
         with self.lock:
             self._save({**self.rules, id_: rule})
         return id_
+
+    def _editable_rule(self, id_):
+        rule = self.rules.get(id_)
+        if rule is None:
+            raise ScheduleError(332)
+        if id_ in self.pending or rule.get("result") == 333:
+            raise ScheduleError(373)
+        return rule
+
+    def edit(self, id_, cron, source, folder, action, password):
+        fields = schedule_parameters(cron, source, folder, action)
+        credential = None
+        if source == "vault" and password not in (None, ""):
+            with self.lock:
+                self._editable_rule(id_)
+            credential = self._encrypt(id_, password)
+        with self.lock:
+            rule = self._editable_rule(id_)
+            updated = {**rule, **fields}
+            if source == "vault":
+                if credential is not None:
+                    updated.update(credential=credential, blocked=False)
+                elif rule["source"] != "vault":
+                    raise ScheduleError(165)
+            else:
+                updated.pop("credential", None)
+                updated.pop("blocked", None)
+            self._save({**self.rules, id_: updated})
 
     def replace_password(self, id_, password):
         with self.lock:
@@ -239,7 +271,7 @@ class Schedules:
         credential = self._encrypt(id_, password)
         with self.lock:
             rule = self.rules.get(id_)
-            if rule is None:
+            if rule is None or rule["source"] != "vault":
                 raise ScheduleError(332)
             if rule.get("result") == 333:
                 raise ScheduleError(334)
