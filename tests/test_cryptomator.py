@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
 from oubi_files import VAULT_METADATA_ROOT, image_revision, sidecar_path
 from oubi_index import VaultIndex, folder_sidecars
-from oubi_web import App, Handler, Workspace, images_under, page_bytes, read_favorites, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
+from oubi_web import App, Handler, Workspace, images_under, images_with_tags, page_bytes, read_favorites, read_info, recent_tagged, sort_command, source_folders, tags_in_folders
 from sort_images import main as sort_main
 
 
@@ -503,6 +503,23 @@ with open(sys.argv[2], 'w') as out:
         reopened.close_catalog()
         app.close_catalog()
 
+    def test_vault_ignores_thumbnail_paths_in_saved_catalog(self):
+        workspace = Workspace.encrypted(self.root)
+        cache = ".oubi/thumbnails"
+        catalog = VaultIndex(workspace).initialize()
+        self.addCleanup(catalog.db.close)
+        for folder in ("", ".oubi", cache, "Album"):
+            catalog.add_folder(folder)
+        for name in (cache + "/cached.webp", "Album/original.webp"):
+            catalog.set_image(name, True, False, 0, "", "moon", {"moon": "moon"})
+        catalog.save()
+
+        app = App(workspace)
+        self.addCleanup(app.close_catalog)
+        self.assertEqual(app.gallery([""]), {"files": ["Album/original.webp"]})
+        self.assertEqual(app.catalog.children(""), ["Album"])
+        self.assertEqual(app.catalog.totals(""), (1, 1, 0))
+
     def test_folder_image_tiles_use_direct_files_and_upgrade_an_existing_vault_index(self):
         workspace = Workspace.encrypted(self.root)
         album = self.root / "Альбом"
@@ -596,11 +613,17 @@ with open(sys.argv[2], 'w') as out:
             workspace = Workspace.encrypted(self.root)
         original = self.root / "src.jpg"
         original.write_bytes(b"image")
+        thumbnail = self.root / ".oubi" / "thumbnails" / "cached.webp"
+        thumbnail.parent.mkdir()
+        thumbnail.write_bytes(b"thumbnail")
         with open(workspace.csv, "w", newline="") as handle:
             fields = ["file", "rating", "character", "copyright", "general", "style"]
             writer = csv.writer(handle)
             writer.writerow(fields)
             writer.writerow([str(original), "rating:g", "person", "series", "", ""])
+            writer.writerow([str(thumbnail), "rating:g", "", "", "preview-only", ""])
+        self.assertEqual(images_with_tags(["preview-only"], workspace.csv, self.root), [])
+        self.assertNotIn("preview-only", tags_in_folders([""], workspace.csv, self.root))
         tags = sidecar_path(original)
         tags.parent.mkdir()
         tags.write_text("rating:g, person")
@@ -614,6 +637,7 @@ with open(sys.argv[2], 'w') as out:
             self.assertIn(workspace.output, "\n".join(app.status()["log"]))
             app._run("sort", selected, "en", None, output=workspace.output)
         result, = Path(workspace.output).rglob("*.jpg")
+        self.assertEqual(list(Path(workspace.output).rglob("*.webp")), [])
         self.assertEqual(sidecar_path(result).read_text(), "rating:g, person")
         self.assertEqual(Path(workspace.sorted_list).read_text().strip(), str(original))
         self.assertEqual(app.folders()[0]["sorted"], 1)
@@ -621,6 +645,7 @@ with open(sys.argv[2], 'w') as out:
             app._run("sort", selected, "en", None, output=workspace.output)
         self.assertEqual(app.folders()[0]["total"], 0)
         self.assertEqual(app.gallery([""]), {"files": []})
+        self.assertEqual(thumbnail.read_bytes(), b"thumbnail")
 
     def test_web_reads_only_tags_subfolder_and_keeps_image_extensions_distinct(self):
         first = self.root / "a.jpg"

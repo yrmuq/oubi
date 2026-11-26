@@ -36,3 +36,27 @@ updates:
       pip:
         patterns:
           - "*"
+  - package-ecosystem: docker
+    directory: /tpm
+    schedule:
+      interval: weekly
+      day: friday
+      time: "09:00"
+      timezone: UTC
+    target-branch: deps
+    groups:
+      tpm-images:
+        patterns:
+          - "*"
+  - package-ecosystem: gomod
+    directory: /tpm
+    schedule:
+      interval: weekly
+      day: friday
+      time: "09:00"
+      timezone: UTC
+    target-branch: deps
+    groups:
+      tpm-go:
+        patterns:
+          - "*"

@@ -35,6 +35,9 @@
   --log: 200px;
   --search-bg: #fff;
   --search-edge: #c8c8c8;
+  --terminal-bg: #e8e8e8;
+  --terminal-text: #000;
+  --terminal-input: #f5f5f5;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -62,6 +65,9 @@
     --pick: #e7b341;
     --search-bg: #0c0c0c;
     --search-edge: #4a4a4a;
+    --terminal-bg: #000;
+    --terminal-text: #e6e6e6;
+    --terminal-input: #151515;
   }
 }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
@@ -82,18 +88,26 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .top.duplicates > .split-v, .top.duplicates > #right, .top.duplicates [data-block="preview"],
 .top.duplicates [data-block="filter"], .top.duplicates .block-split,
 .top.duplicates .edge-split { display: none; }
-#duplicates-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 10px; padding: 8px 0; }
+#duplicates-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 10px; padding: 8px 0; overflow: auto; }
 #duplicates-panel[hidden], #duplicate-pair[hidden], .duplicate-controls[hidden] { display: none; }
-#duplicate-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex: 1; min-height: 0; }
-.duplicate-card { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 6px; min-width: 0; margin: 0; }
-.duplicate-image { display: grid; place-items: center; min-height: 0; padding: 0; overflow: hidden; background: var(--bg); }
-.duplicate-image img { width: 100%; height: 100%; object-fit: contain; min-height: 0; }
-.duplicate-card figcaption { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
+#duplicate-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex: 1 0 auto; }
+.duplicate-card { display: grid; grid-template-rows: minmax(96px, 1fr) auto; gap: 6px; min-width: 0; margin: 0; }
+.duplicate-preview { position: relative; min-width: 0; min-height: 0; }
+.duplicate-image { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; overflow: hidden; background: var(--bg); }
+.duplicate-image img, .comparison-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+#duplicate-pair.zoomed .duplicate-image { cursor: grab; touch-action: none; }
+.duplicate-keep { position: absolute; z-index: 1; bottom: 8px; max-width: calc(100% - 16px); overflow-wrap: anywhere; }
+#duplicate-keep-left { right: 8px; }
+#duplicate-keep-right { left: 8px; }
+.duplicate-card figcaption { block-size: 2.8em; overflow: auto; scrollbar-width: thin; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; line-height: 1.4; }
 .duplicate-difference { color: #111; }
 .duplicate-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
-#duplicate-status { margin: 0; font-size: 0.9rem; }
+#duplicate-different { margin-inline-start: auto; }
+#duplicate-nav:not([hidden]) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+#duplicate-status { margin: 0; overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
+#duplicate-notice:empty { display: none; }
 @media (max-width: 650px) {
-  .top.duplicates { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: minmax(150px, 34%) minmax(0, 1fr); }
+  .top.duplicates { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: minmax(150px, 34%) minmax(180px, 1fr); }
 }
 .pane { border: 1px solid var(--line); border-bottom: 0; background: var(--pane); margin: 8px 0 0; padding: 12px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0; position: relative; }
 h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
@@ -123,6 +137,21 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 #delete-error { margin-top: 10px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 #vault-dialog .dialog-actions button { flex: 1 1 0; }
+.schedule-dialog { width: min(540px, calc(100vw - 56px)); max-height: calc(100dvh - 56px); background: var(--pane); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.schedule-dialog::backdrop { background: #0009; }
+.schedule-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.schedule-header h2 { margin: 0; }
+.schedule-close { flex: none; width: 32px; height: 32px; padding: 0; font-size: 21px; line-height: 1; }
+#schedule-form, #schedule-form label:not([hidden]) { display: grid; gap: 6px; }
+#schedule-form input, #schedule-form select, #schedule-form textarea { box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#schedule-form textarea { resize: none; }
+#schedule-form ::placeholder { color: var(--muted); opacity: 1; }
+#schedule-error, #schedule-form-error, #schedule-tpm-note { margin: 0; }
+#schedule-rules { display: grid; gap: 8px; padding: 0; list-style: none; }
+#schedule-rules li { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+#schedule-rules p { overflow-wrap: anywhere; margin: 0 0 6px; }
+.schedule-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.schedule-run { background: #f08b32; color: #17110b; }
 .folder-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 #folder-navigation { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
 #folder-up { height: 28px; padding: 0 8px; }
@@ -191,12 +220,23 @@ body.arrange .block * { pointer-events: none; }
 .block.dragging { opacity: 0.4; }
 .block.drop-before { box-shadow: inset 0 3px 0 var(--pick); }
 .block.drop-after { box-shadow: inset 0 -3px 0 var(--pick); }
-.head-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; margin-inline-start: auto; }
+.head-tools { position: relative; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; margin-inline-start: auto; }
 .head-tools select { font: inherit; color: var(--text); background: var(--pane); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
 .settings-control { position: relative; }
 .settings-menu { position: absolute; inset-inline-end: 0; top: calc(100% + 6px); z-index: 5; min-width: 140px; padding: 4px; background: var(--pane); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 3px 12px #0003; }
 .settings-menu button { display: block; width: 100%; border-radius: 5px; background: transparent; color: var(--text); text-align: start; white-space: nowrap; }
 .settings-menu button:hover, .settings-menu button:focus-visible { background: var(--btn-2); }
+#deletion-control { position: static; }
+#deletion-toggle { display: flex; align-items: center; gap: 6px; }
+.queue-badge { display: inline-grid; place-items: center; min-width: 1.45em; height: 1.45em; padding-inline: .2em; box-sizing: border-box; border-radius: 999px; background: var(--text); color: var(--pane); font-size: .82em; font-weight: 700; }
+.queue-badge[hidden] { display: none; }
+.queue-error { background: #b4232b; color: #fff; }
+#deletion-menu { width: min(430px, calc(100vw - 32px)); max-height: 55vh; overflow: auto; padding: 8px; box-sizing: border-box; }
+#deletion-menu p, #deletion-items { margin: 0; }
+#deletion-items { padding: 0; list-style: none; }
+#deletion-items li { padding: 6px; overflow-wrap: anywhere; }
+#deletion-items li + li { border-top: 1px solid var(--line); }
+#deletion-items small { display: block; color: var(--muted); }
 #arrange { width: 32px; height: 32px; padding: 0; background: var(--btn-2); color: var(--text); }
 #arrange.on { background: var(--pick); color: #111; }
 #lang { height: 32px; padding: 0 8px; background: var(--btn-2); color: var(--text); }
@@ -273,21 +313,32 @@ body.arrange .block * { pointer-events: none; }
 .genre-18, .genre-handle.genre-18 { background: #d4c6f2; }
 .genre-19, .genre-handle.genre-19 { background: #ead9a4; }
 .genre-20, .genre-handle.genre-20 { background: #c8d5dc; }
-.log { margin: 0; border: 0; flex: 1; min-height: 0; background: #000; color: #e6e6e6; overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
-.terminal-entry { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid #333; background: #000; color: #e6e6e6; font: 13px/1.35 ui-monospace, monospace; }
-.terminal-entry input { font: inherit; flex: 1; min-width: 0; padding: 3px 5px; border: 1px solid #555; border-radius: 4px; background: #151515; color: inherit; }
+.log { margin: 0; border: 0; flex: 1; min-height: 0; background: var(--terminal-bg); color: var(--terminal-text); overflow: auto; padding: 8px; white-space: pre-wrap; font: 13px/1.35 ui-monospace, monospace; }
+.terminal-entry:not([hidden]) { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid var(--line); background: var(--terminal-bg); color: var(--terminal-text); font: 13px/1.35 ui-monospace, monospace; }
+.terminal-entry input { font: inherit; flex: 1; min-width: 0; padding: 3px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--terminal-input); color: inherit; }
 .terminal-entry input:disabled { opacity: .65; }
 #zoom { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
 #zoom[hidden] { display: none; }
 #zoom-close { position: absolute; top: 12px; right: 12px; z-index: 2; font-size: 32px; line-height: 1; background: transparent; color: #fff; }
 #zoom-img { max-width: 100%; max-height: 100%; transform-origin: center center; user-select: none; }
 #zoom-img.zoomed { cursor: grab; }
+#zoom.paired #zoom-img { display: none; }
+#comparison { display: none; width: 100%; height: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; background: #393939; }
+#zoom.paired #comparison { display: grid; }
+.comparison-frame { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #000; touch-action: none; }
+#comparison.zoomed .comparison-frame { cursor: grab; }
+#comparison .dragging, #duplicate-pair.zoomed .dragging { cursor: grabbing; }
+#comparison-warning { position: absolute; inset-inline: 16px; bottom: 12px; width: fit-content; max-width: calc(100% - 32px); margin: auto; padding: 6px 10px; border-radius: 6px; background: #111d; color: white; overflow-wrap: anywhere; }
+@media (max-width: 650px) and (orientation: portrait) {
+  #comparison { grid-template-columns: 1fr; grid-template-rows: repeat(2, minmax(0, 1fr)); }
+}
 html[data-theme="light"] {
   color-scheme: light;
   --bg: #f2f2f2; --text: #1c1c1c; --muted: #5e5e5e; --pane: #fff; --line: #c6c6c6;
   --folder-tab: #d7a441; --folder: #e7b84a; --folder-front: #f6d78a; --folder-edge: #8a5a12;
   --bar: #e4e4e4; --btn-2: #dedede; --btn-2-text: #1c1c1c; --danger: #8d3a3a; --pick: #c98400;
   --search-bg: #fff; --search-edge: #c8c8c8;
+  --terminal-bg: #e8e8e8; --terminal-text: #000; --terminal-input: #f5f5f5;
 }
 html[data-theme="dark"] {
   color-scheme: dark;
@@ -296,6 +347,7 @@ html[data-theme="dark"] {
   --yellow: #f5c400; --blue: #4c86ff; --iron-a: #f4f6f8; --iron-b: #7e8b97; --iron-c: #c5ced6;
   --bar: #2a2a2a; --btn-2: #333; --btn-2-text: #fff; --danger: #6e2e2e; --pick: #e7b341;
   --search-bg: #0c0c0c; --search-edge: #4a4a4a;
+  --terminal-bg: #000; --terminal-text: #e6e6e6; --terminal-input: #151515;
 }
 </style>
 <script>
@@ -324,10 +376,21 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <select id="nvidia-card"><option value="auto">Auto</option></select>
       <button type="button" class="secondary" id="nvidia-install">Install</button>
     </div>
+    <div class="compute">
+      <button type="button" class="secondary" id="schedule-open" aria-haspopup="dialog">Schedules</button>
+    </div>
   </div>
-  <button id="app-mode" type="button" class="secondary" aria-pressed="false">Sorting</button>
+  <button id="app-mode" type="button" class="secondary" aria-pressed="false">Gallery</button>
   <div class="head-tools">
-    <button id="arrange" type="button" title="Move blocks">✎</button>
+    <div id="deletion-control" class="settings-control">
+      <button id="deletion-toggle" class="secondary" type="button" aria-expanded="false" aria-controls="deletion-menu">
+        <span id="deletion-label"></span><span id="deletion-count" class="queue-badge">0</span><span id="deletion-warning" class="queue-badge queue-error" role="img" hidden>!</span>
+      </button>
+      <div id="deletion-menu" class="settings-menu" hidden>
+        <p id="deletion-empty"></p>
+        <ul id="deletion-items"></ul>
+      </div>
+    </div>
     <div class="settings-control">
       <button id="import-settings" class="secondary" type="button" aria-expanded="false" aria-controls="settings-menu">Import</button>
       <div id="settings-menu" class="settings-menu" hidden>
@@ -345,6 +408,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
       <option value="ru" lang="ru">Русский</option>
     </select>
     <button id="theme" type="button">auto</button>
+    <button id="arrange" type="button" title="Move blocks">✎</button>
   </div>
 </header>
 <div class="top">
@@ -397,7 +461,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     </div>
     <div class="block grow" data-block="log">
       <pre id="log" class="log"></pre>
-      <form id="terminal-entry" class="terminal-entry">
+      <form id="terminal-entry" class="terminal-entry" hidden>
         <span aria-hidden="true">&gt;</span>
         <input id="terminal-input" type="text" aria-label="Terminal input" enterkeyhint="send" autocomplete="off" autocapitalize="off" spellcheck="false" disabled>
       </form>
@@ -408,11 +472,17 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     <section id="duplicates-panel" hidden>
       <div id="duplicate-pair" hidden>
         <figure class="duplicate-card">
-          <button id="duplicate-left-image" class="duplicate-image" type="button"></button>
+          <div class="duplicate-preview">
+            <button id="duplicate-left-image" class="duplicate-image" type="button"></button>
+            <button id="duplicate-keep-left" class="duplicate-keep" type="button"></button>
+          </div>
           <figcaption id="duplicate-left-info"></figcaption>
         </figure>
         <figure class="duplicate-card">
-          <button id="duplicate-right-image" class="duplicate-image" type="button"></button>
+          <div class="duplicate-preview">
+            <button id="duplicate-right-image" class="duplicate-image" type="button"></button>
+            <button id="duplicate-keep-right" class="duplicate-keep" type="button"></button>
+          </div>
           <figcaption id="duplicate-right-info"></figcaption>
         </figure>
       </div>
@@ -422,9 +492,8 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
         <button id="duplicate-next" class="secondary" type="button">❯</button>
       </div>
       <div class="duplicate-controls" id="duplicate-actions" hidden>
-        <button id="duplicate-keep-left" type="button"></button>
+        <button id="duplicate-delete-both" class="danger" type="button"></button>
         <button id="duplicate-different" class="secondary" type="button"></button>
-        <button id="duplicate-keep-right" type="button"></button>
       </div>
       <p id="duplicate-notice" role="status"></p>
     </section>
@@ -498,9 +567,58 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
   </div>
   <p id="delete-error" role="alert" hidden></p>
 </dialog>
+<dialog class="schedule-dialog" id="schedule-dialog" aria-labelledby="schedule-title">
+  <div class="schedule-header">
+    <h2 id="schedule-title" data-schedule-text="347"></h2>
+    <button type="button" class="secondary schedule-close" id="schedule-close"><span aria-hidden="true">×</span></button>
+  </div>
+  <button type="button" id="schedule-add" aria-haspopup="dialog"></button>
+  <ul id="schedule-rules"></ul>
+  <p id="schedule-error" role="alert" hidden></p>
+</dialog>
+<dialog class="schedule-dialog" id="schedule-editor" aria-labelledby="schedule-editor-title">
+  <div class="schedule-header">
+    <h2 id="schedule-editor-title"></h2>
+    <button type="button" class="secondary schedule-close" id="schedule-editor-close"><span aria-hidden="true">×</span></button>
+  </div>
+  <form id="schedule-form">
+    <label><span id="schedule-workspace-text" data-schedule-text="348"></span>
+      <select id="schedule-source" name="source" aria-labelledby="schedule-workspace-text" required autofocus>
+        <option value="" data-schedule-text="379" selected disabled></option>
+        <option value="images" data-schedule-text="349"></option>
+        <option value="vault" data-schedule-text="350" disabled>Cryptomator</option>
+      </select>
+    </label>
+    <label><span data-schedule-text="351"></span>
+      <textarea name="folder" rows="1" maxlength="4096" data-schedule-placeholder="374" autocomplete="off" data-bwignore="true"></textarea>
+    </label>
+    <label><span data-schedule-text="352"></span>
+      <textarea name="cron" rows="1" maxlength="128" placeholder="0 3 * * *" autocomplete="off" data-bwignore="true" required></textarea>
+    </label>
+    <label><span id="schedule-action-text" data-schedule-text="353"></span>
+      <select name="action" aria-labelledby="schedule-action-text" required>
+        <option value="" data-schedule-text="380" selected disabled></option>
+        <option value="tag" data-schedule-text="1"></option>
+        <option value="duplicates" data-schedule-text="264"></option>
+        <option value="both" data-schedule-text="354"></option>
+      </select>
+    </label>
+    <p id="schedule-tpm-note" hidden></p>
+    <label id="schedule-password-add" hidden><span data-schedule-text="174"></span>
+      <input type="password" name="password" autocomplete="current-password" disabled>
+    </label>
+    <p id="schedule-form-error" role="alert" hidden></p>
+    <button type="submit" id="schedule-save"></button>
+  </form>
+</dialog>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
   <img id="zoom-img" alt="">
+  <div id="comparison" role="group">
+    <div class="comparison-frame"></div>
+    <div class="comparison-frame"></div>
+  </div>
+  <p id="comparison-warning" role="status" hidden></p>
 </div>
 <script>
 const initialVaultFolder = __OUBI_VAULT_FOLDER__;
@@ -530,17 +648,35 @@ let tagText = "";
 let hasFile = false;
 let pinned = [];
 let vocab = [];
-const appModes = ["sorting", "gallery", "duplicates"];
+const appModes = ["gallery", "duplicates", "sorting"];
 const savedMode = readPreference("oubi.mode");
-let appMode = appModes.includes(savedMode) ? savedMode : "sorting";
+let appMode = appModes.includes(savedMode) ? savedMode : appModes[0];
 let regularLayout;
 let duplicatePage = null;
 let duplicateRequest = 0;
 let duplicateBusy = false;
+const duplicateView = { scale: 1, x: 0.5, y: 0.5 };
+let duplicateViewKey = "";
+const duplicateFrames = [...document.querySelectorAll(".duplicate-image")];
+const zoom = document.getElementById("zoom");
+const zoomImg = document.getElementById("zoom-img");
+const comparison = document.getElementById("comparison");
+const comparisonFrames = [...comparison.children];
+const comparisonWarning = document.getElementById("comparison-warning");
+const view = { scale: 1, x: 0, y: 0, drag: null };
+let comparisonVersion = 0;
+let comparisonTrigger = null;
+let comparisonDrag = null;
+let draggedDuplicateFrame = null;
 let duplicateSearching = false;
 let duplicateError = "";
 const duplicatePreviews = new Map();
-const duplicateButtons = ["duplicate-keep-left", "duplicate-different", "duplicate-keep-right"];
+const duplicateButtons = [
+  ["duplicate-keep-left", 266, "left"],
+  ["duplicate-delete-both", 302, "both"],
+  ["duplicate-different", 267, "different"],
+  ["duplicate-keep-right", 268, "right"],
+];
 let manualDevice = null;
 let preferredGpu = readPreference("oubi.gpu");
 let favorites = { character: [], event: [] };
@@ -554,6 +690,11 @@ const modeToggle = document.getElementById("app-mode");
 const importSettings = document.getElementById("import-settings");
 const exportSettings = document.getElementById("export-settings");
 const settingsMenu = document.getElementById("settings-menu");
+const deletionToggle = document.getElementById("deletion-toggle");
+const deletionMenu = document.getElementById("deletion-menu");
+const deletionItems = document.getElementById("deletion-items");
+const deletionEmpty = document.getElementById("deletion-empty");
+let deletionStatus = null;
 const settingsFile = document.getElementById("settings-file");
 let settingsTrigger = null;
 let settingsImport = null;
@@ -561,6 +702,7 @@ const rocmArch = document.getElementById("rocm-arch");
 const rocmInstall = document.getElementById("rocm-install");
 const nvidiaCard = document.getElementById("nvidia-card");
 const nvidiaInstall = document.getElementById("nvidia-install");
+const terminalEntry = document.getElementById("terminal-entry");
 const terminalInput = document.getElementById("terminal-input");
 const deleteImage = document.getElementById("delete-image");
 const imageActions = document.getElementById("image-actions");
@@ -580,6 +722,15 @@ const vaultPassword = document.getElementById("vault-password");
 const vaultError = document.getElementById("vault-error");
 const vaultUnlock = document.getElementById("vault-unlock");
 const vaultCancel = document.getElementById("vault-cancel");
+const scheduleDialog = document.getElementById("schedule-dialog");
+const scheduleEditor = document.getElementById("schedule-editor");
+const scheduleForm = document.getElementById("schedule-form");
+const scheduleSource = document.getElementById("schedule-source");
+const scheduleList = document.getElementById("schedule-rules");
+const scheduleError = document.getElementById("schedule-error");
+const scheduleFormError = document.getElementById("schedule-form-error");
+const scheduleSave = document.getElementById("schedule-save");
+const scheduleEditorClose = document.getElementById("schedule-editor-close");
 const vaultBackground = document.querySelectorAll("body > .topbar, body > .top");
 const sortTarget = document.getElementById("sort-target");
 const folderBox = document.getElementById("folders");
@@ -608,6 +759,170 @@ let gpuProgress = null;
 let sendingGpuRequest = false;
 let statusRequest = 0;
 let statusShown = 0;
+let scheduleData = { rules: [], vault: false, tpm: false };
+let changingSchedule = false;
+let readingSchedules = false;
+let scheduleRevision = 0;
+let editingSchedule = null;
+
+function showScheduleError(message = "", target = scheduleError) {
+  target.textContent = message;
+  target.hidden = !message;
+}
+
+function showSchedulePassword() {
+  const encrypted = scheduleSource.value === "vault";
+  const hasPassword = encrypted && editingSchedule?.source === "vault";
+  const password = scheduleForm.elements.password;
+  password.disabled = !encrypted;
+  password.required = encrypted && !hasPassword;
+  password.placeholder = hasPassword ? t(381) : "";
+  if (!encrypted) password.value = "";
+  document.getElementById("schedule-password-add").hidden = !encrypted;
+  const tpmNote = document.getElementById("schedule-tpm-note");
+  tpmNote.textContent = t(scheduleData.tpm_error || 326);
+  tpmNote.hidden = !encrypted || scheduleData.tpm;
+}
+
+function renderScheduleEditor() {
+  scheduleSource.querySelector('[value="vault"]').disabled = !scheduleData.vault;
+  document.getElementById("schedule-editor-title").textContent = t(editingSchedule ? 376 : 355);
+  scheduleSave.textContent = editingSchedule ? t(378) : "+ " + t(377);
+  showSchedulePassword();
+}
+
+function openScheduleEditor(rule = null) {
+  if (changingSchedule || scheduleEditor.open) return;
+  editingSchedule = rule;
+  scheduleForm.reset();
+  if (rule) {
+    for (const field of ["source", "folder", "cron", "action"]) scheduleForm.elements[field].value = rule[field];
+  }
+  showScheduleError("", scheduleFormError);
+  renderScheduleEditor();
+  scheduleEditor.showModal();
+}
+
+function renderScheduleProgress() {
+  const number = new Intl.NumberFormat(lang);
+  scheduleData.rules.forEach((rule, index) => {
+    const line = scheduleList.children[index].querySelector(".schedule-progress");
+    const progress = rule.progress;
+    const scan = progress?.tag_scan ? tagScanDisplay(progress.tag_scan) : null;
+    const percent = scan ? scan.percent : progress?.percent;
+    const text = progress ? [
+      scan?.step || (progress.stage ? t(progress.stage) : progress.step),
+      !scan && Number.isFinite(percent) && !/%/.test(progress.detail) ? number.format(percent) + "%" : "",
+      scan?.detail || progress.detail,
+    ].filter(Boolean).join(" · ") : "";
+    if (line.textContent !== text) line.textContent = text;
+    line.hidden = !text;
+  });
+}
+
+function renderSchedules() {
+  renderScheduleEditor();
+  const date = new Intl.DateTimeFormat(lang, { dateStyle: "short", timeStyle: "short" });
+  const entries = scheduleData.rules.map(rule => {
+    const row = document.createElement("li");
+    const target = document.createElement("p");
+    const result = document.createElement("p");
+    const progress = document.createElement("p");
+    progress.className = "schedule-progress";
+    const actions = document.createElement("div");
+    actions.className = "schedule-actions";
+    const action = { tag: 1, duplicates: 264, both: 354 }[rule.action];
+    target.textContent = [t(rule.source === "vault" ? 350 : 349), "/" + rule.folder, rule.cron, t(action)].join(" · ");
+    result.textContent = rule.last_run
+      ? [t(357), date.format(rule.last_run * 1000), rule.result === 333 ? "" : t(rule.result)].filter(Boolean).join(" · ")
+      : t(358);
+    if (rule.pending) result.textContent += " · " + t(359);
+    const active = rule.pending || rule.result === 333;
+    if (rule.stopping) result.textContent += " · " + t(371);
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "danger";
+    reset.textContent = t(356);
+    reset.disabled = active;
+    reset.onclick = () => {
+      if (window.confirm(t(361))) submitSchedule({ operation: "reset", id: rule.id });
+    };
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "secondary";
+    edit.textContent = t(375);
+    edit.setAttribute("aria-haspopup", "dialog");
+    edit.disabled = active;
+    edit.onclick = () => openScheduleEditor(rule);
+    const run = document.createElement("button");
+    run.type = "button";
+    run.className = active ? "danger" : "schedule-run";
+    run.textContent = t(active ? 4 : 367);
+    run.disabled = rule.stopping;
+    run.onclick = async () => {
+      if (changingSchedule) return;
+      run.disabled = reset.disabled = edit.disabled = true;
+      await submitSchedule({ operation: active ? "stop" : "run", id: rule.id });
+      run.disabled = rule.stopping;
+      reset.disabled = edit.disabled = active;
+    };
+    actions.append(reset, edit, run);
+    row.append(target, result, progress, actions);
+    return row;
+  });
+  scheduleList.replaceChildren(...entries);
+  renderScheduleProgress();
+}
+
+async function loadSchedules() {
+  if (!scheduleDialog.open || changingSchedule || readingSchedules) return;
+  readingSchedules = true;
+  const revision = scheduleRevision;
+  try {
+    const response = await fetch("/api/schedules");
+    const data = await response.json();
+    if (revision !== scheduleRevision || !scheduleDialog.open) return;
+    if (!response.ok) {
+      if (scheduleError.hidden) showScheduleError(data.error || t(363));
+      return;
+    }
+    const sameControls = JSON.stringify(data, (key, value) => key === "progress" ? undefined : value) ===
+      JSON.stringify(scheduleData, (key, value) => key === "progress" ? undefined : value);
+    scheduleData = data;
+    if (sameControls) renderScheduleProgress();
+    else renderSchedules();
+  } catch {
+    if (scheduleDialog.open && revision === scheduleRevision && scheduleError.hidden) showScheduleError(t(363));
+  } finally {
+    readingSchedules = false;
+  }
+}
+
+async function submitSchedule(payload, errorTarget = scheduleError) {
+  if (changingSchedule) return false;
+  changingSchedule = true;
+  scheduleRevision++;
+  showScheduleError("", errorTarget);
+  try {
+    const response = await fetch("/api/schedules", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      if (scheduleDialog.open) showScheduleError(data.error || t(364), errorTarget);
+      return false;
+    }
+    return true;
+  } catch {
+    if (scheduleDialog.open) showScheduleError(t(364), errorTarget);
+    return false;
+  } finally {
+    changingSchedule = false;
+    loadSchedules();
+  }
+}
 
 function fileName(path) {
   const parts = String(path || "").split("/");
@@ -687,7 +1002,7 @@ function duplicatePreview(file) {
   const image = new Image();
   image.alt = file.path;
   image.dataset.original = workspaceUrl("/api/file?display=1&" + query);
-  image.onload = updateDuplicateControls;
+  image.onload = () => { updateDuplicateControls(); paintDuplicateView(); };
   image.onerror = updateDuplicateControls;
   image.src = url;
   duplicatePreviews.set(url, image);
@@ -697,7 +1012,7 @@ function duplicatePreview(file) {
 function updateDuplicateControls() {
   const images = [...document.querySelectorAll("#duplicate-pair img")];
   const loaded = images.length === 2 && images.every(image => image.complete && image.naturalWidth);
-  for (const id of duplicateButtons) {
+  for (const [id] of duplicateButtons) {
     document.getElementById(id).disabled = !duplicatePage?.pair || wasBusy || duplicateBusy || !loaded;
   }
   const failed = images.find(image => image.complete && !image.naturalWidth);
@@ -731,11 +1046,19 @@ function renderDuplicateCaption(info, file, other) {
     mark.textContent = value;
     info.append(mark);
   });
+  info.title = info.textContent;
 }
 
 function renderDuplicatePage() {
   const page = appMode === "duplicates" ? duplicatePage : null;
   const pair = page?.pair;
+  const viewKey = pair ? JSON.stringify(pair.images.map(file => [file.path, file.live_revision])) : "";
+  if (viewKey !== duplicateViewKey) {
+    duplicateViewKey = viewKey;
+    Object.assign(duplicateView, { scale: 1, x: 0.5, y: 0.5 });
+    if (comparisonDrag) endDuplicateDrag(comparisonDrag.frame);
+    if (zoom.classList.contains("paired")) closeZoom();
+  }
   const keep = new Set();
   for (const [index, side] of ["left", "right"].entries()) {
     const button = document.getElementById("duplicate-" + side + "-image");
@@ -744,13 +1067,14 @@ function renderDuplicatePage() {
     if (!pair) {
       button.onclick = null;
       info.textContent = "";
+      info.removeAttribute("title");
       continue;
     }
     const file = pair.images[index];
     const [url, image] = duplicatePreview(file);
     keep.add(url);
     button.appendChild(image);
-    button.onclick = () => { if (image.naturalWidth) { showZoomImage(image); zoom.hidden = false; } };
+    button.onclick = showDuplicateZoom;
     renderDuplicateCaption(info, file, pair.images[1 - index]);
   }
   for (const file of page?.next?.images || []) keep.add(duplicatePreview(file)[0]);
@@ -762,11 +1086,13 @@ function renderDuplicatePage() {
   document.getElementById("duplicate-actions").hidden = !pair;
   document.getElementById("duplicate-prev").disabled = !pair || duplicateBusy || page.index === 0;
   document.getElementById("duplicate-next").disabled = !pair || duplicateBusy || page.index + 1 >= page.count;
-  document.getElementById("duplicate-status").textContent = pair ?
+  const status = document.getElementById("duplicate-status");
+  status.title = status.textContent = pair ?
     t(271).replace("{current}", page.index + 1).replace("{total}", page.count).replace("{distance}", pair.distance) : "";
   document.getElementById("duplicate-notice").textContent =
     duplicateError || (duplicateSearching ? t(299) : pair ? "" : t(page?.searched ? 269 : 270));
   updateDuplicateControls();
+  paintDuplicateView();
 }
 
 async function loadDuplicatePage(index = duplicatePage?.index || 0) {
@@ -810,13 +1136,9 @@ async function reviewDuplicate(decision) {
     if (scope !== vaultScope) return;
     if (response.ok) {
       await loadDuplicatePage(index);
-      if (decision !== "different") {
-        workspaceMutation++;
-        loadFolders();
-      }
-      if (data.warning) showNotice(data.warning);
+      tick().catch(() => {});
     } else {
-      if (response.status === 409) await loadDuplicatePage(index);
+      if (response.status === 409 || decision === "both") await loadDuplicatePage(index);
       duplicateError = data.error || "[289] " + t(289);
     }
   } catch {
@@ -824,6 +1146,63 @@ async function reviewDuplicate(decision) {
   } finally {
     duplicateBusy = false;
     renderDuplicatePage();
+  }
+}
+
+function renderDeletionQueue() {
+  const items = deletionStatus?.items || [];
+  const count = items.filter(item => item.state === "waiting" || item.state === "running").length;
+  const countBadge = document.getElementById("deletion-count");
+  const warningBadge = document.getElementById("deletion-warning");
+  document.getElementById("deletion-label").textContent = t(307);
+  countBadge.textContent = new Intl.NumberFormat(lang).format(count);
+  warningBadge.hidden = !items.some(item => item.state === "failed" || item.state === "warning");
+  warningBadge.title = t(370);
+  warningBadge.setAttribute("aria-label", t(370));
+  if (deletionMenu.hidden) return;
+  deletionEmpty.hidden = items.length > 0;
+  deletionEmpty.textContent = t(308);
+  deletionItems.replaceChildren();
+  for (const item of items) {
+    const entry = document.createElement("li");
+    const state = document.createElement("small");
+    state.textContent = t({ waiting: 309, running: 310, failed: 311, warning: 312 }[item.state]);
+    entry.append(state);
+    for (const file of item.files) {
+      const path = document.createElement("div");
+      path.textContent = file;
+      entry.append(path);
+    }
+    if (item.message) {
+      const message = document.createElement("small");
+      message.textContent = item.message;
+      entry.append(message);
+    }
+    deletionItems.append(entry);
+  }
+}
+
+function updateDeletionQueue(data) {
+  if (!data || deletionStatus?.version === data.version) return;
+  const previous = deletionStatus;
+  deletionStatus = data;
+  renderDeletionQueue();
+  const newlyQueued = data.items.filter(item => item.state === "waiting" || item.state === "running")
+    .flatMap(item => item.files);
+  const oldPending = new Set((previous?.items || []).filter(item => item.state === "waiting" || item.state === "running")
+    .flatMap(item => item.files));
+  const added = new Set(newlyQueued.filter(path => !oldPending.has(path)));
+  const removed = (previous?.removed || 0) !== data.removed || (previous?.busy && !data.busy && data.removed);
+  const failed = (previous?.failed || 0) !== data.failed;
+  if (added.size || removed || failed) {
+    workspaceMutation++;
+    if (added.size) discardQueuedImages(added);
+    loadFolders();
+    if (appMode !== "duplicates" && !workPreview) loadGallery();
+  }
+  if (appMode === "duplicates" && !duplicateBusy &&
+      (failed || duplicatePage?.pair?.images.some(image => added.has(image.path)))) {
+    loadDuplicatePage();
   }
 }
 
@@ -854,8 +1233,17 @@ function showEmpty() {
 
 function applyI18n() {
   document.documentElement.lang = lang;
+  document.getElementById("schedule-open").textContent = t(347);
+  document.getElementById("schedule-add").textContent = "+ " + t(355);
+  for (const button of document.querySelectorAll(".schedule-close")) {
+    button.setAttribute("aria-label", t(362));
+    button.title = t(362);
+  }
+  for (const node of document.querySelectorAll("[data-schedule-text]")) node.textContent = t(node.dataset.scheduleText);
+  scheduleForm.elements.folder.placeholder = t(scheduleForm.elements.folder.dataset.schedulePlaceholder);
+  renderSchedules();
   document.getElementById("tag").textContent = t(1);
-  duplicateButtons.forEach((id, index) => { document.getElementById(id).textContent = t(266 + index); });
+  for (const [id, label] of duplicateButtons) document.getElementById(id).textContent = t(label);
   document.getElementById("duplicate-prev").setAttribute("aria-label", t(300));
   document.getElementById("duplicate-next").setAttribute("aria-label", t(301));
   document.getElementById("sort").textContent = t(2);
@@ -879,6 +1267,7 @@ function applyI18n() {
   document.getElementById("theme").textContent = theme === "light" ? t(8) : theme === "dark" ? t(9) : t(10);
   document.getElementById("arrange").title = t(20);
   importSettings.textContent = t(223);
+  renderDeletionQueue();
   exportSettings.textContent = t(224);
   settingsMenu.querySelector('[data-settings="favorites"]').textContent = t(212);
   settingsMenu.querySelector('[data-settings="layout"]').textContent = t(225);
@@ -903,6 +1292,7 @@ function applyI18n() {
   for (const [id, key] of [["prev", 94], ["next", 95], ["filter-query", 96], ["zoom-close", 97]]) {
     document.getElementById(id).setAttribute("aria-label", t(key));
   }
+  document.getElementById("comparison").setAttribute("aria-label", t(319));
   showRocm();
   showNvidia();
   if (!hasFile && !previewRequest) showEmpty();
@@ -1084,13 +1474,13 @@ function workspaceUrl(path, scope = vaultScope) {
   return path + (path.includes("?") ? "&" : "?") + "scope=" + encodeURIComponent(scope);
 }
 
-async function workspaceData(path, signal) {
+async function workspaceData(path, signal, { trackMutations = true } = {}) {
   const scope = vaultScope;
   const mutation = workspaceMutation;
   const response = await fetch(workspaceUrl(path, scope), { signal });
   if (!response.ok) return null;
   const data = await response.json();
-  return scope === vaultScope && mutation === workspaceMutation ? data : null;
+  return scope === vaultScope && (!trackMutations || mutation === workspaceMutation) ? data : null;
 }
 
 function renderVault() {
@@ -1151,6 +1541,9 @@ function useVault(scope, folder) {
   if (scope === vaultScope) return;
   if (deleteDialog.open && !deleteBusy) deleteDialog.close();
   vaultScope = scope;
+  deletionStatus = null;
+  closeDeletionMenu();
+  renderDeletionQueue();
   duplicatePage = null;
   duplicateRequest++;
   duplicateError = "";
@@ -1570,7 +1963,8 @@ async function showImage(root, path) {
   document.getElementById("tags").replaceChildren();
   tagText = "";
   if (root !== "images") return;
-  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(path), request.controller.signal)
+  const data = await workspaceData("/api/tags?path=" + encodeURIComponent(path), request.controller.signal,
+    { trackMutations: false })
     .catch(() => null);
   if (!data || previewRequest !== request) return;
   document.getElementById("who").textContent = (data.character || "").split("_").join(" ");
@@ -1615,7 +2009,7 @@ async function openTileDeletion() {
   imageActions.hidePopover();
   if (!target || !openDeleteDialog(target)) return;
   const data = await workspaceData("/api/tags?path=" + encodeURIComponent(target.path),
-    AbortSignal.timeout(galleryTimeoutMs)).catch(() => null);
+    AbortSignal.timeout(galleryTimeoutMs), { trackMutations: false }).catch(() => null);
   if (deleteTarget !== target || !deleteDialog.open) return;
   target.revision = data?.revision;
   if (!target.revision) {
@@ -1625,16 +2019,17 @@ async function openTileDeletion() {
   renderDeleteControls();
 }
 
-function discardDeletedImage(path) {
+function discardQueuedImages(paths) {
   const activePath = reel[reelAt];
-  const index = reel.indexOf(path);
-  reel = reel.filter(item => item !== path);
-  if (workFile === path) workFile = "";
-  reelAt = activePath === path ? Math.min(index, reel.length - 1) : reel.indexOf(activePath);
+  const nextIndex = reel.slice(0, Math.max(0, reelAt)).filter(path => !paths.has(path)).length;
+  reel = reel.filter(path => !paths.has(path));
+  if (paths.has(workFile)) workFile = "";
+  reelAt = paths.has(activePath) ? Math.min(nextIndex, reel.length - 1) : reel.indexOf(activePath);
   if (!reel.length) galleryMessage = 195;
-  if (folderPreview === path) folderPreview = "";
-  const key = "images:" + path;
-  if (shown === key || previewRequest?.key === key) showEmpty();
+  if (paths.has(folderPreview)) folderPreview = "";
+  takeFolderFiles(folderFiles.filter(file => !paths.has(file.path)));
+  if (appMode === "duplicates") return;
+  if ([...paths].some(path => shown === "images:" + path || previewRequest?.key === "images:" + path)) showEmpty();
   if (workPreview) renderWorkPreview();
   else renderGallery();
 }
@@ -1660,11 +2055,9 @@ async function confirmDelete() {
       workspaceMutation++;
       galleryRequest++;
       statusShown = ++statusRequest;
-      discardDeletedImage(target.path);
-      takeFolderFiles(folderFiles.filter(file => file.path !== target.path));
-      showNotice(data.warning || "");
+      discardQueuedImages(new Set([target.path]));
+      showNotice(t(323));
       vocab = [];
-      if (vaultScope) loadFolders();
       tick();
     }
   } catch {
@@ -1732,6 +2125,7 @@ async function tick() {
   statusShown = request;
   vaultToggle.hidden = !data.vault_enabled;
   useVault(data.vault_scope || "", data.vault_folder);
+  updateDeletionQueue(data.deletions);
   rocmState = data.rocm;
   nvidiaState = data.nvidia;
   if (gpuPrompt?.id !== data.gpu_prompt?.id) {
@@ -1767,7 +2161,7 @@ async function tick() {
   const ready = data.model === "ready";
   const picked = selected.size > 0;
   for (const id of ["tag", "sort", "plan"]) {
-    document.getElementById(id).disabled = busy || !picked ||
+    document.getElementById(id).disabled = busy || data.deletions?.busy || !picked ||
       (id === "tag" && appMode !== "duplicates" && (!ready || !readyDevices[deviceInput.value]));
   }
   document.getElementById("stop").disabled = !busy;
@@ -1783,7 +2177,7 @@ async function tick() {
   } else if (jobFinished && !workPreview && (!jobChanged || appMode === "gallery")) loadGallery();
   else if ((galleryMessage === 204 && (!scan || scan.stage === "done")) ||
            (scanFinished && vaultScope && selected.size && !pinned.length)) loadGallery();
-  recountFolders.disabled = recountPending || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
+  recountFolders.disabled = recountPending || data.deletions?.busy || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
   wasBusy = !!busy;
   workFile = data.preview_file || "";
   if (data.phase !== "duplicates" && jobChanged && (busy || lastJob !== null)) setPreviewMode(true);
@@ -1795,8 +2189,9 @@ async function tick() {
 }
 
 function showTerminalInput() {
+  terminalEntry.hidden = !gpuPrompt;
   terminalInput.disabled = !gpuPrompt || sendingGpuRequest;
-  terminalInput.placeholder = t(gpuPrompt ? 159 : gpuProgress ? 162 : 160);
+  terminalInput.placeholder = t(159);
 }
 
 function selectedRocmArch() {
@@ -1922,7 +2317,7 @@ nvidiaInstall.onclick = async () => {
   if (await sendGpuRequest("/api/nvidia", { gpu, action }, action === "uninstall" ? 236 : 133)) terminalInput.focus();
 };
 terminalInput.oninput = () => terminalInput.setCustomValidity("");
-document.getElementById("terminal-entry").onsubmit = async event => {
+terminalEntry.onsubmit = async event => {
   event.preventDefault();
   if (!gpuPrompt || sendingGpuRequest) return;
   const answer = terminalInput.value.trim().toLowerCase();
@@ -2244,11 +2639,31 @@ async function exportSettingsFile(type, scope) {
 }
 
 importSettings.onclick = exportSettings.onclick = toggleSettingsMenu;
+function closeDeletionMenu(restoreFocus = false) {
+  if (deletionMenu.hidden) return;
+  deletionMenu.hidden = true;
+  deletionItems.replaceChildren();
+  deletionToggle.setAttribute("aria-expanded", "false");
+  if (restoreFocus) deletionToggle.focus();
+}
+deletionToggle.onclick = () => {
+  if (!deletionMenu.hidden) {
+    closeDeletionMenu();
+    return;
+  }
+  closeSettingsMenu();
+  deletionMenu.hidden = false;
+  deletionToggle.setAttribute("aria-expanded", "true");
+  renderDeletionQueue();
+  tick().catch(() => {});
+};
 document.addEventListener("click", event => {
   if (!event.target.closest(".settings-control")) closeSettingsMenu();
+  if (!event.target.closest("#deletion-control")) closeDeletionMenu();
 });
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && settingsTrigger) closeSettingsMenu(true);
+  if (event.key === "Escape") closeDeletionMenu(true);
 });
 settingsMenu.onclick = event => {
   const type = event.target.dataset.settings;
@@ -2311,9 +2726,9 @@ document.getElementById("theme").onclick = () => {
 for (const id of ["tag", "sort", "plan"]) {
   document.getElementById(id).onclick = () => start(id === "tag" && appMode === "duplicates" ? "duplicates" : id);
 }
-duplicateButtons.forEach((id, index) => {
-  document.getElementById(id).onclick = () => reviewDuplicate(["left", "different", "right"][index]);
-});
+for (const [id, , decision] of duplicateButtons) {
+  document.getElementById(id).onclick = () => reviewDuplicate(decision);
+}
 document.getElementById("duplicate-prev").onclick = () => loadDuplicatePage(duplicatePage.index - 1);
 document.getElementById("duplicate-next").onclick = () => loadDuplicatePage(duplicatePage.index + 1);
 if (!Array.isArray(genres) || !genres.length) genres = [""];
@@ -2767,9 +3182,6 @@ document.getElementById("prev").onclick = () => showAt(reelAt - 1);
 document.getElementById("next").onclick = () => showAt(reelAt + 1);
 document.getElementById("split-left").onpointerdown = (event) => dragSplit("left", event);
 document.getElementById("split-mid").onpointerdown = (event) => dragSplit("mid", event);
-const zoom = document.getElementById("zoom");
-const zoomImg = document.getElementById("zoom-img");
-const view = { scale: 1, x: 0, y: 0, drag: null };
 function paintZoom() {
   zoomImg.style.transform = "translate(" + view.x + "px, " + view.y + "px) scale(" + view.scale + ")";
   zoomImg.classList.toggle("zoomed", view.scale > 1);
@@ -2777,7 +3189,139 @@ function paintZoom() {
 function closeZoom() {
   zoom.hidden = true;
   view.drag = null;
+  if (zoom.classList.contains("paired")) {
+    zoom.classList.remove("paired");
+    comparisonVersion++;
+    if (comparisonDrag) endDuplicateDrag(comparisonDrag.frame);
+    for (const frame of comparisonFrames) frame.replaceChildren();
+    comparisonWarning.hidden = true;
+    comparisonWarning.textContent = "";
+    if (comparisonTrigger && appMode === "duplicates") comparisonTrigger.focus({ preventScroll: true });
+    comparisonTrigger = null;
+  }
 }
+
+function fittedDuplicate(frame) {
+  const image = frame.firstElementChild;
+  if (!image?.naturalWidth || !image.naturalHeight || !frame.clientWidth || !frame.clientHeight) return null;
+  const fit = Math.min(frame.clientWidth / image.naturalWidth, frame.clientHeight / image.naturalHeight);
+  return { image, width: fit * image.naturalWidth, height: fit * image.naturalHeight };
+}
+
+function paintDuplicateView() {
+  const { scale, x, y } = duplicateView;
+  for (const frame of [...duplicateFrames, ...comparisonFrames]) {
+    const fitted = fittedDuplicate(frame);
+    if (!fitted) continue;
+    const dx = (0.5 - x) * fitted.width * scale;
+    const dy = (0.5 - y) * fitted.height * scale;
+    fitted.image.style.transform = scale === 1 ? "" : `translate(${dx}px, ${dy}px) scale(${scale})`;
+  }
+  comparison.classList.toggle("zoomed", scale > 1);
+  document.getElementById("duplicate-pair").classList.toggle("zoomed", scale > 1);
+}
+
+function moveDuplicateView(x, y) {
+  duplicateView.x = Math.max(0, Math.min(1, x));
+  duplicateView.y = Math.max(0, Math.min(1, y));
+  paintDuplicateView();
+}
+
+function zoomDuplicateAt(event) {
+  const frame = event.currentTarget;
+  const fitted = fittedDuplicate(frame);
+  if (!fitted || !event.deltaY) return;
+  event.preventDefault();
+  const units = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? frame.clientHeight : 1;
+  const delta = Math.max(-120, Math.min(120, event.deltaY * units));
+  const prior = duplicateView.scale;
+  const scale = Math.max(1, Math.min(8, prior * Math.exp(-delta * 0.002)));
+  if (scale === prior) return;
+  duplicateView.scale = scale;
+  if (scale === 1) {
+    moveDuplicateView(0.5, 0.5);
+    return;
+  }
+  const rect = frame.getBoundingClientRect();
+  const dx = (event.clientX - rect.left - rect.width / 2) / fitted.width;
+  const dy = (event.clientY - rect.top - rect.height / 2) / fitted.height;
+  // Keep the point under the cursor fixed in normalized image coordinates.
+  const shift = 1 / prior - 1 / scale;
+  moveDuplicateView(duplicateView.x + dx * shift, duplicateView.y + dy * shift);
+}
+
+function showDuplicateZoom(event) {
+  if (event.detail && draggedDuplicateFrame === event.currentTarget) return;
+  const previews = duplicateFrames.map(frame => frame.querySelector("img"));
+  if (previews.some(image => !image) || !previews.some(image => image.naturalWidth)) return;
+  const version = ++comparisonVersion;
+  comparisonTrigger = event.currentTarget;
+  comparisonWarning.hidden = true;
+  comparisonWarning.textContent = "";
+  const failures = [];
+  previews.forEach((preview, index) => {
+    const frame = comparisonFrames[index];
+    const fallback = preview.cloneNode();
+    fallback.onload = paintDuplicateView;
+    frame.replaceChildren(fallback);
+    const original = new Image();
+    original.alt = preview.alt;
+    original.onload = () => {
+      if (comparisonVersion !== version) return;
+      frame.replaceChildren(original);
+      paintDuplicateView();
+    };
+    original.onerror = () => {
+      if (comparisonVersion !== version) return;
+      failures.push("[318] " + t(318).replace("{path}", () => preview.alt));
+      comparisonWarning.textContent = failures.join(" ");
+      comparisonWarning.hidden = false;
+    };
+    original.src = preview.dataset.original;
+  });
+  zoom.classList.add("paired");
+  zoom.hidden = false;
+  document.getElementById("zoom-close").focus({ preventScroll: true });
+  paintDuplicateView();
+}
+
+const compareResize = new ResizeObserver(paintDuplicateView);
+function endDuplicateDrag(frame) {
+  if (comparisonDrag?.frame !== frame) return;
+  if (comparisonDrag.moved) draggedDuplicateFrame = frame;
+  frame.classList.remove("dragging");
+  comparisonDrag = null;
+}
+for (const frame of [...duplicateFrames, ...comparisonFrames]) {
+  compareResize.observe(frame);
+  frame.addEventListener("wheel", zoomDuplicateAt, { passive: false });
+  frame.onpointerdown = event => {
+    if (!event.isPrimary || event.button !== 0) return;
+    draggedDuplicateFrame = null;
+    if (duplicateView.scale <= 1 || !fittedDuplicate(frame)) return;
+    comparisonDrag = { frame, id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+    frame.setPointerCapture(event.pointerId);
+  };
+  frame.onpointermove = event => {
+    if (comparisonDrag?.id !== event.pointerId || comparisonDrag.frame !== frame) return;
+    const moveX = event.clientX - comparisonDrag.x;
+    const moveY = event.clientY - comparisonDrag.y;
+    if (!comparisonDrag.moved && Math.hypot(moveX, moveY) < 4) return;
+    const fitted = fittedDuplicate(frame);
+    if (!fitted) return;
+    const dx = moveX / (fitted.width * duplicateView.scale);
+    const dy = moveY / (fitted.height * duplicateView.scale);
+    comparisonDrag.x = event.clientX;
+    comparisonDrag.y = event.clientY;
+    comparisonDrag.moved = true;
+    frame.classList.add("dragging");
+    moveDuplicateView(duplicateView.x - dx, duplicateView.y - dy);
+  };
+  frame.onpointerup = frame.onpointercancel = frame.onlostpointercapture = event => {
+    if (comparisonDrag?.id === event.pointerId) endDuplicateDrag(frame);
+  };
+}
+
 function showZoomImage(image) {
   view.scale = 1;
   view.x = 0;
@@ -2797,12 +3341,13 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeZoom();
   if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
     event.preventDefault();
-    if (workPreview || !reel.length) return;
+    if (zoom.classList.contains("paired") || workPreview || !reel.length) return;
     showAt(reelAt + (event.key === "ArrowRight" ? 1 : -1));
   }
 });
 zoom.addEventListener("wheel", (event) => {
   event.preventDefault();
+  if (zoom.classList.contains("paired")) return;
   const next = view.scale * (event.deltaY < 0 ? 1.12 : 1 / 1.12);
   view.scale = Math.min(8, Math.max(1, next));
   if (view.scale === 1) {
@@ -2823,6 +3368,41 @@ window.addEventListener("mousemove", (event) => {
   paintZoom();
 });
 window.addEventListener("mouseup", () => { view.drag = null; });
+document.getElementById("schedule-open").onclick = () => {
+  showScheduleError();
+  scheduleDialog.showModal();
+  loadSchedules();
+};
+document.getElementById("schedule-close").onclick = () => scheduleDialog.close();
+document.getElementById("schedule-add").onclick = () => openScheduleEditor();
+scheduleEditorClose.onclick = () => scheduleEditor.close();
+scheduleEditor.addEventListener("cancel", event => {
+  if (changingSchedule) event.preventDefault();
+});
+scheduleEditor.addEventListener("close", () => {
+  if (!scheduleEditor.open) scheduleForm.elements.password.value = "";
+});
+scheduleSource.onchange = showSchedulePassword;
+scheduleForm.addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.isComposing && event.target instanceof HTMLTextAreaElement) {
+    event.preventDefault();
+    scheduleForm.requestSubmit();
+  }
+});
+scheduleForm.onsubmit = async event => {
+  event.preventDefault();
+  if (changingSchedule) return;
+  const fields = Object.fromEntries(new FormData(scheduleForm));
+  scheduleForm.elements.password.value = "";
+  const operation = editingSchedule ? "edit" : "add";
+  scheduleSave.disabled = scheduleEditorClose.disabled = true;
+  try {
+    if (await submitSchedule({ operation, id: editingSchedule?.id, ...fields }, scheduleFormError)) scheduleEditor.close();
+  } finally {
+    scheduleSave.disabled = scheduleEditorClose.disabled = false;
+  }
+};
+setInterval(loadSchedules, 1000);
 if (initialVaultFolder) selectFolderLocation(initialVaultFolder);
 if (initialVaultFolder === null) showNotice(t(257));
 loadFolders();

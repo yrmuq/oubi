@@ -1,0 +1,429 @@
+"""Minute-based background jobs and TPM-bound Cryptomator credentials."""
+
+import json
+import os
+import re
+import socket
+import subprocess
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
+
+
+TPM_DEVICE = "/dev/tpmrm0"
+TPM_SOCKET = Path("/run/oubi-tpm/service.sock")
+TPM_CREDENTIAL_PREFIX = "oubi-tpm-v1:"
+TPM_MESSAGE_LIMIT = 32768
+CRON_LIMITS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
+CRON_ITEM = re.compile(r"(\*|[0-9]+(?:-[0-9]+)?)(?:/([0-9]+))?", re.ASCII)
+SCHEDULE_ACTIONS = ("tag", "duplicates", "both")
+
+
+class ScheduleError(Exception):
+    def __init__(self, code, **values):
+        self.code = code
+        self.values = values
+
+
+def parse_cron(expression):
+    fields = expression.split()
+    if len(fields) != 5:
+        raise ScheduleError(324)
+    parsed = []
+    for field, (low, high) in zip(fields, CRON_LIMITS):
+        values = set()
+        for item in field.split(","):
+            match = CRON_ITEM.fullmatch(item)
+            if match is None:
+                raise ScheduleError(324)
+            base, step = match.groups()
+            if base == "*":
+                start, end = low, high
+            elif "-" in base:
+                start, end = map(int, base.split("-"))
+            elif step is None:
+                start = end = int(base)
+            else:
+                raise ScheduleError(324)
+            stride = int(step) if step is not None else 1
+            if not low <= start <= end <= high or not 1 <= stride <= high - low + 1:
+                raise ScheduleError(324)
+            values.update(range(start, end + 1, stride))
+        parsed.append((values, field.startswith("*")))
+    return parsed
+
+
+def cron_matches(fields, now):
+    (minutes, _), (hours, _), (days, all_days), (months, _), (weekdays, all_weekdays) = fields
+    weekday = (now.weekday() + 1) % 7
+    day_matches = now.day in days
+    weekday_matches = weekday in weekdays or (weekday == 0 and 7 in weekdays)
+    calendar_matches = (day_matches and weekday_matches) if all_days or all_weekdays else (day_matches or weekday_matches)
+    return now.minute in minutes and now.hour in hours and now.month in months and calendar_matches
+
+
+def schedule_folder(value):
+    if not isinstance(value, str) or len(value) > 4096 or "\0" in value:
+        raise ScheduleError(325)
+    relative = Path(value.strip())
+    if relative.is_absolute() or any(part == ".." or part == "tags" or part.startswith(".") for part in relative.parts):
+        raise ScheduleError(325)
+    return relative.as_posix() if relative.parts else ""
+
+
+def schedule_parameters(cron, source, folder, action):
+    if not isinstance(cron, str) or len(cron) > 128:
+        raise ScheduleError(324)
+    cron = " ".join(cron.split())
+    parse_cron(cron)
+    folder = schedule_folder(folder)
+    if source not in ("images", "vault") or action not in SCHEDULE_ACTIONS:
+        raise ScheduleError(331)
+    return {"cron": cron, "source": source, "folder": folder, "action": action}
+
+
+def local_tpm_available():
+    return os.access(TPM_DEVICE, os.R_OK | os.W_OK)
+
+
+def tpm_service_configured():
+    return TPM_SOCKET.parent.is_dir()
+
+
+def request_tpm(operation, id_="", value=""):
+    timeout = 1 if operation == "ping" else 30
+    try:
+        payload = json.dumps({"operation": operation, "id": id_, "value": value}, ensure_ascii=False).encode()
+        if len(payload) > TPM_MESSAGE_LIMIT:
+            raise ValueError
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(timeout)
+            connection.connect(str(TPM_SOCKET))
+            connection.sendall(payload)
+            connection.shutdown(socket.SHUT_WR)
+            with connection.makefile("rb") as stream:
+                body = stream.read(TPM_MESSAGE_LIMIT + 1)
+        if len(body) > TPM_MESSAGE_LIMIT:
+            raise ValueError
+        response = json.loads(body)
+        if not isinstance(response, dict):
+            raise ValueError
+    except (OSError, ValueError, UnicodeError) as error:
+        raise ScheduleError(365) from error
+
+    if response.get("error") == "unavailable":
+        raise ScheduleError(365)
+    result = response.get("value")
+    if (not isinstance(result, str) or not result or
+            (operation == "encrypt" and not result.startswith(TPM_CREDENTIAL_PREFIX))):
+        raise ScheduleError(327 if operation == "encrypt" else 328)
+    return result
+
+
+def tpm_available():
+    if not tpm_service_configured():
+        return local_tpm_available()
+    try:
+        return request_tpm("ping") == "ready"
+    except ScheduleError:
+        return False
+
+
+def vault_credential(directory, id_, operation, value):
+    using_service = tpm_service_configured()
+    if (operation == "encrypt" and using_service) or (
+            operation == "decrypt" and value.startswith(TPM_CREDENTIAL_PREFIX)):
+        return request_tpm(operation, id_, value)
+    if not local_tpm_available():
+        raise ScheduleError(366 if using_service else 326)
+    secret_dir = directory / ".oubi-tpm"
+    code = 327 if operation == "encrypt" else 328
+    command = ["systemd-creds", f"--name=oubi-schedule-{id_}", f"--tpm2-device={TPM_DEVICE}"]
+    if operation == "encrypt":
+        # Bookworm's systemd-creds 252 cannot decrypt credentials sealed with an empty PCR mask.
+        command.extend(("--with-key=host+tpm2", "--tpm2-pcrs=7"))
+    try:
+        secret_dir.mkdir(mode=0o700, exist_ok=True)
+        if secret_dir.is_symlink():
+            raise OSError
+        result = subprocess.run(
+            [*command, operation, "-", "-"], input=value.encode("utf-8"), capture_output=True,
+            env={**os.environ, "SYSTEMD_CREDENTIAL_SECRET": str(secret_dir / "credential.secret")},
+            timeout=25, check=True,
+        )
+        encoded = result.stdout.decode("utf-8")
+        if not encoded.strip():
+            raise ValueError
+        return encoded
+    except (OSError, UnicodeError, ValueError, subprocess.SubprocessError) as error:
+        raise ScheduleError(code) from error
+
+
+class Schedules:
+    def __init__(self, path, write_json, reserve, execute, release, report_error):
+        self.path = path
+        self.write_json = write_json
+        self.reserve = reserve
+        self.execute = execute
+        self.release = release
+        self.report_error = report_error
+        self.lock = threading.Lock()
+        self.stopping = threading.Event()
+        self.thread = None
+        self.worker = None
+        self.pending = {}
+        self.progress = None
+        self.run_stop = None
+        self.load_failed = False
+        try:
+            self.rules = self._read_rules()
+        except (OSError, ValueError, ScheduleError):
+            self.load_failed = True
+            self.rules = {}
+            report_error(329)
+
+    def _read_rules(self):
+        try:
+            if self.path.is_symlink():
+                raise ValueError
+            rules = json.loads(self.path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        if not isinstance(rules, dict):
+            raise ValueError
+        for id_, rule in rules.items():
+            if (re.fullmatch(r"[0-9a-f]{32}", id_) is None or not isinstance(rule, dict)
+                    or not isinstance(rule.get("cron"), str) or len(rule["cron"]) > 128
+                    or rule.get("source") not in ("images", "vault") or rule.get("action") not in SCHEDULE_ACTIONS
+                    or (rule["source"] == "vault" and not isinstance(rule.get("credential"), str))):
+                raise ValueError
+            parse_cron(rule["cron"])
+            schedule_folder(rule.get("folder"))
+            if rule.get("result") == 333:
+                rule["result"] = 336
+        return rules
+
+    def _save(self, rules):
+        if self.load_failed:
+            raise ScheduleError(329)
+        try:
+            self.write_json(self.path, rules)
+        except OSError as error:
+            raise ScheduleError(330) from error
+        self.rules = rules
+
+    def _encrypt(self, id_, password):
+        if not isinstance(password, str) or not password or any(char in password for char in "\r\n\0"):
+            raise ScheduleError(165)
+        try:
+            if len(password.encode("utf-8")) > 4096:
+                raise ScheduleError(165)
+        except UnicodeError as error:
+            raise ScheduleError(165) from error
+        return vault_credential(self.path.parent.resolve(), id_, "encrypt", password)
+
+    def add(self, cron, source, folder, action, password):
+        rule = schedule_parameters(cron, source, folder, action)
+        id_ = uuid4().hex
+        if source == "vault":
+            rule["credential"] = self._encrypt(id_, password)
+        with self.lock:
+            self._save({**self.rules, id_: rule})
+        return id_
+
+    def _editable_rule(self, id_):
+        rule = self.rules.get(id_)
+        if rule is None:
+            raise ScheduleError(332)
+        if id_ in self.pending or rule.get("result") == 333:
+            raise ScheduleError(373)
+        return rule
+
+    def edit(self, id_, cron, source, folder, action, password):
+        fields = schedule_parameters(cron, source, folder, action)
+        credential = None
+        if source == "vault" and password not in (None, ""):
+            with self.lock:
+                self._editable_rule(id_)
+            credential = self._encrypt(id_, password)
+        with self.lock:
+            rule = self._editable_rule(id_)
+            updated = {**rule, **fields}
+            if source == "vault":
+                if credential is not None:
+                    updated.update(credential=credential, blocked=False)
+                elif rule["source"] != "vault":
+                    raise ScheduleError(165)
+            else:
+                updated.pop("credential", None)
+                updated.pop("blocked", None)
+            self._save({**self.rules, id_: updated})
+
+    def replace_password(self, id_, password):
+        with self.lock:
+            rule = self.rules.get(id_)
+            if rule is None or rule["source"] != "vault":
+                raise ScheduleError(332)
+            if rule.get("result") == 333:
+                raise ScheduleError(334)
+        credential = self._encrypt(id_, password)
+        with self.lock:
+            rule = self.rules.get(id_)
+            if rule is None or rule["source"] != "vault":
+                raise ScheduleError(332)
+            if rule.get("result") == 333:
+                raise ScheduleError(334)
+            self._save({**self.rules, id_: {**rule, "credential": credential, "blocked": False}})
+
+    def reset(self, id_):
+        with self.lock:
+            rule = self.rules.get(id_)
+            if rule is None:
+                raise ScheduleError(332)
+            if id_ in self.pending or rule.get("result") == 333:
+                raise ScheduleError(372)
+            self._save({key: rule for key, rule in self.rules.items() if key != id_})
+
+    def run_now(self, id_):
+        with self.lock:
+            if self.load_failed:
+                raise ScheduleError(329)
+            rule = self.rules.get(id_)
+            if rule is None:
+                raise ScheduleError(332)
+            if rule.get("result") != 333:
+                self.pending.setdefault(id_, None)
+                self._start_worker()
+
+    def stop_now(self, id_):
+        with self.lock:
+            if self.load_failed:
+                raise ScheduleError(329)
+            rule = self.rules.get(id_)
+            if rule is None:
+                raise ScheduleError(332)
+            if rule.get("result") == 333:
+                self.run_stop.set()
+            elif id_ in self.pending:
+                now = datetime.now().astimezone()
+                slot = int(now.timestamp()) // 60
+                queued_slot = self.pending[id_]
+                if queued_slot is not None or cron_matches(parse_cron(rule["cron"]), now):
+                    updated = {**rule, "slot": max(slot, queued_slot or slot, rule.get("slot", -1))}
+                    self._save({**self.rules, id_: updated})
+                self.pending.pop(id_)
+
+    def public(self):
+        with self.lock:
+            if self.load_failed:
+                raise ScheduleError(329)
+            return [{"id": id_, "pending": id_ in self.pending,
+                     "progress": self.progress if rule.get("result") == 333 else None,
+                     "stopping": rule.get("result") == 333 and self.run_stop.is_set(),
+                     **{key: rule.get(key) for key in ("cron", "source", "folder", "action", "last_run", "result", "blocked")}}
+                    for id_, rule in self.rules.items()]
+
+    def start(self):
+        self.thread = threading.Thread(target=self._loop, daemon=True, name="oubi-schedules")
+        self.thread.start()
+
+    def close(self):
+        self.stopping.set()
+        with self.lock:
+            if self.run_stop is not None:
+                self.run_stop.set()
+        if self.thread is not None:
+            self.thread.join()
+        with self.lock:
+            worker = self.worker
+        if worker is not None:
+            worker.join()
+
+    def _loop(self):
+        while not self.stopping.is_set():
+            try:
+                self.queue_due(datetime.now().astimezone())
+            except ScheduleError as error:
+                self.report_error(error.code)
+                self.stopping.wait(60)
+            else:
+                self.stopping.wait(1)
+
+    def queue_due(self, now):
+        slot = int(now.timestamp()) // 60
+        with self.lock:
+            for id_, rule in self.rules.items():
+                if (not rule.get("blocked") and rule.get("result") != 333 and slot > rule.get("slot", -1)
+                        and cron_matches(parse_cron(rule["cron"]), now)
+                        and self.pending.get(id_) is None):
+                    self.pending[id_] = slot
+            self._start_worker()
+
+    def _start_worker(self):
+        if self.pending and self.worker is None and not self.stopping.is_set():
+            self.worker = threading.Thread(target=self.run_pending, daemon=True)
+            self.worker.start()
+
+    def run_pending(self):
+        try:
+            self._process_pending()
+        except ScheduleError as error:
+            self.report_error(error.code)
+            self.stopping.wait(30)
+        finally:
+            with self.lock:
+                self.worker = None
+
+    def _process_pending(self):
+        with self.lock:
+            due = list(self.pending)
+        for id_ in due:
+            with self.lock:
+                if self.stopping.is_set():
+                    return
+                rule = self.rules.get(id_)
+                if rule is None or id_ not in self.pending or not self.reserve(rule):
+                    continue
+                try:
+                    now = datetime.now().astimezone()
+                    slot = int(now.timestamp()) // 60
+                    queued_slot = self.pending[id_]
+                    running = {**rule, "last_run": int(now.timestamp()), "result": 333}
+                    if queued_slot is not None or cron_matches(parse_cron(rule["cron"]), now):
+                        running["slot"] = max(slot, queued_slot or slot, rule.get("slot", -1))
+                    self._save({**self.rules, id_: running})
+                except ScheduleError:
+                    self.release(rule)
+                    raise
+                self.pending.pop(id_, None)
+                self.progress = {"stage": 368 if running["source"] == "vault" else 25}
+                self.run_stop = run_stop = threading.Event()
+
+            def report_progress(progress):
+                with self.lock:
+                    self.progress = progress
+
+            try:
+                password = (vault_credential(self.path.parent.resolve(), id_, "decrypt", running["credential"])
+                            if running["source"] == "vault" else None)
+                result = self.execute(running, password, run_stop, report_progress)
+            except ScheduleError as error:
+                result = error.code
+            except Exception:
+                result = 335
+            finally:
+                self.release(running)
+            with self.lock:
+                self.progress = None
+                self.run_stop = None
+                if run_stop.is_set() and result != 344:
+                    result = 336
+                if self.rules.get(id_) is running:
+                    finished = {**running, "result": result, "blocked": result in (164, 328)}
+                    try:
+                        self._save({**self.rules, id_: finished})
+                    except ScheduleError:
+                        self.rules[id_] = finished
+                        raise
