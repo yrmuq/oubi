@@ -22,8 +22,9 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from oubi_cryptomator import COOKIE_NAME, Vault, VaultError
-from oubi_files import (IMAGE_EXTS, JPEG_XL_SUFFIX, ImageChangedError, delete_source_images, direct_image_files,
-                        file_revision, image_files, image_revision, indexed_image_path, sidecar_path, source_image_path)
+from oubi_files import (IMAGE_EXTS, JPEG_XL_SUFFIX, WORKSPACE_METADATA_DIR, ImageChangedError, delete_source_images,
+                        direct_image_files, file_revision, image_files, image_revision, indexed_image_path,
+                        is_workspace_metadata, sidecar_path, source_image_path)
 from oubi_duplicates import DATABASE_NAME, DuplicateError, DuplicateStore, duplicate_file, scan_duplicates
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
 from oubi_gpu import GPU_BUSY_STATES, GpuError
@@ -76,7 +77,7 @@ class Workspace:
         relative = Path(os.environ.get("OUBI_CRYPT_OUTPUT", "Sorted"))
         if relative.is_absolute() or not relative.parts or ".." in relative.parts:
             raise VaultError(168)
-        data = root / ".oubi"
+        data = root / WORKSPACE_METADATA_DIR
         output = (root / relative).resolve()
         if (not output.is_relative_to(root) or output == root or output.is_relative_to(data)
                 or data.is_relative_to(output) or "tags" in relative.parts or data.is_symlink()
@@ -475,7 +476,7 @@ def images_with_tags(tags, path=CSV_PATH, root=IMAGES, *, exclude=None, folders=
                     rel = resolved.relative_to(base).as_posix()
                 except (OSError, ValueError):
                     continue
-                if (rel in seen or not any(resolved.is_relative_to(folder) for folder in sources)
+                if (rel in seen or is_workspace_metadata(rel) or not any(resolved.is_relative_to(folder) for folder in sources)
                         or not image.is_file() or in_output(image, exclude)):
                     continue
                 seen.add(rel)
@@ -548,7 +549,7 @@ def tags_in_folders(rels, path=CSV_PATH, root=IMAGES, *, exclude=None):
             try:
                 for row in csv.DictReader(handle):
                     rel = relative_file(row.get("file"))
-                    if not listed(rel) or in_output(base / rel, exclude):
+                    if is_workspace_metadata(rel) or not listed(rel) or in_output(base / rel, exclude):
                         continue
                     for column in columns:
                         for part in (row.get(column) or "").split(","):
@@ -861,7 +862,7 @@ def absolute_folders(rels, root=IMAGES, *, language=None, exclude=None):
             path = resolve_under(root, rel)
         except ValueError:
             return None, text(86, language=language)
-        if not path.is_dir() or in_output(path, exclude):
+        if not path.is_dir() or is_workspace_metadata(path) or in_output(path, exclude):
             return None, text(86, language=language)
         paths.append(str(path))
     return paths, None
@@ -1821,7 +1822,7 @@ class App:
                 tags, sorted_paths = read_metadata(workspace)
                 for raw in self.index_changes:
                     name = relative_path(raw, base)
-                    if name is None:
+                    if name is None or is_workspace_metadata(name):
                         continue
                     image = base / name
                     if (image.suffix.lower() not in IMAGE_EXTS or not image.is_file()

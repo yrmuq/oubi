@@ -8,7 +8,7 @@ import stat
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from oubi_files import direct_image_files, indexed_image_path, sidecar_path
+from oubi_files import WORKSPACE_METADATA_DIR, direct_image_files, indexed_image_path, sidecar_path
 
 CHANGE_EVENT = "OUBI_INDEX_CHANGES "
 INDEX_NAME = "index.sqlite3"
@@ -155,6 +155,10 @@ class VaultIndex:
             return "destination"
         if self.db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
             return "invalid"
+        # Older tagging jobs could add preview cache files to a saved catalog.
+        private_paths = (f"*/{WORKSPACE_METADATA_DIR}/*",)
+        self.db.execute("DELETE FROM images WHERE '/' || path || '/' GLOB ?", private_paths)
+        self.db.execute("DELETE FROM folders WHERE '/' || path || '/' GLOB ?", private_paths)
         return None
 
     def needs_format_scan(self):

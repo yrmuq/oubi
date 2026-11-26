@@ -25,7 +25,7 @@ from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
-from oubi_files import indexed_image_path, sidecar_path, stored_image_path
+from oubi_files import indexed_image_path, is_workspace_metadata, sidecar_path, stored_image_path
 from oubi_index import report_changes
 
 csv.field_size_limit(10**9)
@@ -289,19 +289,23 @@ def sort_files(args, record):
         reader = csv.DictReader(handle)
         fieldnames = list(reader.fieldnames or [])
         rows = list(reader)
+    sources = []
     for r in rows:
         if args.source_root is not None and r.get("file"):
             r["_stored_file"] = r["file"]
             r["file"] = str(indexed_image_path(r["file"], args.source_root))
+        if is_workspace_metadata(r.get("file") or ""):
+            continue
         r["_chars"] = split(r.get("character", ""))
         r["_copy"] = split(r.get("copyright", ""))
         r["_gen"] = set(split(r.get("general", "")))
         r["_style"] = set(split(r.get("style", "")))
         r["_rating"] = split(r.get("rating", ""))
+        sources.append(r)
 
     # 1. Пол персонажей по одиночным картинкам из всей коллекции
     votes = defaultdict(Counter)
-    for r in rows:
+    for r in sources:
         if len(r["_chars"]) == 1 and "solo" in r["_gen"]:
             g = r["_gen"]
             if "1girl" in g and not (g & BOYS):
@@ -316,7 +320,7 @@ def sort_files(args, record):
 
     # Тайтл персонажа: самый частый copyright на картинках, где он единственный персонаж
     char_title = defaultdict(Counter)
-    for r in rows:
+    for r in sources:
         if len(r["_chars"]) == 1 and r["_copy"]:
             char_title[r["_chars"][0]][r["_copy"][0]] += 1
 
@@ -333,7 +337,7 @@ def sort_files(args, record):
     counters = {}
     stats = Counter()
 
-    work = [r for r in rows if under_roots(r["file"], args.only)
+    work = [r for r in sources if under_roots(r["file"], args.only)
             and not (args.exclude and under_roots(r["file"], [args.exclude]))]
     series, stuck = series_targets(work, gender, nsfw_set, title_of, args.genres)
     for path, tag in stuck:
@@ -413,7 +417,7 @@ def sort_files(args, record):
         stats["group" if folder_char == "group" else ("unknown" if folder_char == "unknown" else say(78))] += 1
 
     print(say(75, stats=dict(stats)))
-    unknown_gender = sorted({c for r in rows for c in r["_chars"]} - set(gender))
+    unknown_gender = sorted({c for r in sources for c in r["_chars"]} - set(gender))
     if unknown_gender:
         Path("unknown_genders.txt").write_text("\n".join(unknown_gender), encoding="utf-8")
         print(say(76, count=len(unknown_gender)))

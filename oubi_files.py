@@ -12,6 +12,7 @@ JPEG_XL_SUFFIX = ".jxl"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", JPEG_XL_SUFFIX}
 VAULT_MOUNT = Path("/mnt/oubi-crypt/mount")
 VAULT_METADATA_ROOT = Path("/run/oubi-crypt/mount")
+WORKSPACE_METADATA_DIR = ".oubi"
 
 
 def indexed_image_path(value, root):
@@ -33,6 +34,10 @@ def sidecar_path(image):
     return image.parent / "tags" / (image.name + ".txt")
 
 
+def is_workspace_metadata(path):
+    return WORKSPACE_METADATA_DIR in Path(path).parts
+
+
 def open_image(source, *, jpeg_xl=False):
     from PIL import Image
 
@@ -52,6 +57,8 @@ def direct_image_files(folder):
 
 
 def image_files(folder, exclude=None, *, cancelled=None, visit=None, onerror=None):
+    if is_workspace_metadata(folder):
+        return
     excluded = Path(exclude).resolve() if exclude else None
     for directory, subdirs, names in os.walk(folder, onerror=onerror):
         if cancelled and cancelled():
@@ -60,7 +67,7 @@ def image_files(folder, exclude=None, *, cancelled=None, visit=None, onerror=Non
         if excluded and parent.resolve().is_relative_to(excluded):
             subdirs.clear()
             continue
-        subdirs[:] = [name for name in subdirs if name != "tags"
+        subdirs[:] = [name for name in subdirs if name not in {"tags", WORKSPACE_METADATA_DIR}
                       and not (excluded and (parent / name).resolve() == excluded)]
         if visit is not None:
             subdirs[:] = [name for name in subdirs if not name.startswith(".") and not (parent / name).is_symlink()]
@@ -164,7 +171,7 @@ def delete_source_image(root, relative, revision, *, index, sorted_list, exclude
 def source_image_path(root, relative, excluded=None):
     path = Path(relative)
     image = root / path
-    if (path.is_absolute() or not path.parts or any(part in {"..", "tags", ".oubi"} for part in path.parts)
+    if (path.is_absolute() or not path.parts or any(part in {"..", "tags", WORKSPACE_METADATA_DIR} for part in path.parts)
             or path.suffix.lower() not in IMAGE_EXTS or image.parent.resolve() != image.parent
             or (excluded and image.is_relative_to(excluded))):
         raise ValueError("Invalid source image")
