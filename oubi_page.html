@@ -801,20 +801,29 @@ function renderSchedules() {
       ? [t(357), date.format(rule.last_run * 1000), rule.result === 333 ? "" : t(rule.result)].filter(Boolean).join(" · ")
       : t(358);
     if (rule.pending) result.textContent += " · " + t(359);
+    const active = rule.pending || rule.result === 333;
+    if (rule.stopping) result.textContent += " · " + t(371);
     const reset = document.createElement("button");
     reset.type = "button";
     reset.className = "danger";
     reset.textContent = t(356);
+    reset.disabled = active;
     reset.onclick = () => {
       if (window.confirm(t(361))) submitSchedule({ operation: "reset", id: rule.id });
     };
     actions.append(reset);
     const run = document.createElement("button");
     run.type = "button";
-    run.className = "schedule-run";
-    run.textContent = t(367);
-    run.disabled = rule.pending || rule.result === 333;
-    run.onclick = () => submitSchedule({ operation: "run", id: rule.id });
+    run.className = active ? "danger" : "schedule-run";
+    run.textContent = t(active ? 4 : 367);
+    run.disabled = rule.stopping;
+    run.onclick = async () => {
+      if (changingSchedule) return;
+      run.disabled = reset.disabled = true;
+      await submitSchedule({ operation: active ? "stop" : "run", id: rule.id });
+      run.disabled = rule.stopping;
+      reset.disabled = active;
+    };
     actions.append(run);
     row.append(target, result, progress, actions);
     return row;

@@ -164,6 +164,7 @@ class Schedules:
         self.worker = None
         self.pending = {}
         self.progress = None
+        self.run_stop = None
         self.load_failed = False
         try:
             self.rules = self._read_rules()
@@ -246,10 +247,12 @@ class Schedules:
 
     def reset(self, id_):
         with self.lock:
-            if id_ not in self.rules:
+            rule = self.rules.get(id_)
+            if rule is None:
                 raise ScheduleError(332)
+            if id_ in self.pending or rule.get("result") == 333:
+                raise ScheduleError(372)
             self._save({key: rule for key, rule in self.rules.items() if key != id_})
-            self.pending.pop(id_, None)
 
     def run_now(self, id_):
         with self.lock:
@@ -262,12 +265,31 @@ class Schedules:
                 self.pending.setdefault(id_, None)
                 self._start_worker()
 
+    def stop_now(self, id_):
+        with self.lock:
+            if self.load_failed:
+                raise ScheduleError(329)
+            rule = self.rules.get(id_)
+            if rule is None:
+                raise ScheduleError(332)
+            if rule.get("result") == 333:
+                self.run_stop.set()
+            elif id_ in self.pending:
+                now = datetime.now().astimezone()
+                slot = int(now.timestamp()) // 60
+                queued_slot = self.pending[id_]
+                if queued_slot is not None or cron_matches(parse_cron(rule["cron"]), now):
+                    updated = {**rule, "slot": max(slot, queued_slot or slot, rule.get("slot", -1))}
+                    self._save({**self.rules, id_: updated})
+                self.pending.pop(id_)
+
     def public(self):
         with self.lock:
             if self.load_failed:
                 raise ScheduleError(329)
             return [{"id": id_, "pending": id_ in self.pending,
                      "progress": self.progress if rule.get("result") == 333 else None,
+                     "stopping": rule.get("result") == 333 and self.run_stop.is_set(),
                      **{key: rule.get(key) for key in ("cron", "source", "folder", "action", "last_run", "result", "blocked")}}
                     for id_, rule in self.rules.items()]
 
@@ -277,6 +299,9 @@ class Schedules:
 
     def close(self):
         self.stopping.set()
+        with self.lock:
+            if self.run_stop is not None:
+                self.run_stop.set()
         if self.thread is not None:
             self.thread.join()
         with self.lock:
@@ -323,11 +348,11 @@ class Schedules:
         with self.lock:
             due = list(self.pending)
         for id_ in due:
-            if self.stopping.is_set():
-                return
             with self.lock:
+                if self.stopping.is_set():
+                    return
                 rule = self.rules.get(id_)
-                if rule is None or not self.reserve(rule):
+                if rule is None or id_ not in self.pending or not self.reserve(rule):
                     continue
                 try:
                     now = datetime.now().astimezone()
@@ -342,6 +367,7 @@ class Schedules:
                     raise
                 self.pending.pop(id_, None)
                 self.progress = {"stage": 368 if running["source"] == "vault" else 25}
+                self.run_stop = run_stop = threading.Event()
 
             def report_progress(progress):
                 with self.lock:
@@ -350,7 +376,7 @@ class Schedules:
             try:
                 password = (vault_credential(self.path.parent.resolve(), id_, "decrypt", running["credential"])
                             if running["source"] == "vault" else None)
-                result = self.execute(running, password, self.stopping, report_progress)
+                result = self.execute(running, password, run_stop, report_progress)
             except ScheduleError as error:
                 result = error.code
             except Exception:
@@ -359,6 +385,9 @@ class Schedules:
                 self.release(running)
             with self.lock:
                 self.progress = None
+                self.run_stop = None
+                if run_stop.is_set() and result != 344:
+                    result = 336
                 if self.rules.get(id_) is running:
                     finished = {**running, "result": result, "blocked": result in (164, 328)}
                     try:

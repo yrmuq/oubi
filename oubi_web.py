@@ -2259,10 +2259,13 @@ def execute_schedule(app, rule, password, stopping, report_progress):
             return 164 if error.message_id == 164 else 343
     background = None
     try:
-        report_progress({"stage": 25})
-        workspace = Workspace.encrypted(private_vault.mount) if private_vault else None
-        background = App(workspace, devices=(app.rocm, app.nvidia))
-        result = run_scheduled_operations(app, background, rule, stopping, report_progress)
+        if stopping.is_set():
+            result = 336
+        else:
+            report_progress({"stage": 25})
+            workspace = Workspace.encrypted(private_vault.mount) if private_vault else None
+            background = App(workspace, devices=(app.rocm, app.nvidia))
+            result = run_scheduled_operations(app, background, rule, stopping, report_progress)
     except (OSError, ValueError, VaultError, DuplicateError, sqlite3.Error):
         result = 335
     finally:
@@ -2810,10 +2813,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.schedules.replace_password(id_, payload.get("password"))
             elif operation == "run":
                 self.schedules.run_now(id_)
+            elif operation == "stop":
+                self.schedules.stop_now(id_)
             else:
                 raise ScheduleError(331)
         except ScheduleError as error:
-            status = 500 if error.code in (327, 329, 330) else 409 if error.code in (326, 334, 345, 365) else 400
+            status = 500 if error.code in (327, 329, 330) else 409 if error.code in (326, 334, 345, 365, 372) else 400
             self._error(status, error.code)
             return
         self._send({"add": 201, "run": 202}.get(operation, 200), {"id": id_})

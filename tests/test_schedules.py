@@ -122,13 +122,59 @@ class ScheduleTests(unittest.TestCase):
             self.scheduler.reset(id_)
         self.assertEqual(json.loads(self.path.read_text()), {})
 
-    def test_reset_during_run_stays_reset(self):
+    def test_stop_cancels_the_queued_occurrence_before_remove(self):
+        self.reserve.return_value = False
+        id_ = self.scheduler.add("* * * * *", "images", "", "duplicates", None)
+        now = datetime.now().astimezone()
+        self.run_slot(now)
+        with self.assertRaises(ScheduleError) as error:
+            self.scheduler.reset(id_)
+        self.assertEqual(error.exception.code, 372)
+        self.scheduler.stop_now(id_)
+        self.assertFalse(self.scheduler.public()[0]["pending"])
+        self.reserve.return_value = True
+        self.run_slot(now)
+        self.execute.assert_not_called()
+        self.run_slot(now + timedelta(minutes=2))
+        self.execute.assert_called_once()
+
+    def test_stop_interrupts_only_the_active_run_before_remove(self):
         id_ = self.scheduler.add("* * * * *", "images", "", "tag", None)
-        self.execute.side_effect = lambda rule, password, stopping, report: self.scheduler.reset(id_) or 337
-        self.run_slot(datetime.now().astimezone())
+
+        def execute(rule, password, stopping, report):
+            with self.assertRaises(ScheduleError) as error:
+                self.scheduler.reset(id_)
+            self.assertEqual(error.exception.code, 372)
+            self.scheduler.stop_now(id_)
+            self.assertTrue(stopping.is_set())
+            self.assertTrue(self.scheduler.public()[0]["stopping"])
+            return 336
+
+        self.execute.side_effect = execute
+        self.scheduler.run_now(id_)
+        self.wait_for_worker()
         self.release.assert_called_once()
-        self.assertEqual(self.scheduler.public(), [])
+        saved = self.make_scheduler().public()[0]
+        self.assertEqual(saved["result"], 336)
+        self.assertFalse(saved["stopping"])
+        self.assertFalse(self.scheduler.stopping.is_set())
+        self.scheduler.reset(id_)
         self.assertEqual(self.make_scheduler().public(), [])
+
+    def test_shutdown_interrupts_and_preserves_the_rule(self):
+        started = threading.Event()
+        def execute(rule, password, stopping, report):
+            started.set()
+            self.assertTrue(stopping.wait(timeout=2))
+            return 336
+
+        self.execute.side_effect = execute
+        id_ = self.scheduler.add("0 2 * * *", "images", "", "duplicates", None)
+        self.scheduler.run_now(id_)
+        self.assertTrue(started.wait(timeout=2))
+        self.scheduler.close()
+        saved = self.make_scheduler().public()[0]
+        self.assertEqual((saved["id"], saved["result"]), (id_, 336))
 
     def test_run_progress_is_visible_only_while_running(self):
         id_ = self.scheduler.add("0 2 * * *", "images", "", "duplicates", None)
