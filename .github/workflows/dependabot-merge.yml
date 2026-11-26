@@ -1,0 +1,76 @@
+name: Merge Dependabot updates
+
+on:
+  pull_request:
+    branches: [deps]
+    types: [opened, reopened, synchronize, ready_for_review, closed]
+
+permissions: {}
+
+jobs:
+  checks:
+    if: >-
+      github.event.action != 'closed' && !github.event.pull_request.draft &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'dependabot/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sh scripts/check.sh
+
+  merge:
+    needs: checks
+    if: >-
+      !cancelled() && github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      (needs.checks.result == 'success' || github.event.pull_request.merged)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      ref: ${{ steps.merge.outputs.ref }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Merge the checked update into deps
+        id: merge
+        if: github.event.action != 'closed'
+        run: |
+          base=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.base.ref')
+          [[ $base == deps ]]
+          ref=$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
+            -f sha="$HEAD_SHA" -f merge_method=merge --jq 'select(.merged) | .sha')
+          [[ $ref =~ ^[0-9a-f]{40}$ ]]
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - name: Remove the merged Dependabot branch
+        run: |
+          ref="refs/heads/$HEAD_REF"
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/$HEAD_REF" \
+            | jq -r --arg ref "$ref" '.[] | select(.ref == $ref) | .object.sha')
+          if [[ $current == "$HEAD_SHA" ]]; then
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/$ref"
+          fi
+
+  prerelease:
+    needs: merge
+    if: ${{ !cancelled() && needs.merge.outputs.ref != '' }}
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      channel: deps
+      ref: ${{ needs.merge.outputs.ref }}
