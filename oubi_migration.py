@@ -1,6 +1,7 @@
 """Move images and their metadata into modification-date buckets."""
 
 import os
+import re
 import stat
 from collections import Counter
 from contextlib import ExitStack
@@ -10,6 +11,8 @@ from pathlib import Path
 
 from oubi_files import (apply_index_changes, direct_image_files, image_files, sidecar_path,
                         stage_migrated_indexes)
+
+QUARTER_FOLDER = re.compile(r"[0-9]{4}-Q[1-4]")
 
 
 @dataclass
@@ -40,9 +43,11 @@ def migration_folder(workspace, value):
 
 
 def migration_options(workspace, payload):
-    source, destination, recursive, year = (payload.get(key) for key in ("source", "destination", "recursive", "year"))
-    if (type(year) is not int or not 1 <= year <= 9999 or type(recursive) is not bool
-            or not isinstance(source, str) or (destination is not None and not isinstance(destination, str))
+    if "year" in payload:
+        raise MigrationError(408)
+    source, destination, recursive = (payload.get(key) for key in ("source", "destination", "recursive"))
+    if (type(recursive) is not bool or not isinstance(source, str)
+            or (destination is not None and not isinstance(destination, str))
             or payload.get("order") != "modified"):
         raise MigrationError(396)
     try:
@@ -50,30 +55,33 @@ def migration_options(workspace, payload):
         target = migration_folder(workspace, destination) if destination is not None else origin
     except (OSError, ValueError, RuntimeError) as error:
         raise MigrationError(397) from error
-    return origin, target, recursive, year
+    return origin, target, recursive
 
 
-def bucket_for(image, year):
+def bucket_for(image):
     modified = datetime.fromtimestamp(image.lstat().st_mtime)
-    return (modified.month - 1) // 3 if modified.year == year else 4
+    return f"{modified.year:04d}-Q{(modified.month - 1) // 3 + 1}"
 
 
 def raise_walk_error(error):
     raise error
 
 
-def make_plan(workspace, source, destination, recursive, year, cancelled):
-    buckets = [destination / f"{year:04d}-Q{quarter}" for quarter in range(1, 5)]
-    buckets.append(destination / f"{year:04d}-other")
+def make_plan(workspace, source, destination, recursive, cancelled):
     excluded = Path(workspace.excluded) if workspace.excluded else None
-    for directory in buckets:
-        if (source.is_relative_to(directory) or (excluded and excluded.is_relative_to(directory))
-                or (os.path.lexists(directory) and (directory.is_symlink() or not directory.is_dir()))):
-            raise MigrationError(398, path=str(directory.relative_to(Path(workspace.images).resolve())))
-
     skipped = []
     moves = []
+    buckets = {}
     root = Path(workspace.images).resolve()
+
+    def bucket_path(name):
+        if name not in buckets:
+            directory = destination / name
+            if (source.is_relative_to(directory) or (excluded and excluded.is_relative_to(directory))
+                    or (os.path.lexists(directory) and (directory.is_symlink() or not directory.is_dir()))):
+                raise MigrationError(398, path=str(directory.relative_to(root)))
+            buckets[name] = directory
+        return buckets[name]
 
     def skip(path, code):
         skipped.append({"path": path.relative_to(root).as_posix(), "code": code})
@@ -81,7 +89,7 @@ def make_plan(workspace, source, destination, recursive, year, cancelled):
     for image in sorted(direct_image_files(source)):
         if cancelled():
             raise InterruptedError
-        target = buckets[bucket_for(image, year)] / image.name
+        target = bucket_path(bucket_for(image)) / image.name
         tags = sidecar_path(image)
         target_tags = sidecar_path(target)
         if (tags.parent.is_symlink() or tags.is_symlink()
@@ -99,7 +107,7 @@ def make_plan(workspace, source, destination, recursive, year, cancelled):
             if cancelled():
                 raise InterruptedError
             if (folder.name.startswith(".") or folder.name == "tags" or folder.is_symlink()
-                    or not folder.is_dir() or folder in buckets):
+                    or QUARTER_FOLDER.fullmatch(folder.name) or not folder.is_dir()):
                 continue
             if destination != source and destination.is_relative_to(folder):
                 continue
@@ -112,16 +120,16 @@ def make_plan(workspace, source, destination, recursive, year, cancelled):
                 raise InterruptedError
             if not photos:
                 continue
-            quarter, votes = Counter(bucket_for(image, year) for image in photos).most_common(1)[0]
+            quarter, votes = Counter(bucket_for(image) for image in photos).most_common(1)[0]
             if votes * 2 <= len(photos):
                 skip(folder, 391)
                 continue
-            target = buckets[quarter] / folder.name
+            target = bucket_path(quarter) / folder.name
             if os.path.lexists(target):
                 skip(folder, 392)
                 continue
             moves.append(Move(folder, target, {image: target / image.relative_to(folder) for image in photos}))
-    return buckets, moves, skipped
+    return moves, skipped
 
 
 def move_into_empty_path(source, target):
@@ -144,8 +152,8 @@ def move_into_empty_path(source, target):
         raise
 
 
-def migrate(workspace, source, destination, recursive, year, *, cancelled, progress, before_move):
-    buckets, plan, skipped = make_plan(workspace, source, destination, recursive, year, cancelled)
+def migrate(workspace, source, destination, recursive, *, cancelled, progress, before_move):
+    plan, skipped = make_plan(workspace, source, destination, recursive, cancelled)
     root = Path(workspace.images).resolve()
     moved = {image: target for move in plan for image, target in move.images.items()}
     if not plan:
@@ -171,7 +179,7 @@ def migrate(workspace, source, destination, recursive, year, *, cancelled, progr
             raise InterruptedError
         before_move()
         try:
-            for path in buckets:
+            for path in sorted({move.target.parent for move in plan}):
                 mkdir(path)
             progress(0, len(plan))
             for done, move in enumerate(plan, 1):

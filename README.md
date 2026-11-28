@@ -186,9 +186,9 @@ If opening fails, the password dialog identifies the failed step and shows the r
 
 #### Migration by quarter
 
-In **Sorting**, open **Migration**, select a source folder and year, and leave the destination inside the selected folder or choose another folder in the active workspace. Migration uses the image's modification time in the container's time zone and creates `YYYY-Q1` through `YYYY-Q4` plus `YYYY-other`. The latter holds images from all other years. Each image moves with its matching file in `tags/` and retains its position in the tag index under the new path.
+In **Sorting**, open **Migration**, select a source folder, and leave the destination inside the selected folder or choose another folder in the active workspace. Migration uses the image's modification time in the container's time zone and creates only the relevant year-and-quarter folders, such as `2017-Q1` and `2018-Q3`. Each image moves with its matching file in `tags/` and retains its position in the tag index under the new path.
 
-Enable **Move subfolders as a whole** to count images throughout each immediate subfolder and move its tree to the group containing more than half of its images. Subfolders without a majority and items with a conflicting destination name stay in place and appear in the report.
+Enable **Move subfolders as a whole** to count images throughout each immediate subfolder and move its tree to the year and quarter containing more than half of its images. Subfolders without a majority and items with a conflicting destination name stay in place and appear in the report. Existing quarter folders are skipped on subsequent runs. To reorganize an old `YYYY-other` folder, select it as the source and its parent as the destination.
 
 #### Scheduled jobs
 

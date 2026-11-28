@@ -34,7 +34,7 @@ class MigrationTests(unittest.TestCase):
         return path
 
     def run_migration(self, recursive=False, destination=None):
-        return migrate(self.workspace, self.source, destination or self.source, recursive, 2025,
+        return migrate(self.workspace, self.source, destination or self.source, recursive,
                        cancelled=lambda: False, progress=lambda done, total: None, before_move=lambda: None)
 
     def test_direct_images_and_tags_move_and_index_paths_follow(self):
@@ -54,7 +54,8 @@ class MigrationTests(unittest.TestCase):
         moved, skipped, pending = self.run_migration(destination=destination)
 
         self.assertEqual([moved[path].parent.name for path in paths],
-                         ["2025-Q1", "2025-Q2", "2025-Q3", "2025-Q4", "2025-other"])
+                         ["2025-Q1", "2025-Q2", "2025-Q3", "2025-Q4", "2024-Q2"])
+        self.assertEqual({path.name for path in destination.iterdir()}, {target.parent.name for target in moved.values()})
         self.assertEqual(skipped, [])
         self.assertFalse(pending)
         self.assertTrue(untouched.exists())
@@ -71,11 +72,11 @@ class MigrationTests(unittest.TestCase):
         quarter = self.image("Trip/Deep/spring.jpg", 4, tagged=True)
         self.image("Trip/may.jpg", 5)
         self.image("Trip/earlier.jpg", 1)
-        outside = self.image("Archive/old.jpg", 4, 2023)
-        self.image("Archive/new.jpg", 8, 2026)
+        older = self.image("Archive/old.jpg", 4, 2023)
+        self.image("Archive/also-old.jpg", 6, 2023)
         self.image("Archive/current.jpg", 4)
         tie = self.image("Tie/first.jpg", 1)
-        self.image("Tie/second.jpg", 4)
+        self.image("Tie/second.jpg", 1, 2024)
         collision = self.image("collision.jpg", 4, tagged=True)
         existing = self.image("2025-Q2/collision.jpg", 4)
         out = self.image("Inside/Target/already.jpg", 4)
@@ -84,13 +85,31 @@ class MigrationTests(unittest.TestCase):
 
         self.assertEqual(moved[quarter].relative_to(self.source).as_posix(), "2025-Q2/Trip/Deep/spring.jpg")
         self.assertTrue(sidecar_path(moved[quarter]).is_file())
-        self.assertEqual(moved[outside].relative_to(self.source).as_posix(), "2025-other/Archive/old.jpg")
+        self.assertEqual(moved[older].relative_to(self.source).as_posix(), "2023-Q2/Archive/old.jpg")
         self.assertEqual(skipped, [{"path": "Album/collision.jpg", "code": 392},
                                    {"path": "Album/Tie", "code": 391}])
         self.assertTrue(tie.is_file())
         self.assertTrue(collision.is_file() and existing.is_file())
         self.assertEqual(moved[out].relative_to(self.source).as_posix(), "2025-Q2/Inside/Target/already.jpg")
         self.assertNotIn(existing, moved)
+        self.assertEqual(self.run_migration(recursive=True)[0], {})
+        self.assertTrue(moved[older].is_file())
+
+    def test_legacy_other_folder_can_be_migrated_into_its_parent(self):
+        parent = self.source
+        self.source = parent / "2017-other"
+        earlier = self.image("before.jpg", 12, 2016, tagged=True)
+        later = self.image("after.jpg", 8, 2018)
+        existing = parent / "2017-Q1"
+        existing.mkdir()
+
+        moved, skipped, _ = self.run_migration(destination=parent)
+
+        self.assertEqual(moved, {earlier: parent / "2016-Q4/before.jpg", later: parent / "2018-Q3/after.jpg"})
+        self.assertTrue(sidecar_path(moved[earlier]).is_file())
+        self.assertEqual(skipped, [])
+        self.assertTrue(existing.is_dir())
+        self.assertEqual({path.name for path in parent.iterdir()}, {"2017-other", "2017-Q1", "2016-Q4", "2018-Q3"})
 
     def test_move_failure_restores_images_and_sidecars(self):
         first = self.image("first.jpg", 1, tagged=True)
@@ -111,9 +130,15 @@ class MigrationTests(unittest.TestCase):
 
     def test_rejects_paths_outside_the_active_workspace(self):
         with self.assertRaises(MigrationError) as raised:
-            migration_options(self.workspace, {"year": 2025, "source": "../outside", "recursive": True,
+            migration_options(self.workspace, {"source": "../outside", "recursive": True,
                                                "destination": None, "order": "modified"})
         self.assertEqual(raised.exception.code, 397)
+
+    def test_legacy_year_request_requires_a_page_refresh(self):
+        with self.assertRaises(MigrationError) as raised:
+            migration_options(self.workspace, {"year": 2025, "source": "Album", "recursive": False,
+                                               "destination": None, "order": "modified"})
+        self.assertEqual(raised.exception.code, 408)
 
     def test_job_rebuilds_the_vault_catalog_at_the_new_paths(self):
         self.image("spring.jpg", 4, tagged=True)
@@ -122,7 +147,7 @@ class MigrationTests(unittest.TestCase):
         app._count_folders(threading.Event(), "initial")
         self.assertEqual(app.gallery([""]), {"files": ["Album/spring.jpg"]})
 
-        job_id = app.start_migration((self.source, self.source, False, 2025), "en")
+        job_id = app.start_migration((self.source, self.source, False), "en")
         app.migration_worker.join(timeout=3)
         with app.lock:
             scan = app.folder_scan
