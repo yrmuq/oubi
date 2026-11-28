@@ -95,7 +95,7 @@ def file_revision(info):
     return "-".join(str(field) for field in fields)
 
 
-def _updated_index(index, root, images, *, table, cleanup):
+def _updated_index(index, root, images, *, table, cleanup, moved=None):
     if index.is_symlink():
         raise ValueError("Image index must be a regular file")
     if not index.exists():
@@ -108,6 +108,10 @@ def _updated_index(index, root, images, *, table, cleanup):
 
     def matches(raw):
         return bool(raw) and Path(os.path.normpath(indexed_image_path(raw, root))) in images
+
+    def relocated(raw):
+        path = moved[Path(os.path.normpath(indexed_image_path(raw, root)))]
+        return str(stored_image_path(path) if Path(raw).is_absolute() else path.relative_to(root))
 
     with index.open(encoding="utf-8", newline="") as source, updated.open("w", encoding="utf-8", newline="") as output:
         if table:
@@ -122,12 +126,18 @@ def _updated_index(index, root, images, *, table, cleanup):
             for row in reader:
                 if len(row) > field and matches(row[field]):
                     removed = True
+                    if moved is not None:
+                        row[field] = relocated(row[field])
+                        writer.writerow(row)
                 else:
                     writer.writerow(row)
         else:
             for line in source:
-                if matches(line.rstrip("\r\n")):
+                raw = line.rstrip("\r\n")
+                if matches(raw):
                     removed = True
+                    if moved is not None:
+                        output.write(relocated(raw) + line[len(raw):])
                 else:
                     output.write(line)
     if not removed:
@@ -136,7 +146,16 @@ def _updated_index(index, root, images, *, table, cleanup):
     return updated
 
 
-def _apply_removal(changes):
+def stage_migrated_indexes(root, moved, index, sorted_list, cleanup):
+    changes = []
+    for path, table in ((Path(index), True), (Path(sorted_list), False)):
+        updated = _updated_index(path, root, moved, table=table, cleanup=cleanup, moved=moved)
+        if updated is not None:
+            changes.append((path, updated))
+    return changes
+
+
+def apply_index_changes(changes):
     backups = []
     try:
         for path, replacement in changes:
@@ -216,4 +235,4 @@ def delete_source_images(root, files, *, index, sorted_list, excluded=None, befo
             check_revision(image, relative, revision)
         if before_commit is not None:
             before_commit()
-        return _apply_removal(changes)
+        return apply_index_changes(changes)

@@ -27,6 +27,7 @@ from oubi_files import (IMAGE_EXTS, JPEG_XL_SUFFIX, WORKSPACE_METADATA_DIR, Imag
                         is_workspace_metadata, sidecar_path, source_image_path)
 from oubi_duplicates import DATABASE_NAME, DuplicateError, DuplicateStore, duplicate_file, scan_duplicates
 from oubi_index import CHANGE_EVENT, DIRTY_NAME, INDEX_NAME, VaultIndex, folder_sidecars, image_metadata, read_metadata, relative_path
+from oubi_migration import MigrationError, migrate, migration_folder, migration_options
 from oubi_gpu import GPU_BUSY_STATES, GpuError
 from oubi_nvidia import NvidiaRuntime
 from oubi_rocm import RocmRuntime
@@ -1202,6 +1203,8 @@ class App:
         self.lines = []
         self.model_state = "downloading"
         self.job_running = False
+        self.migration = None
+        self.migration_worker = None
         self.job_result = None
         self.schedule_scope = None
         self.cancel_requested = False
@@ -1946,6 +1949,7 @@ class App:
                 **self._job_progress(),
                 "preview_file": "",
                 "scan_progress": self.scan_progress,
+                "migration": self.migration,
                 "log": self.lines[-80:],
                 "deletions": self._deletion_status(),
             }
@@ -1957,6 +1961,87 @@ class App:
             except ValueError:
                 payload["preview_file"] = ""
         return payload
+
+    def start_migration(self, options, language):
+        with self.lock:
+            if self.job_running or self.review_worker is not None or self.folder_scan is not None:
+                raise MigrationError(401)
+            self.job_mode = self.phase = "migration"
+            self.job_id = uuid4().hex
+            self.job_running = True
+            self.job_result = None
+            self.cancel_requested = False
+            self.step, self.detail, self.percent = text(389, language=language), "", None
+            self.migration = {"id": self.job_id, "running": True}
+            try:
+                worker = threading.Thread(target=self._run_migration, args=(options, language), daemon=True)
+                self.migration_worker = worker
+                worker.start()
+            except RuntimeError as error:
+                self.job_running = False
+                self.job_mode = self.migration = self.migration_worker = None
+                raise MigrationError(239) from error
+            return self.job_id
+
+    def _run_migration(self, options, language):
+        workspace = self.paths
+        touched = False
+        report = {"moved": 0, "skipped": [], "warning": "", "error": ""}
+
+        def progress(done, total):
+            message = text(390, done=done, total=total, language=language)
+            with self.lock:
+                self.step, self.percent = message, round(done * 100 / total)
+
+        def before_move():
+            nonlocal touched
+            if self.catalog is not None:
+                self.catalog.mark_dirty()
+            touched = True
+
+        result = 0
+        try:
+            moved, skipped, cleanup_pending = migrate(workspace, *options, cancelled=lambda: self.cancel_requested,
+                                                      progress=progress, before_move=before_move)
+            report.update(moved=len(moved), skipped=skipped)
+            if cleanup_pending:
+                report["warning"] = text(403, language=language)
+            duplicate_path = Path(workspace.data or Path(workspace.csv).parent) / DATABASE_NAME
+            if moved and (self.duplicate_store is not None or duplicate_path.is_file()):
+                root = Path(workspace.images).resolve()
+                store = self.duplicate_results()
+                with store.lock:
+                    store.remove(*(image.relative_to(root).as_posix() for image in moved))
+        except InterruptedError:
+            report["error"] = text(81, language=language)
+            result = -15
+        except MigrationError as error:
+            report["error"] = f"[{error.code}] " + text(error.code, language=language, **error.values)
+            result = 1
+        except (OSError, ValueError, csv.Error, sqlite3.Error, DuplicateError) as error:
+            if report["moved"]:
+                report["warning"] = text(404, error=str(error), language=language)
+            else:
+                report["error"] = "[402] " + text(402, error=str(error), language=language)
+                result = 1
+        finally:
+            if touched:
+                with self.index_guard, self.lock:
+                    self.close_catalog()
+                    self._invalidate_folders()
+                    self.character_cache.clear()
+                    self.preview_file = ""
+            message = report["error"] or text(393, count=report["moved"], language=language)
+            with self.lock:
+                self.step = message
+                self.percent = None if result else 100
+                self.migration = {"id": self.job_id, "running": False, **report}
+                self.job_result = result
+                self.job_mode = None
+                self.job_running = False
+            self.note(message)
+            if touched and not self.cancel_requested:
+                self._ensure_count()
 
     def _job_progress(self):
         progress = {"step": self.step, "detail": self.detail, "percent": self.percent}
@@ -2345,6 +2430,26 @@ class Handler(BaseHTTPRequestHandler):
             return vault.app
         return None
 
+    def _migration_action(self, payload):
+        scope = payload.get("scope", "")
+        if self.headers.get_content_type() != "application/json" or not isinstance(scope, str):
+            self._error(400, 89)
+            return
+        with self.app.vault.lock:
+            app = self._scoped_app(scope)
+            if app is None:
+                response = self._error_response(409, 172)
+            elif self.app.schedule_scope:
+                response = self._error_response(409, 342)
+            else:
+                try:
+                    options = migration_options(app.paths, payload)
+                    response = (202, {"id": app.start_migration(options, self._language())})
+                except MigrationError as error:
+                    response = (409 if error.code in (239, 401) else 400,
+                                {"error": f"[{error.code}] " + text(error.code, language=self._language(), **error.values)})
+        self._send(*response)
+
     def _duplicate_error(self, status, code, **values):
         return status, {"error": f"[{code}] " + text(code, language=self._language(), **values)}
 
@@ -2590,6 +2695,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._duplicate_error(500, 298, error=str(error))
 
         try:
+            if path == "/api/migration/folders":
+                folder = migration_folder(workspace, query.get("folder", [""])[0])
+                base = Path(workspace.images).resolve()
+                excluded = Path(workspace.excluded) if workspace.excluded else None
+                children = [child.relative_to(base).as_posix() for child in folder.iterdir()
+                            if not child.name.startswith(".") and child.name != "tags" and child != excluded
+                            and not child.is_symlink() and child.is_dir()]
+                return 200, {"children": sorted(children, key=str.casefold)}
             if path == "/api/folders":
                 return 200, app.folders(directories[0] if directories else "")
             if path == "/api/folder-images":
@@ -2651,6 +2764,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/schedules" and self.schedules is not None:
             self._schedule_action(payload)
+            return
+        if parsed.path == "/api/migration":
+            self._migration_action(payload)
             return
         if parsed.path == "/api/theme":
             if not write_theme(payload.get("theme")):
@@ -2860,6 +2976,11 @@ def main():
         server.server_close()
         schedules.close()
         app.pause_duplicate_reviews()
+        opened = app.vault.app
+        for workspace in (app, opened):
+            if workspace is not None and (worker := workspace.migration_worker) is not None and worker.is_alive():
+                workspace.stop()
+                worker.join()
         with app.vault.lock:
             if opened := app.vault.app:
                 opened.stop()

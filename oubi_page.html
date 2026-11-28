@@ -142,8 +142,10 @@ h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
 .schedule-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .schedule-header h2 { margin: 0; }
 .schedule-close { flex: none; width: 32px; height: 32px; padding: 0; font-size: 21px; line-height: 1; }
-#schedule-form, #schedule-form label:not([hidden]) { display: grid; gap: 6px; }
-#schedule-form input, #schedule-form select, #schedule-form textarea { box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#schedule-form, #schedule-form label:not([hidden]), #migration-form, #migration-form .migration-field:not([hidden]) { display: grid; gap: 6px; }
+#schedule-form input, #schedule-form select, #schedule-form textarea, #migration-form select, #migration-form input[type="number"] { box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#migration-report { max-height: 190px; overflow: auto; overflow-wrap: anywhere; }
+#migration-message { margin: 8px 0 0; }
 #schedule-form textarea { resize: none; }
 #schedule-form ::placeholder { color: var(--muted); opacity: 1; }
 #schedule-error, #schedule-form-error, #schedule-tpm-note { margin: 0; }
@@ -378,6 +380,7 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     </div>
     <div class="compute">
       <button type="button" class="secondary" id="schedule-open" aria-haspopup="dialog">Schedules</button>
+      <button type="button" class="secondary" id="migration-open" aria-haspopup="dialog" hidden></button>
     </div>
   </div>
   <button id="app-mode" type="button" class="secondary" aria-pressed="false">Gallery</button>
@@ -611,6 +614,36 @@ if (savedTheme === "light" || savedTheme === "dark") document.documentElement.se
     <button type="submit" id="schedule-save"></button>
   </form>
 </dialog>
+<dialog class="schedule-dialog" id="migration-dialog" aria-labelledby="migration-title">
+  <div class="schedule-header">
+    <h2 id="migration-title" data-migration-text="382"></h2>
+    <button type="button" class="secondary schedule-close" id="migration-close"><span aria-hidden="true">×</span></button>
+  </div>
+  <form id="migration-form">
+    <label class="migration-field"><span data-migration-text="383"></span>
+      <select name="source"></select>
+    </label>
+    <label class="migration-field"><span data-migration-text="384"></span>
+      <select name="order"><option value="modified" data-migration-text="385"></option></select>
+    </label>
+    <label><input type="checkbox" name="recursive"> <span data-migration-text="386"></span></label>
+    <label class="migration-field"><span data-migration-text="387"></span>
+      <input type="number" name="year" min="1" max="9999" step="1" required>
+    </label>
+    <label class="migration-field"><span data-migration-text="388"></span>
+      <select name="location">
+        <option value="source" data-migration-text="394"></option>
+        <option value="other" data-migration-text="395"></option>
+      </select>
+    </label>
+    <label class="migration-field" id="migration-destination" hidden><span data-migration-text="395"></span>
+      <select name="destination" disabled></select>
+    </label>
+    <button type="submit" id="migration-submit" data-migration-text="405"></button>
+  </form>
+  <p id="migration-message" aria-live="polite" hidden></p>
+  <ul id="migration-report" hidden></ul>
+</dialog>
 <div id="zoom" hidden>
   <button id="zoom-close" type="button">×</button>
   <img id="zoom-img" alt="">
@@ -731,6 +764,12 @@ const scheduleError = document.getElementById("schedule-error");
 const scheduleFormError = document.getElementById("schedule-form-error");
 const scheduleSave = document.getElementById("schedule-save");
 const scheduleEditorClose = document.getElementById("schedule-editor-close");
+const migrationOpen = document.getElementById("migration-open");
+const migrationDialog = document.getElementById("migration-dialog");
+const migrationForm = document.getElementById("migration-form");
+const migrationSubmit = document.getElementById("migration-submit");
+const migrationMessage = document.getElementById("migration-message");
+const migrationReport = document.getElementById("migration-report");
 const vaultBackground = document.querySelectorAll("body > .topbar, body > .top");
 const sortTarget = document.getElementById("sort-target");
 const folderBox = document.getElementById("folders");
@@ -764,6 +803,10 @@ let changingSchedule = false;
 let readingSchedules = false;
 let scheduleRevision = 0;
 let editingSchedule = null;
+let migrationScope = null;
+let migrationBusy = false;
+let migrationState = null;
+let migrationSending = false;
 
 function showScheduleError(message = "", target = scheduleError) {
   target.textContent = message;
@@ -969,6 +1012,7 @@ function renderAppMode() {
   document.getElementById("favorites").hidden = !gallery;
   document.getElementById("sort").hidden = gallery || duplicates;
   document.getElementById("plan").hidden = gallery || duplicates;
+  migrationOpen.hidden = gallery || duplicates;
   folderBox.classList.toggle("gallery", gallery || duplicates);
   renderVault();
   renderFavorites();
@@ -1240,6 +1284,8 @@ function applyI18n() {
     button.title = t(362);
   }
   for (const node of document.querySelectorAll("[data-schedule-text]")) node.textContent = t(node.dataset.scheduleText);
+  migrationOpen.textContent = t(382);
+  for (const node of migrationDialog.querySelectorAll("[data-migration-text]")) node.textContent = t(node.dataset.migrationText);
   scheduleForm.elements.folder.placeholder = t(scheduleForm.elements.folder.dataset.schedulePlaceholder);
   renderSchedules();
   document.getElementById("tag").textContent = t(1);
@@ -1481,6 +1527,56 @@ async function workspaceData(path, signal, { trackMutations = true } = {}) {
   if (!response.ok) return null;
   const data = await response.json();
   return scope === vaultScope && (!trackMutations || mutation === workspaceMutation) ? data : null;
+}
+
+function updateMigrationSubmit() {
+  const { source, destination, location } = migrationForm.elements;
+  migrationSubmit.disabled = migrationBusy || migrationSending || source.dataset.ready !== "true" ||
+    (location.value === "other" && destination.dataset.ready !== "true");
+}
+
+async function chooseMigrationFolder(input, path) {
+  const scope = vaultScope;
+  input.dataset.ready = "false";
+  input.disabled = true;
+  const current = new Option(path ? "/" + path : "/", path, true, true);
+  input.replaceChildren(current);
+  if (path) {
+    const parent = path.slice(0, Math.max(0, path.lastIndexOf("/")));
+    input.add(new Option("↑  /" + parent, parent));
+  }
+  updateMigrationSubmit();
+  try {
+    const data = await workspaceData("/api/migration/folders?folder=" + encodeURIComponent(path),
+                                     AbortSignal.timeout(galleryTimeoutMs), {trackMutations: false});
+    if (scope !== vaultScope || !migrationDialog.open || input.options[0] !== current) return;
+    if (!Array.isArray(data?.children)) throw new Error(t(406));
+    for (const child of data.children) input.add(new Option("  " + child.split("/").at(-1), child));
+    input.dataset.ready = "true";
+  } catch {
+    if (scope === vaultScope && migrationDialog.open && input.options[0] === current)
+      showScheduleError(t(406), migrationMessage);
+  } finally {
+    if (input.options[0] === current) input.disabled = false;
+    updateMigrationSubmit();
+  }
+}
+
+function showMigrationReport(report) {
+  migrationState = report;
+  migrationReport.replaceChildren();
+  migrationReport.hidden = !report?.skipped?.length;
+  if (!report) {
+    showScheduleError("", migrationMessage);
+    return;
+  }
+  const message = report.running ? t(389) : report.error || t(393).replace("{count}", report.moved);
+  showScheduleError([message, report.warning].filter(Boolean).join(" · "), migrationMessage);
+  for (const item of report.skipped || []) {
+    const line = document.createElement("li");
+    line.textContent = "/" + item.path + " · " + t(item.code);
+    migrationReport.append(line);
+  }
 }
 
 function renderVault() {
@@ -2145,7 +2241,7 @@ async function tick() {
   const tagScan = data.tag_scan ? tagScanDisplay(data.tag_scan) : null;
   tagScanMessage = tagScan ? tagScan.step + " " + tagScan.detail : "";
   const searching = !gpuProgress && (tagScan?.percent === null ||
-    (data.job_mode === "duplicates" && data.percent === null));
+    (["duplicates", "migration"].includes(data.job_mode) && data.percent === null));
   document.getElementById("step").textContent = gpuProgress?.step || tagScan?.step || step;
   document.getElementById("detail").textContent = (gpuProgress?.detail ?? tagScan?.detail ?? data.detail) || "";
   const fill = document.getElementById("fill");
@@ -2156,6 +2252,18 @@ async function tick() {
   const scanFinished = scan?.stage === "done" && (scan.id !== folderScan?.id || folderScan?.stage !== "done");
   folderScan = scan;
   const busy = data.job_running;
+  migrationBusy = busy || data.deletions?.busy || Boolean(scan && scan.stage !== "done");
+  if (migrationScope !== vaultScope && migrationDialog.open) migrationDialog.close();
+  if (data.migration?.id !== migrationState?.id || data.migration?.running !== migrationState?.running) {
+    const completed = data.migration && !data.migration.running && migrationState?.running;
+    showMigrationReport(data.migration);
+    if (completed) {
+      workspaceMutation++;
+      loadFolders();
+      loadGallery(true);
+    }
+  }
+  updateMigrationSubmit();
   const jobChanged = data.job_id && data.job_id !== lastJob;
   const jobFinished = !busy && (wasBusy || (jobChanged && lastJob !== null));
   const ready = data.model === "ready";
@@ -2180,7 +2288,7 @@ async function tick() {
   recountFolders.disabled = recountPending || data.deletions?.busy || (busy && data.job_mode !== "plan") || Boolean(scan && scan.stage !== "done");
   wasBusy = !!busy;
   workFile = data.preview_file || "";
-  if (data.phase !== "duplicates" && jobChanged && (busy || lastJob !== null)) setPreviewMode(true);
+  if (!["duplicates", "migration"].includes(data.phase) && jobChanged && (busy || lastJob !== null)) setPreviewMode(true);
   lastJob = data.job_id;
   renderTerminal();
   renderDeleteControls();
@@ -3403,6 +3511,53 @@ scheduleForm.onsubmit = async event => {
   }
 };
 setInterval(loadSchedules, 1000);
+migrationOpen.onclick = () => {
+  migrationScope = vaultScope;
+  migrationForm.reset();
+  migrationForm.elements.year.value = new Date().getFullYear();
+  document.getElementById("migration-destination").hidden = true;
+  migrationForm.elements.destination.disabled = true;
+  migrationDialog.showModal();
+  showMigrationReport(migrationState);
+  chooseMigrationFolder(migrationForm.elements.source, selected.size === 1 ? [...selected][0] : folderLocation);
+};
+document.getElementById("migration-close").onclick = () => migrationDialog.close();
+for (const input of [migrationForm.elements.source, migrationForm.elements.destination]) {
+  input.onchange = () => chooseMigrationFolder(input, input.value);
+}
+migrationForm.elements.location.onchange = () => {
+  const other = migrationForm.elements.location.value === "other";
+  const destination = migrationForm.elements.destination;
+  document.getElementById("migration-destination").hidden = !other;
+  if (other) chooseMigrationFolder(destination, "");
+  else destination.disabled = true;
+  updateMigrationSubmit();
+};
+migrationForm.onsubmit = async event => {
+  event.preventDefault();
+  if (migrationSubmit.disabled || migrationScope !== vaultScope) return;
+  const { source, destination, location, recursive, year, order } = migrationForm.elements;
+  migrationSending = true;
+  updateMigrationSubmit();
+  try {
+    const response = await fetch("/api/migration", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ scope: migrationScope, source: source.value, order: order.value,
+        destination: location.value === "other" ? destination.value : null,
+        recursive: recursive.checked, year: year.valueAsNumber }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || t(407));
+    migrationBusy = true;
+    showMigrationReport({id: data.id, running: true});
+    tick();
+  } catch (error) {
+    showScheduleError(error.message || t(407), migrationMessage);
+  } finally {
+    migrationSending = false;
+    updateMigrationSubmit();
+  }
+};
 if (initialVaultFolder) selectFolderLocation(initialVaultFolder);
 if (initialVaultFolder === null) showNotice(t(257));
 loadFolders();

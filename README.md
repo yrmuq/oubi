@@ -56,6 +56,7 @@
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | Lock icon | Unlock or lock the Cryptomator vault from the folder controls. |
 | Schedules | Run identification, duplicate search, or both in the background. View the last run and its result. |
+| **Migration** | In Sorting mode, move images and their tag sidecars into folders by modification date. |
 | `Sort destination` | With the vault open, choose the destination for both sorting and its plan. |
 | `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
 | `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
@@ -182,6 +183,12 @@ Set `OUBI_CRYPT_FOLDER` in `.env` when using the Cryptomator override, for examp
 Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/Sorted`. It defaults to `Sorted` and is excluded from the vault's source scan. The external destination uses `OUBI_OUTPUT` and stores files outside Cryptomator encryption. Vault indexes, sort history, favorite tags, and gender overrides use the vault’s `.oubi/` folder.
 
 If opening fails, the password dialog identifies the failed step and shows the relevant error from Cryptomator or FUSE when available. Use that message when reporting a vault problem. If Oubi has to rebuild the index on unlock, the terminal shows the reason before discovery starts.
+
+#### Migration by quarter
+
+In **Sorting**, open **Migration**, select a source folder and year, and leave the destination inside the selected folder or choose another folder in the active workspace. Migration uses the image's modification time in the container's time zone and creates `YYYY-Q1` through `YYYY-Q4` plus `YYYY-other`. The latter holds images from all other years. Each image moves with its matching file in `tags/` and retains its position in the tag index under the new path.
+
+Enable **Move subfolders as a whole** to count images throughout each immediate subfolder and move its tree to the group containing more than half of its images. Subfolders without a majority and items with a conflicting destination name stay in place and appear in the report.
 
 #### Scheduled jobs
 
