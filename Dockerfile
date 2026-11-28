@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM python:3.12-slim-bookworm AS python-base
+FROM python:3.15-slim-bookworm AS python-base
 FROM python-base AS cryptomator
 
 RUN --mount=type=bind,source=dependencies/os-refresh.txt,target=/tmp/os-refresh.txt apt-get update \
