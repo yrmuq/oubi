@@ -1,0 +1,12 @@
+{
+  "amd": {
+    "rocm": "10.1.0",
+    "torch": "2.14.0",
+    "torchvision": "0.29.0a0",
+    "sha256": "e6616e62ebd1324031681e6e59349d46ee4f143a8d8f4f901a91c35c993041fc"
+  },
+  "nvidia": {
+    "cu126": {"torch": "2.14.0", "torchvision": "0.29.0"},
+    "cu130": {"torch": "2.14.0", "torchvision": "0.29.0"}
+  }
+}

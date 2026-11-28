@@ -25,7 +25,8 @@ updates:
         patterns:
           - "*"
   - package-ecosystem: pip
-    directory: /
+    directory: /dependencies
+    exclude-paths: ["cpu-wheels.txt", "cpu.lock.txt", "shared.txt", "default-model.txt", "os-refresh.txt", "security-refresh.txt"]
     schedule:
       interval: weekly
       day: friday

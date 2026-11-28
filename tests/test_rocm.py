@@ -76,7 +76,10 @@ class RocmTests(unittest.TestCase):
             self.assertFalse(environment.exists())
             with patch.object(self.runtime, "_pip") as install:
                 self.runtime._install(arch)
-            self.assertIn("torch[device-gfx1102]==2.14.0+rocm10.1.0", install.call_args.args)
+            from oubi_gpu import GPU_WHEELS
+
+            wheels = GPU_WHEELS["amd"]
+            self.assertIn(f"torch[device-gfx1102]=={wheels['torch']}+rocm{wheels['rocm']}", install.call_args.args)
         self.assertEqual(self.runtime.install["state"], "ready")
         self.assertEqual(self.runtime.installed(arch), "AMD Radeon RX 7600")
         self.assertEqual(self.runtime.python_for(arch), str(environment / "bin/python"))

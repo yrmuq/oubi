@@ -56,6 +56,7 @@
 | `Sort` | Copy the selected folders' tagged images into their destinations. Set `OUBI_MOVE=1` to move them. |
 | Lock icon | Unlock or lock the Cryptomator vault from the folder controls. |
 | Schedules | Run identification, duplicate search, or both in the background. View the last run and its result. |
+| **Migration** | In Sorting mode, move images and their tag sidecars into folders by modification date. |
 | `Sort destination` | With the vault open, choose the destination for both sorting and its plan. |
 | `Sort plan` | Show destination paths before copying or moving. A plan may write `unknown_genders.txt`. |
 | `+` / `−` | Add a genre field or remove the last one, keeping at least one field available. |
@@ -63,7 +64,7 @@
 | `OUBI_NSFW_FROM` | Use `q` to include `rating:q` and `rating:e`, or `e` to include only `rating:e`. |
 | `OUBI_COPY_TXT=1` | Copy or move accompanying `.txt` files with sorted images. |
 | `OUBI_BATCH_SIZE` | Set the number of images in a model pass. The CPU default is `1`. |
-| `OUBI_MODEL` | Use a Hugging Face model ID or a model directory visible to the container. |
+| `OUBI_MODEL` | Use a Hugging Face model ID or a model directory visible to the container. Oubi resolves the current Hub revision at the start of each tagging run. |
 | `OUBI_GENRE_1`–`OUBI_GENRE_20` | Set initial genre tags in order. A saved genre list in the web interface takes precedence. |
 
 Put optional gender overrides in `genders.csv` under the data directory as headerless rows like `hatsune_miku,f`. Copy entries from `unknown_genders.txt` into that file, add `f` or `m`, then sort again.
@@ -88,6 +89,8 @@ Select a GPU in the header and click its `Install` button. The terminal shows th
 ### Release Scheme
 
 Use the [latest stable release](https://github.com/yrmuq/oubi/releases/latest) for regular use and the [release list](https://github.com/yrmuq/oubi/releases) for versioned images. Stable releases are `X.Y.0` and publish `ghcr.io/yrmuq/oubi:latest`. Automated dependency prereleases use `X.Y.Z` with `Z > 0` and use their numbered tag. Development builds use `:dev`. All three channels run the web interface.
+
+The [Dependencies workflow](.github/workflows/deps.yml) updates the Python lock, resolves CPU and GPU wheel sets, verifies new Cryptomator CLI releases, and refreshes Debian and Alpine packages. The [security workflow](.github/workflows/security.yml) scans the published stable images daily and requests a dependency build for newly fixable high or critical findings. Set the optional repository Actions secret `OUBI_SECURITY_WEBHOOK` to an HTTPS Mattermost incoming webhook to receive scan alerts.
 
 ### Docker
 
@@ -181,6 +184,12 @@ Set `OUBI_CRYPT_OUTPUT` to a path relative to the vault root, such as `Archive/S
 
 If opening fails, the password dialog identifies the failed step and shows the relevant error from Cryptomator or FUSE when available. Use that message when reporting a vault problem. If Oubi has to rebuild the index on unlock, the terminal shows the reason before discovery starts.
 
+#### Migration by quarter
+
+In **Sorting**, open **Migration**, select a source folder, and leave the destination inside the selected folder or choose another folder in the active workspace. Migration uses the image's modification time in the container's time zone and creates only the relevant year-and-quarter folders, such as `2017-Q1` and `2018-Q3`. Each image moves with its matching file in `tags/` and retains its position in the tag index under the new path.
+
+Enable **Move subfolders as a whole** to count images throughout each immediate subfolder and move its tree to the year and quarter containing more than half of its images. Subfolders without a majority and items with a conflicting destination name stay in place and appear in the report. Migration skips existing `YYYY-Q1`–`YYYY-Q4` folders and their contents. A subfolder that contains one of these folders also stays in place and appears in the report. To reorganize an old `YYYY-other` folder, select it as the source and its parent as the destination.
+
 #### Scheduled jobs
 
 Open **Schedules** in the header and click **+ Add schedule**. Enter a folder path relative to the selected workspace, such as `Photos/Trips`. Leave **Folder** blank to process the whole workspace. The five cron fields are minute, hour, day of the month, month, and day of the week. For example, `0 3 * * *` runs daily at 03:00 in the container's `TZ` time zone. Scheduled identification uses the CPU. Duplicate search saves pairs for review in **Duplicates**. File deletion still requires a manual decision.
@@ -219,5 +228,5 @@ The scripts and `Dockerfile` in this repository are licensed under `GPL-3.0-only
 | Transformers | [huggingface/transformers](https://github.com/huggingface/transformers) | `Apache-2.0` | Loads the tagger pipeline. |
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | `Apache-2.0` | Required by the tagger model code. |
 | Pillow JPEG XL plugin | [Isotr0py/pillow-jpegxl-plugin](https://github.com/Isotr0py/pillow-jpegxl-plugin) | `GPL-3.0-or-later` | Shared decoder with a bundled license and [matching source distribution](https://pypi.org/project/pillow-jxl-plugin/1.3.8/#files). |
-| Cryptomator CLI | [Cryptomator CLI 0.6.2 source](https://github.com/cryptomator/cli/tree/0.6.2) | `AGPL-3.0-only` | The upstream Linux x86_64 binary and its license ship with Oubi. The vault override enables mounting via FUSE. |
+| Cryptomator CLI | [cryptomator/cli](https://github.com/cryptomator/cli) | `AGPL-3.0-only` | The upstream Linux x86_64 binary and license ship with Oubi. The [dependency lock](dependencies/cryptomator.json) records the release and archive checksum. |
 | Go TPM | [google/go-tpm](https://github.com/google/go-tpm) | `Apache-2.0` | The Alpine service uses the library to seal and unseal the key used for scheduled vault credentials. |

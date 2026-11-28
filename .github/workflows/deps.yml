@@ -6,6 +6,10 @@ on:
   schedule:
     - cron: '0 9 * * 5'
   workflow_dispatch:
+    inputs:
+      security_fingerprint:
+        description: Fingerprint of fixable findings in the published images
+        type: string
   workflow_call:
 
 jobs:
@@ -43,8 +47,12 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Synchronize deps and resolve compatible PyTorch CPU wheels
+      - uses: astral-sh/setup-uv@v10.4.0
+      - name: Refresh dependency locks and the base system packages
         id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SECURITY_FINGERPRINT: ${{ inputs.security_fingerprint }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -52,13 +60,24 @@ jobs:
           git fetch origin deps
           git switch --detach origin/deps
           report_dir=$(mktemp -d)
-          docker run --rm -v "$report_dir:/report" python:3.12-slim-bookworm \
+          base=$(awk '/ AS python-base$/ {print $2}' Dockerfile)
+          docker run --rm -v "$report_dir:/report" "$base" \
             python -m pip install --quiet --dry-run --ignore-installed --only-binary=:all: \
             --index-url https://download.pytorch.org/whl/cpu --report /report/resolve.json torch torchvision
           python3 scripts/update-torch-pins.py "$report_dir/resolve.json"
-          if ! git diff --quiet -- Dockerfile; then
-            git add Dockerfile
-            git commit -m 'Update the PyTorch CPU wheels'
+          sh scripts/lock-cpu.sh
+          python3 scripts/update-gpu-pins.py
+          python3 scripts/cryptomator-cli.py update dependencies/cryptomator.json
+          if [[ -n "$SECURITY_FINGERPRINT" ]]; then
+            [[ $SECURITY_FINGERPRINT =~ ^[0-9a-f]{64}$ ]]
+            printf '%s\n' "$SECURITY_FINGERPRINT" > dependencies/security-refresh.txt
+            printf '%s %s\n' "$(date -u +%F)" "$SECURITY_FINGERPRINT" > dependencies/os-refresh.txt
+          else
+            date -u +%G-W%V > dependencies/os-refresh.txt
+          fi
+          if ! git diff --quiet -- dependencies; then
+            git add dependencies
+            git commit -m 'Refresh dependency locks and system packages'
             git push origin HEAD:refs/heads/deps
             echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           fi

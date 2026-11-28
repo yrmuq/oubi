@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from oubi_gpu import GpuError
+from oubi_gpu import GPU_WHEELS, GpuError
 from oubi_nvidia import NvidiaRuntime, cuda_build, detect_gpus, nvidia_device
 from oubi_web import App
 from tag_folder import main
@@ -55,7 +55,7 @@ class NvidiaTests(unittest.TestCase):
                     runtime._install("cu130", FIRST)
                     runtime._install("cu130", SECOND)
                 self.assertEqual(install.call_count, 2)
-                self.assertIn("torch==2.14.0+cu130", install.call_args.args)
+                self.assertIn(f"torch=={GPU_WHEELS['nvidia']['cu130']['torch']}+cu130", install.call_args.args)
             self.assertEqual(runner.call_count, 3)
             self.assertEqual(runtime.installed("cu130", FIRST), f"GPU {FIRST}")
             self.assertEqual(runtime.installed("cu130", SECOND), f"GPU {SECOND}")
