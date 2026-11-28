@@ -111,6 +111,28 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue(existing.is_dir())
         self.assertEqual({path.name for path in parent.iterdir()}, {"2017-other", "2017-Q1", "2016-Q4", "2018-Q3"})
 
+    def test_quarter_contents_stay_in_place_under_a_movable_subfolder_or_as_a_source(self):
+        sorted_image = self.image("Trip/Archive/2017-Q1/Deep/sorted.jpg", 4, tagged=True)
+        loose = self.image("Trip/loose.jpg", 4)
+        sibling = self.image("Other/move.jpg", 4)
+
+        moved, skipped, _ = self.run_migration(recursive=True)
+
+        self.assertEqual(moved, {sibling: self.source / "2025-Q2/Other/move.jpg"})
+        self.assertEqual(skipped, [{"path": "Album/Trip", "code": 409}])
+        self.assertTrue(sorted_image.is_file())
+        self.assertTrue(sidecar_path(sorted_image).is_file())
+        self.assertTrue(loose.is_file())
+
+        self.source = sorted_image.parent
+        for recursive in (False, True):
+            with self.subTest(recursive=recursive):
+                moved, skipped, _ = self.run_migration(recursive=recursive, destination=self.root)
+                self.assertEqual(moved, {})
+                self.assertEqual(skipped, [{"path": "Album/Trip/Archive/2017-Q1/Deep", "code": 409}])
+                self.assertTrue(sorted_image.is_file())
+                self.assertTrue(sidecar_path(sorted_image).is_file())
+
     def test_move_failure_restores_images_and_sidecars(self):
         first = self.image("first.jpg", 1, tagged=True)
         second = self.image("second.jpg", 2, tagged=True)

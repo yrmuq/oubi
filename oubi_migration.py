@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from oubi_files import (apply_index_changes, direct_image_files, image_files, sidecar_path,
+from oubi_files import (IMAGE_EXTS, apply_index_changes, direct_image_files, sidecar_path,
                         stage_migrated_indexes)
 
 QUARTER_FOLDER = re.compile(r"[0-9]{4}-Q[1-4]")
@@ -63,8 +63,25 @@ def bucket_for(image):
     return f"{modified.year:04d}-Q{(modified.month - 1) // 3 + 1}"
 
 
-def raise_walk_error(error):
-    raise error
+def branch_images(folder, cancelled):
+    images = []
+    pending = [(folder, True)]
+    while pending:
+        directory, eligible = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if cancelled():
+                    raise InterruptedError
+                if entry.is_dir(follow_symlinks=False):
+                    if QUARTER_FOLDER.fullmatch(entry.name):
+                        return None
+                    # Check all descendants before moving the tree, including excluded tag and hidden directories.
+                    count_images = eligible and entry.name != "tags" and not entry.name.startswith(".")
+                    pending.append((entry.path, count_images))
+                elif (eligible and Path(entry.name).suffix.lower() in IMAGE_EXTS
+                      and entry.is_file(follow_symlinks=False)):
+                    images.append(Path(entry.path))
+    return images
 
 
 def make_plan(workspace, source, destination, recursive, cancelled):
@@ -85,6 +102,10 @@ def make_plan(workspace, source, destination, recursive, cancelled):
 
     def skip(path, code):
         skipped.append({"path": path.relative_to(root).as_posix(), "code": code})
+
+    if any(QUARTER_FOLDER.fullmatch(part) for part in source.relative_to(root).parts):
+        skip(source, 409)
+        return moves, skipped
 
     for image in sorted(direct_image_files(source)):
         if cancelled():
@@ -113,11 +134,12 @@ def make_plan(workspace, source, destination, recursive, cancelled):
                 continue
             if excluded and excluded.is_relative_to(folder):
                 continue
-            photos = [image for image in image_files(folder, workspace.excluded, cancelled=cancelled,
-                                                       visit=lambda _: None, onerror=raise_walk_error)
-                      if not image.is_symlink()]
+            photos = branch_images(folder, cancelled)
             if cancelled():
                 raise InterruptedError
+            if photos is None:
+                skip(folder, 409)
+                continue
             if not photos:
                 continue
             quarter, votes = Counter(bucket_for(image) for image in photos).most_common(1)[0]
